@@ -8,6 +8,7 @@ import { SceneManager, RenderPipeline, LightManager, ModelLoader } from '../../t
 import { animationEngine, AnimationEngine } from '../../three/AnimationEngine';
 import { EnvironmentLoader } from '../../three/EnvironmentLoader';
 import { getHDRIPresetById } from '../../types/Environment';
+import { base64ToArrayBuffer } from '../../store/modelDataStore';
 import { ViewportToolbar } from './ViewportToolbar';
 import { CameraBookmarks } from './CameraBookmarks';
 import type { AnimatedProperty } from '../../types/Animation';
@@ -41,6 +42,9 @@ export const Viewport: React.FC<ViewportProps> = ({ sceneManagerRef, onScreensho
   const setModel = useSceneStore((s) => s.setModel);
   const setExposure = useSceneStore((s) => s.setExposure);
   const setBloom = useSceneStore((s) => s.setBloom);
+  const pendingModelData = useSceneStore((s) => s._pendingModelDataBase64);
+  const pendingModelFileName = useSceneStore((s) => s._pendingModelFileName);
+  const clearPendingModelData = useSceneStore((s) => s.clearPendingModelData);
 
   const lights = useLightsStore((s) => s.lights);
   const updateLight = useLightsStore((s) => s.updateLight);
@@ -245,11 +249,14 @@ export const Viewport: React.FC<ViewportProps> = ({ sceneManagerRef, onScreensho
     sceneManagerRef.current?.setBackground(environment.background, environment.showBackground);
   }, [environment.background, environment.showBackground, sceneManagerRef]);
 
-  // Phase 9: Sync environment preset to 3D scene
+  // Phase 9: Sync environment preset to 3D scene (built-in presets only)
   useEffect(() => {
     const sm = sceneManagerRef.current;
     const el = envLoaderRef.current;
     if (!sm || !el) return;
+
+    // Skip custom HDRI — handled by the separate effect below
+    if (environment.presetId === '__custom__') return;
 
     const preset = getHDRIPresetById(environment.presetId);
     if (!preset) return;
@@ -257,6 +264,49 @@ export const Viewport: React.FC<ViewportProps> = ({ sceneManagerRef, onScreensho
     const envTexture = el.generateFromPreset(preset, sm.pmremGenerator, environment.rotation);
     el.setEnvironmentTexture(sm.scene, envTexture, environment.intensity);
   }, [environment.presetId, environment.rotation, environment.intensity, sceneManagerRef, envLoaderRef]);
+
+  // Phase 9: Load custom HDRI file into the 3D scene
+  useEffect(() => {
+    const sm = sceneManagerRef.current;
+    const el = envLoaderRef.current;
+    if (!sm || !el) return;
+
+    if (environment.presetId === '__custom__' && environment.hdri) {
+      el.loadHDRI(environment.hdri, sm.pmremGenerator)
+        .then((envTexture) => {
+          el.setEnvironmentTexture(sm.scene, envTexture, environment.intensity);
+        })
+        .catch(() => {
+          // Fallback to neutral studio on error
+          const fallback = getHDRIPresetById('studio-neutral');
+          if (fallback) {
+            const envTexture = el.generateFromPreset(fallback, sm.pmremGenerator, 0);
+            el.setEnvironmentTexture(sm.scene, envTexture, environment.intensity);
+          }
+        });
+    }
+  }, [environment.presetId, environment.hdri, environment.intensity, sceneManagerRef, envLoaderRef]);
+
+  // Restore model from scene file (triggered when _pendingModelDataBase64 is set)
+  useEffect(() => {
+    if (!pendingModelData) return;
+    const ml = modelLoaderRef.current;
+    if (!ml) return;
+
+    setIsLoading(true);
+    setLoadError(null);
+    setLoadProgress(0);
+
+    try {
+      const arrayBuffer = base64ToArrayBuffer(pendingModelData);
+      ml.loadFromBuffer(arrayBuffer, pendingModelFileName);
+    } catch {
+      setLoadError('Failed to restore model from scene file');
+      setIsLoading(false);
+    }
+
+    clearPendingModelData();
+  }, [pendingModelData, pendingModelFileName, modelLoaderRef, clearPendingModelData]);
 
   // Sync render settings
   useEffect(() => {

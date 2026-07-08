@@ -2,6 +2,7 @@ import { useSceneStore } from '../store/sceneStore';
 import { useLightsStore } from '../store/lightsStore';
 import { useAnimationStore } from '../store/animationStore';
 import { history } from '../store/historyStore';
+import { getRawModelDataBase64 } from '../store/modelDataStore';
 import type { AnimationState } from '../types/Animation';
 import type { SceneState } from '../types/Scene';
 
@@ -21,6 +22,8 @@ export interface SceneFile {
   // ── Core scene data ──────────────────────────────────────────────────────
   scene: {
     modelName: string;
+    /** Base64-encoded GLB binary data (embedded for self-contained scene files) */
+    modelDataBase64: string | null;
     camera: {
       position: [number, number, number];
       target: [number, number, number];
@@ -99,6 +102,7 @@ export class SceneExporter {
       },
       scene: {
         modelName: sceneState.modelName,
+        modelDataBase64: getRawModelDataBase64(),
         camera: { ...sceneState.camera },
         environment: { ...sceneState.environment },
         renderSettings: {
@@ -210,6 +214,14 @@ export class SceneExporter {
         // The sceneStore doesn't have a setBookmarks method, so we use loadSceneState
         // which will merge. We need to handle this carefully.
         // For now, bookmarks are supplementary and non-critical.
+      }
+
+      // ── Restore model GLB data ──────────────────────────────────────────
+      if (data.scene.modelDataBase64) {
+        useSceneStore.getState().setPendingModelData(
+          data.scene.modelDataBase64,
+          sceneData.modelName || 'model.glb',
+        );
       }
 
       return null;

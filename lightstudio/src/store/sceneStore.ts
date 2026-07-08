@@ -7,6 +7,11 @@ interface SceneStore extends SceneState {
   // Camera bookmarks
   cameraBookmarks: CameraBookmark[];
   
+  // Transient: pending model data (base64) from scene file restore
+  // Not part of the persisted scene state — used to signal Viewport to reload the model
+  _pendingModelDataBase64: string | null;
+  _pendingModelFileName: string;
+  
   // Model
   setModel: (path: string, name: string) => void;
   clearModel: () => void;
@@ -43,11 +48,17 @@ interface SceneStore extends SceneState {
   // Scene load
   loadSceneState: (state: Partial<SceneState>) => void;
   resetScene: () => void;
+  
+  // Model data restore
+  setPendingModelData: (base64: string | null, fileName: string) => void;
+  clearPendingModelData: () => void;
 }
 
 export const useSceneStore = create<SceneStore>((set, get) => ({
   ...DEFAULT_SCENE_STATE,
   cameraBookmarks: [],
+  _pendingModelDataBase64: null,
+  _pendingModelFileName: 'model.glb',
 
   setModel: (path, name) => {
     // Model loading is NOT recorded — it's a file operation, not an edit
@@ -204,6 +215,14 @@ export const useSceneStore = create<SceneStore>((set, get) => ({
 
   resetScene: () => {
     history.record('New Scene');
-    set({ ...DEFAULT_SCENE_STATE, cameraBookmarks: [] });
+    set({ ...DEFAULT_SCENE_STATE, cameraBookmarks: [], _pendingModelDataBase64: null, _pendingModelFileName: 'model.glb' });
+  },
+
+  setPendingModelData: (base64, fileName) => {
+    set({ _pendingModelDataBase64: base64, _pendingModelFileName: fileName });
+  },
+
+  clearPendingModelData: () => {
+    set({ _pendingModelDataBase64: null, _pendingModelFileName: 'model.glb' });
   },
 }));

@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { RectAreaLightUniformsLib } from 'three/addons/lights/RectAreaLightUniformsLib.js';
+import { setRawModelData, clearRawModelData } from '../store/modelDataStore';
 import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
@@ -1128,6 +1129,15 @@ export class ModelLoader {
     this._progress = 0;
     this._onProgress?.(0);
 
+    // Read file as ArrayBuffer to store raw data for scene persistence
+    let arrayBuffer: ArrayBuffer | null = null;
+    try {
+      arrayBuffer = await file.arrayBuffer();
+      setRawModelData(arrayBuffer, file.name);
+    } catch {
+      // Non-critical — model will load but won't be saveable
+    }
+
     const url = URL.createObjectURL(file);
 
     try {
@@ -1187,6 +1197,76 @@ export class ModelLoader {
     }
   }
 
+  /**
+   * Load a model from an ArrayBuffer (e.g., restored from a scene file).
+   */
+  async loadFromBuffer(arrayBuffer: ArrayBuffer, fileName: string): Promise<void> {
+    if (this._loading) return;
+    this._loading = true;
+    this._progress = 0;
+    this._onProgress?.(0);
+
+    setRawModelData(arrayBuffer, fileName);
+
+    const blob = new Blob([arrayBuffer], { type: 'model/gltf-binary' });
+    const url = URL.createObjectURL(blob);
+
+    try {
+      const gltf = await new Promise<{ scene: THREE.Group }>((resolve, reject) => {
+        this._loader.load(
+          url,
+          (result) => resolve(result),
+          (event) => {
+            if (event.lengthComputable) {
+              this._progress = (event.loaded / event.total) * 100;
+              this._onProgress?.(this._progress);
+            }
+          },
+          (error) => reject(error)
+        );
+      });
+
+      this.removeCurrentModel();
+
+      this._currentModel = gltf.scene;
+      this._scene.add(gltf.scene);
+
+      // Enable shadows
+      gltf.scene.traverse((child) => {
+        if (child instanceof THREE.Mesh) {
+          child.castShadow = true;
+          child.receiveShadow = true;
+        }
+      });
+
+      // Center and scale
+      const box = new THREE.Box3().setFromObject(gltf.scene);
+      const center = box.getCenter(new THREE.Vector3());
+      const size = box.getSize(new THREE.Vector3());
+      const maxDim = Math.max(size.x, size.y, size.z);
+      if (maxDim > 0) {
+        const scale = 4 / maxDim;
+        gltf.scene.scale.multiplyScalar(scale);
+      }
+      const box2 = new THREE.Box3().setFromObject(gltf.scene);
+      const center2 = box2.getCenter(new THREE.Vector3());
+      gltf.scene.position.sub(center2);
+      gltf.scene.position.y += box2.getSize(new THREE.Vector3()).y / 2;
+
+      this._loading = false;
+      this._progress = 100;
+      this._onProgress?.(100);
+      this._onLoaded?.(fileName.replace(/\.(glb|gltf)$/i, ''));
+    } catch (err) {
+      this._loading = false;
+      this._progress = 0;
+      const msg = err instanceof Error ? err.message : 'Failed to load model from buffer';
+      this._onError?.(msg);
+    } finally {
+      URL.revokeObjectURL(url);
+    }
+  }
+
   removeCurrentModel(): void {
     if (this._currentModel) {
       this._scene.remove(this._currentModel);
@@ -1201,6 +1281,7 @@ export class ModelLoader {
         }
       });
       this._currentModel = null;
+      clearRawModelData();
     }
   }
 
