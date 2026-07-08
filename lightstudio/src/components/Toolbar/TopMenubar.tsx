@@ -103,7 +103,7 @@ const MENU_DEFINITIONS = (
       action: () => {
         if (!sceneManagerRef?.current) return;
         const { renderer, scene } = sceneManagerRef.current;
-        exportSceneAsHDR(renderer, scene, { size: 2048, excludeModel: true });
+        exportSceneAsHDR(renderer, scene, { size: 2048 });
       },
     },
     exportEXR: {
@@ -111,7 +111,7 @@ const MENU_DEFINITIONS = (
       action: () => {
         if (!sceneManagerRef?.current) return;
         const { renderer, scene } = sceneManagerRef.current;
-        exportSceneAsEXR(renderer, scene, { size: 2048, excludeModel: true });
+        exportSceneAsEXR(renderer, scene, { size: 2048 });
       },
     },
     sep2: { label: '', separator: true },
