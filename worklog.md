@@ -45,3 +45,40 @@ Stage Summary:
 - Key insight: backgroundHint is for viewport UI only, NOT for HDRI data
 - With 0.0 background: exposure*0=0 (dark stays dark), exposure*30=30*exposure (lights respond)
 
+---
+Task ID: 2
+Agent: Main Agent
+Task: Analyze reference HDR/EXR files and fix HDRIExporter to match spec
+
+Work Log:
+- Analyzed ferndale_studio_07_2k.hdr: 2048x1024, RLE encoding, 20.3 stops dynamic range
+  - R: min=0.000854, max=936, median=0.074
+  - G: min=0.000755, max=1000, median=0.064
+  - B: min=0.000816, max=1240, median=0.061
+  - ~10% pixels > 1.0, ~24% pixels < 0.01, 0% pixels = 0.0
+- Analyzed ferndale_studio_07_1k.exr: 1024x512, PIZ compression
+  - 4 channels: A(FLOAT), B(FLOAT), G(FLOAT), R(FLOAT) in alphabetical order
+  - Alpha = constant 0.814632 (processing artifact)
+  - All standard attributes: pixelAspectRatio=1.0, screenWindowCenter=(0,0), screenWindowWidth=1.0
+  - Each attribute has proper size(u32LE) field between type and value
+
+- Identified 3 critical differences in our EXR encoder:
+  1. MISSING Alpha channel (only B,G,R — reference has A,B,G,R)
+  2. MISSING attribute size fields (fundamental spec violation)
+  3. Channel order not alphabetical
+
+- Fix 1: Added Alpha channel (FLOAT, pLinear=false, sampling 1,1) with value 1.0
+- Fix 2: Rewrote entire EXR header with proper name\0 + type\0 + size(u32LE) + value + padding
+  - Added writeAttrValue() helper that writes size field + value + 4-byte padding
+  - Added writeChannelEntry() helper for proper chlist entries
+  - Added intToBytes() and floatToBytes() helpers
+- Fix 3: Channel order now A, B, G, R (alphabetical per EXR convention)
+- HDR encoding confirmed correct (RGBE flat format is valid, header matches spec)
+- TypeScript compiles clean (zero errors)
+
+Stage Summary:
+- EXR encoder completely rewritten for spec compliance
+- 3 bugs fixed: missing alpha, missing size fields, wrong channel order
+- HDR encoder confirmed OK — no changes needed
+- Reference pixel value ranges: max ~1000, median ~0.07, 20 stops dynamic range
+

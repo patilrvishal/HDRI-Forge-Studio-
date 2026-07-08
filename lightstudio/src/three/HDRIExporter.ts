@@ -541,8 +541,12 @@ function rgbFloatToRGBE(
 /**
  * Encode HDR pixel data into an OpenEXR .exr file (ArrayBuffer).
  *
- * Channels: B, G, R as FLOAT (32-bit). Compression: NONE.
- * All required attributes for Blender/Photoshop compatibility.
+ * Channels: A, B, G, R as FLOAT (32-bit) — matches standard HDRI EXR convention
+ * (alphabetical channel order with alpha). Compression: NONE.
+ * Alpha is set to 1.0 (fully opaque) for all pixels.
+ *
+ * OpenEXR header format per attribute:
+ *   name\0  type\0  size(u32LE)  value(size bytes, padded to 4-byte boundary)
  *
  * @param pixels - Float32Array of RGB (3 floats/pixel, top-to-bottom, linear).
  * @param width  - Image width in pixels.
@@ -554,88 +558,131 @@ export function encodeEXR(
   width: number,
   height: number,
 ): ArrayBuffer {
-  const CHANNEL_NAMES = ['B', 'G', 'R'] as const;
+  const CHANNEL_NAMES = ['A', 'B', 'G', 'R'] as const;
   const PIXEL_TYPE_FLOAT = 2;
   const CHANNEL_BYTES = 4;
-  const BYTES_PER_PIXEL = 3 * CHANNEL_BYTES;
+  const NUM_CHANNELS = 4; // A, B, G, R
+  const BYTES_PER_PIXEL = NUM_CHANNELS * CHANNEL_BYTES;
   const SCANLINE_DATA_SIZE = width * BYTES_PER_PIXEL;
 
-  // ── Helper functions ────────────────────────────────────────────────────
-  const writeU8 = (arr: number[], val: number): void => { arr.push(val & 0xff); };
+  // ── Low-level write helpers ──────────────────────────────────────────────
   const writeU32LE = (arr: number[], val: number): void => {
     arr.push(val & 0xff, (val >>> 8) & 0xff, (val >>> 16) & 0xff, (val >>> 24) & 0xff);
   };
+  const writeI32LE = (arr: number[], val: number): void => writeU32LE(arr, val >>> 0);
   const writeF32LE = (arr: number[], val: number): void => {
     const buf = new ArrayBuffer(4);
     new DataView(buf).setFloat32(0, val, true);
     const bytes = new Uint8Array(buf);
     arr.push(bytes[0], bytes[1], bytes[2], bytes[3]);
   };
-  const writeStr = (arr: number[], str: string): void => {
+
+  /** Convert a 32-bit integer to 4 bytes (little-endian). */
+  const intToBytes = (val: number): number[] => [
+    val & 0xff, (val >>> 8) & 0xff, (val >>> 16) & 0xff, (val >>> 24) & 0xff,
+  ];
+
+  /** Convert a 32-bit float to 4 bytes (little-endian). */
+  const floatToBytes = (val: number): number[] => {
+    const buf = new ArrayBuffer(4);
+    new DataView(buf).setFloat32(0, val, true);
+    return [...new Uint8Array(buf)];
+  };
+
+  /** Write a null-terminated string (for attribute names and type names). */
+  const writeName = (arr: number[], str: string): void => {
     const bytes = new TextEncoder().encode(str);
     for (const b of bytes) arr.push(b);
     arr.push(0);
   };
-  const writePaddedStr = (arr: number[], str: string): void => {
-    const bytes = new TextEncoder().encode(str);
+
+  /**
+   * Write a channel-list entry: name\0 + padding to 4-byte boundary,
+   * then pixel_type(i32) + pLinear(u32) + x_sampling(u32) + y_sampling(u32).
+   * Each entry is exactly 4 + 16 = 20 bytes.
+   */
+  const writeChannelEntry = (arr: number[], name: string): void => {
+    const bytes = new TextEncoder().encode(name);
     for (const b of bytes) arr.push(b);
-    const totalLen = bytes.length + 1;
-    const pad = (4 - (totalLen % 4)) % 4;
-    arr.push(0);
+    arr.push(0); // null terminator
+    // Pad name to 4-byte boundary (including null)
+    const nameLen = bytes.length + 1;
+    const pad = (4 - (nameLen % 4)) % 4;
+    for (let i = 0; i < pad; i++) arr.push(0);
+    // Channel properties (16 bytes)
+    writeI32LE(arr, PIXEL_TYPE_FLOAT); // pixel type
+    writeU32LE(arr, 0);                // pLinear = false
+    writeU32LE(arr, 1);                // x sampling
+    writeU32LE(arr, 1);                // y sampling
+  };
+
+  /**
+   * Write an attribute value with proper size field and 4-byte padding.
+   * Format: size(u32LE) + value_bytes + padding_to_4_byte_boundary
+   */
+  const writeAttrValue = (arr: number[], valueBytes: number[]): void => {
+    writeU32LE(arr, valueBytes.length); // size field
+    for (const b of valueBytes) arr.push(b);
+    // Pad value to 4-byte boundary
+    const pad = (4 - (valueBytes.length % 4)) % 4;
     for (let i = 0; i < pad; i++) arr.push(0);
   };
 
-  // ── Build header ────────────────────────────────────────────────────────
+  // ── Build header attributes ──────────────────────────────────────────────
   const hdr: number[] = [];
 
-  writeStr(hdr, 'channels');
-  writeStr(hdr, 'chlist');
+  // 1) channels (chlist): 4 entries × 20 bytes + 1 terminator byte = 81 bytes
+  writeName(hdr, 'channels');
+  writeName(hdr, 'chlist');
+  const channelData: number[] = [];
   for (const chName of CHANNEL_NAMES) {
-    writePaddedStr(hdr, chName);
-    writeU32LE(hdr, PIXEL_TYPE_FLOAT);
-    writeU32LE(hdr, 0);
-    writeU32LE(hdr, 1);
-    writeU32LE(hdr, 1);
+    writeChannelEntry(channelData, chName);
   }
-  hdr.push(0);
+  channelData.push(0); // channel list terminator
+  writeAttrValue(hdr, channelData);
 
-  writeStr(hdr, 'compression');
-  writeStr(hdr, 'compression');
-  hdr.push(0, 0, 0, 0);
+  // 2) compression: 1 byte (0 = NO_COMPRESSION)
+  writeName(hdr, 'compression');
+  writeName(hdr, 'compression');
+  writeAttrValue(hdr, [0]);
 
-  writeStr(hdr, 'dataWindow');
-  writeStr(hdr, 'box2i');
-  writeU32LE(hdr, 16);
-  writeU32LE(hdr, 0);
-  writeU32LE(hdr, 0);
-  writeU32LE(hdr, width - 1);
-  writeU32LE(hdr, height - 1);
+  // 3) dataWindow (box2i): 4 × int32 = 16 bytes
+  writeName(hdr, 'dataWindow');
+  writeName(hdr, 'box2i');
+  writeAttrValue(hdr, [
+    ...intToBytes(0), ...intToBytes(0),
+    ...intToBytes(width - 1), ...intToBytes(height - 1),
+  ]);
 
-  writeStr(hdr, 'displayWindow');
-  writeStr(hdr, 'box2i');
-  writeU32LE(hdr, 16);
-  writeU32LE(hdr, 0);
-  writeU32LE(hdr, 0);
-  writeU32LE(hdr, width - 1);
-  writeU32LE(hdr, height - 1);
+  // 4) displayWindow (box2i): 4 × int32 = 16 bytes
+  writeName(hdr, 'displayWindow');
+  writeName(hdr, 'box2i');
+  writeAttrValue(hdr, [
+    ...intToBytes(0), ...intToBytes(0),
+    ...intToBytes(width - 1), ...intToBytes(height - 1),
+  ]);
 
-  writeStr(hdr, 'lineOrder');
-  writeStr(hdr, 'lineOrder');
-  hdr.push(0, 0, 0, 0);
+  // 5) lineOrder: 1 byte (0 = INCREASING_Y)
+  writeName(hdr, 'lineOrder');
+  writeName(hdr, 'lineOrder');
+  writeAttrValue(hdr, [0]);
 
-  writeStr(hdr, 'pixelAspectRatio');
-  writeStr(hdr, 'float');
-  writeF32LE(hdr, 1.0);
+  // 6) pixelAspectRatio (float): 4 bytes
+  writeName(hdr, 'pixelAspectRatio');
+  writeName(hdr, 'float');
+  writeAttrValue(hdr, floatToBytes(1.0));
 
-  writeStr(hdr, 'screenWindowCenter');
-  writeStr(hdr, 'v2f');
-  writeF32LE(hdr, 0.0);
-  writeF32LE(hdr, 0.0);
+  // 7) screenWindowCenter (v2f): 8 bytes
+  writeName(hdr, 'screenWindowCenter');
+  writeName(hdr, 'v2f');
+  writeAttrValue(hdr, [...floatToBytes(0.0), ...floatToBytes(0.0)]);
 
-  writeStr(hdr, 'screenWindowWidth');
-  writeStr(hdr, 'float');
-  writeF32LE(hdr, 1.0);
+  // 8) screenWindowWidth (float): 4 bytes
+  writeName(hdr, 'screenWindowWidth');
+  writeName(hdr, 'float');
+  writeAttrValue(hdr, floatToBytes(1.0));
 
+  // End of header: empty name (single null byte), then pad to 8-byte boundary
   hdr.push(0);
   while (hdr.length % 8 !== 0) hdr.push(0);
 
@@ -652,12 +699,14 @@ export function encodeEXR(
   }
 
   // ── Scanline pixel data ─────────────────────────────────────────────────
+  // Each scanline: [y_coord (u32)] [data_size (u32)] [A(u32) B(u32) G(u32) R(u32) per pixel]
   const scanlines: number[] = [];
   for (let y = 0; y < height; y++) {
     writeU32LE(scanlines, y);
     writeU32LE(scanlines, SCANLINE_DATA_SIZE);
     for (let x = 0; x < width; x++) {
       const srcIdx = (y * width + x) * 3;
+      writeF32LE(scanlines, 1.0);              // A = 1.0 (fully opaque)
       writeF32LE(scanlines, pixels[srcIdx + 2]); // B
       writeF32LE(scanlines, pixels[srcIdx + 1]); // G
       writeF32LE(scanlines, pixels[srcIdx]);     // R
