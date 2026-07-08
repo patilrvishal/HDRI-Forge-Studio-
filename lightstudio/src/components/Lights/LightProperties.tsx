@@ -1,0 +1,431 @@
+import React, { useCallback, useMemo } from 'react';
+import { useLightsStore } from '../../store/lightsStore';
+import type { Light, LightType, ColorProfile, FalloffType } from '../../types/Light';
+import { Slider } from '../UI/Slider';
+import { Toggle } from '../UI/Toggle';
+import { NumericInput } from '../UI/NumericInput';
+import { Dropdown } from '../UI/Dropdown';
+import { ColorPicker } from '../UI/ColorPicker';
+import { sphericalToCartesian } from '../../utils/math';
+import { colorProfileToHex, hexToKelvin, kelvinToHex } from '../../utils/colorConversion';
+
+const LIGHT_TYPE_OPTIONS: Array<{ value: string; label: string }> = [
+  { value: 'point', label: 'Point' },
+  { value: 'spot', label: 'Spot' },
+  { value: 'area', label: 'Area' },
+  { value: 'directional', label: 'Directional' },
+  { value: 'overhead', label: 'Overhead' },
+  { value: 'underlight', label: 'Underlight' },
+  { value: 'rim', label: 'Rim' },
+  { value: 'ies', label: 'IES' },
+];
+
+const COLOR_PROFILE_OPTIONS: Array<{ value: string; label: string }> = [
+  { value: 'daylight', label: 'Daylight' },
+  { value: 'tungsten', label: 'Tungsten' },
+  { value: 'fluorescent', label: 'Fluorescent' },
+  { value: 'custom', label: 'Custom' },
+];
+
+const FALLOFF_OPTIONS: Array<{ value: string; label: string }> = [
+  { value: 'quadratic', label: 'Quadratic' },
+  { value: 'linear', label: 'Linear' },
+  { value: 'none', label: 'None' },
+  { value: 'custom', label: 'Custom (1.5)' },
+];
+
+export const LightProperties: React.FC = () => {
+  const selectedLightId = useLightsStore((s) => s.selectedLightId);
+  const lights = useLightsStore((s) => s.lights);
+  const updateLight = useLightsStore((s) => s.updateLight);
+  const updateLightTransform = useLightsStore((s) => s.updateLightTransform);
+
+  const light = useMemo(
+    () => lights.find((l) => l.id === selectedLightId) ?? null,
+    [lights, selectedLightId],
+  );
+
+  const handleUpdate = useCallback(
+    (updates: Partial<Light>) => {
+      if (!selectedLightId) return;
+      updateLight(selectedLightId, updates);
+    },
+    [selectedLightId, updateLight],
+  );
+
+  const handleTypeChange = useCallback(
+    (type: string) => {
+      if (!light) return;
+      // When switching types, also set visibility of gear (helper)
+      const isAreaType = type === 'area' || type === 'overhead';
+      handleUpdate({
+        type: type as LightType,
+        areaLight: isAreaType,
+        gearVisible: true,
+      });
+    },
+    [light, handleUpdate],
+  );
+
+  const handleColorChange = useCallback(
+    (color: string) => {
+      handleUpdate({ color, colorProfile: 'custom' });
+    },
+    [handleUpdate],
+  );
+
+  const handleProfileChange = useCallback(
+    (profile: string) => {
+      const hex = colorProfileToHex(profile);
+      handleUpdate({ colorProfile: profile as ColorProfile, color: hex });
+    },
+    [handleUpdate],
+  );
+
+  const handleSphericalChange = useCallback(
+    (key: 'lat' | 'lng' | 'radius' | 'height', value: number) => {
+      if (!light) return;
+      const newSpherical = { ...light.transform.spherical, [key]: value };
+      const cart = sphericalToCartesian(
+        newSpherical.lat,
+        newSpherical.lng,
+        newSpherical.radius,
+        newSpherical.height,
+      );
+      updateLightTransform(light.id, {
+        spherical: newSpherical,
+        position: cart,
+      });
+    },
+    [light, updateLightTransform],
+  );
+
+  const handlePositionChange = useCallback(
+    (axis: 'x' | 'y' | 'z', value: number) => {
+      if (!light) return;
+      const newPos = { ...light.transform.position, [axis]: value };
+      updateLightTransform(light.id, {
+        position: newPos,
+      });
+    },
+    [light, updateLightTransform],
+  );
+
+  const handleRotationChange = useCallback(
+    (axis: 'x' | 'y' | 'z', value: number) => {
+      if (!light) return;
+      const newRot = { ...light.transform.rotation, [axis]: value };
+      updateLightTransform(light.id, {
+        rotation: newRot,
+      });
+    },
+    [light, updateLightTransform],
+  );
+
+  // Color temperature display (approximate kelvin from hex)
+  const kelvinValue = useMemo(() => {
+    if (!light) return 6500;
+    return hexToKelvin(light.color);
+  }, [light]);
+
+  // No light selected
+  if (!light) {
+    return (
+      <div className="placeholder-panel" style={{ height: '100%' }}>
+        <span style={{ fontSize: 11, color: 'var(--text-dim)' }}>
+          Select a light to view its properties
+        </span>
+      </div>
+    );
+  }
+
+  const isSpotLike = light.type === 'spot' || light.type === 'rim';
+  const isAreaLike = light.type === 'area' || light.type === 'overhead';
+  const hasFalloff = light.type === 'point' || light.type === 'spot' || light.type === 'underlight' || light.type === 'ies';
+  const hasShadows = light.type === 'spot' || light.type === 'directional' || light.type === 'point' || light.type === 'rim';
+
+  return (
+    <div className="light-properties">
+      {/* Header */}
+      <div className="props-section">
+        <div className="section-header">Light Settings</div>
+
+        {/* Name */}
+        <div className="field-row" style={{ marginBottom: 6 }}>
+          <span className="field-label">Name</span>
+          <input
+            className="field-input"
+            value={light.name}
+            onChange={(e) => handleUpdate({ name: e.target.value })}
+          />
+        </div>
+
+        {/* Type */}
+        <Dropdown
+          label="Type"
+          value={light.type}
+          options={LIGHT_TYPE_OPTIONS}
+          onChange={handleTypeChange}
+        />
+
+        {/* Color Profile */}
+        <Dropdown
+          label="Profile"
+          value={light.colorProfile}
+          options={COLOR_PROFILE_OPTIONS}
+          onChange={handleProfileChange}
+        />
+
+        {/* Color Picker */}
+        <ColorPicker label="Color" color={light.color} onChange={handleColorChange} />
+
+        {/* Color temperature display */}
+        <div className="field-row">
+          <span className="field-label">Temp</span>
+          <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text-sec)' }}>
+            ~{kelvinValue}K
+          </span>
+        </div>
+
+        {/* Brightness */}
+        <Slider
+          label="Brightness"
+          value={light.brightness}
+          min={0}
+          max={1000}
+          step={1}
+          onChange={(v) => handleUpdate({ brightness: v })}
+        />
+
+        {/* Opacity */}
+        <Slider
+          label="Opacity"
+          value={light.opacity}
+          min={0}
+          max={200}
+          step={1}
+          onChange={(v) => handleUpdate({ opacity: v })}
+          unit="%"
+        />
+
+        {/* Visible + Gear toggles */}
+        <div style={{ display: 'flex', gap: 12, marginTop: 4, marginBottom: 4 }}>
+          <Toggle
+            label="Visible"
+            checked={light.visible}
+            onChange={(v) => handleUpdate({ visible: v })}
+          />
+          <Toggle
+            label="Helper"
+            checked={light.gearVisible}
+            onChange={(v) => handleUpdate({ gearVisible: v })}
+          />
+        </div>
+      </div>
+
+      {/* Falloff section */}
+      {hasFalloff && (
+        <div className="props-section">
+          <div className="section-header">Falloff</div>
+          <Dropdown
+            label="Decay"
+            value={light.falloff}
+            options={FALLOFF_OPTIONS}
+            onChange={(v) => handleUpdate({ falloff: v as FalloffType })}
+          />
+        </div>
+      )}
+
+      {/* Spotlight params */}
+      {isSpotLike && (
+        <div className="props-section">
+          <div className="section-header">Spotlight</div>
+          <Slider
+            label="Angle"
+            value={45}
+            min={1}
+            max={90}
+            step={1}
+            onChange={() => {}}
+            unit="deg"
+          />
+          <Slider
+            label="Penumbra"
+            value={50}
+            min={0}
+            max={100}
+            step={1}
+            onChange={() => {}}
+            unit="%"
+          />
+        </div>
+      )}
+
+      {/* Area light dimensions */}
+      {isAreaLike && (
+        <div className="props-section">
+          <div className="section-header">Area Dimensions</div>
+          <NumericInput label="Width" value={light.type === 'overhead' ? 4 : 2} min={0.1} max={20} step={0.1} onChange={() => {}} />
+          <NumericInput label="Height" value={light.type === 'overhead' ? 4 : 2} min={0.1} max={20} step={0.1} onChange={() => {}} />
+        </div>
+      )}
+
+      {/* Position: Spherical */}
+      <div className="props-section">
+        <div className="section-header">
+          Position
+          <span style={{ float: 'right', fontWeight: 400, textTransform: 'none', letterSpacing: 'normal', fontSize: 9, color: 'var(--text-dim)' }}>
+            Spherical
+          </span>
+        </div>
+        <Slider
+          label="Latitude"
+          value={light.transform.spherical.lat}
+          min={-90}
+          max={90}
+          step={0.5}
+          onChange={(v) => handleSphericalChange('lat', v)}
+          unit="deg"
+        />
+        <Slider
+          label="Longitude"
+          value={light.transform.spherical.lng}
+          min={0}
+          max={360}
+          step={0.5}
+          onChange={(v) => handleSphericalChange('lng', v)}
+          unit="deg"
+        />
+        <Slider
+          label="Radius"
+          value={light.transform.spherical.radius}
+          min={0.5}
+          max={30}
+          step={0.1}
+          onChange={(v) => handleSphericalChange('radius', v)}
+        />
+        <Slider
+          label="Height"
+          value={light.transform.spherical.height}
+          min={-5}
+          max={15}
+          step={0.1}
+          onChange={(v) => handleSphericalChange('height', v)}
+        />
+      </div>
+
+      {/* Position: Cartesian XYZ */}
+      <div className="props-section">
+        <div className="section-header">
+          Position
+          <span style={{ float: 'right', fontWeight: 400, textTransform: 'none', letterSpacing: 'normal', fontSize: 9, color: 'var(--text-dim)' }}>
+            XYZ
+          </span>
+        </div>
+        <div style={{ display: 'flex', gap: 4, marginBottom: 4 }}>
+          <div style={{ flex: 1 }}>
+            <NumericInput
+              label="X"
+              value={light.transform.position.x}
+              min={-20}
+              max={20}
+              step={0.1}
+              onChange={(v) => handlePositionChange('x', v)}
+              width="100%"
+            />
+          </div>
+          <div style={{ flex: 1 }}>
+            <NumericInput
+              label="Y"
+              value={light.transform.position.y}
+              min={-5}
+              max={15}
+              step={0.1}
+              onChange={(v) => handlePositionChange('y', v)}
+              width="100%"
+            />
+          </div>
+          <div style={{ flex: 1 }}>
+            <NumericInput
+              label="Z"
+              value={light.transform.position.z}
+              min={-20}
+              max={20}
+              step={0.1}
+              onChange={(v) => handlePositionChange('z', v)}
+              width="100%"
+            />
+          </div>
+        </div>
+      </div>
+
+      {/* Rotation */}
+      <div className="props-section">
+        <div className="section-header">
+          Rotation
+          <span style={{ marginLeft: 'auto' }}>
+            <Toggle
+              checked={light.transform.rotation.enabled}
+              onChange={(v) =>
+                handleUpdate({
+                  transform: {
+                    ...light.transform,
+                    rotation: { ...light.transform.rotation, enabled: v },
+                  },
+                })
+              }
+            />
+          </span>
+        </div>
+        {light.transform.rotation.enabled && (
+          <>
+            <Slider
+              label="Rot X"
+              value={light.transform.rotation.x}
+              min={-180}
+              max={180}
+              step={1}
+              onChange={(v) => handleRotationChange('x', v)}
+              unit="deg"
+            />
+            <Slider
+              label="Rot Y"
+              value={light.transform.rotation.y}
+              min={-180}
+              max={180}
+              step={1}
+              onChange={(v) => handleRotationChange('y', v)}
+              unit="deg"
+            />
+            <Slider
+              label="Rot Z"
+              value={light.transform.rotation.z}
+              min={-180}
+              max={180}
+              step={1}
+              onChange={(v) => handleRotationChange('z', v)}
+              unit="deg"
+            />
+          </>
+        )}
+      </div>
+
+      {/* Collection assignment */}
+      <div className="props-section">
+        <div className="section-header">Collection</div>
+        <Dropdown
+          label="Group"
+          value={light.collectionId ?? '__none__'}
+          options={[
+            { value: '__none__', label: 'None' },
+            { value: 'default', label: 'Default' },
+            { value: 'key', label: 'Key Lights' },
+            { value: 'fill', label: 'Fill Lights' },
+            { value: 'rim', label: 'Rim Lights' },
+          ]}
+          onChange={(v) => handleUpdate({ collectionId: v === '__none__' ? null : v })}
+        />
+      </div>
+    </div>
+  );
+};

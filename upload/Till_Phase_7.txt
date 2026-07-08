@@ -1,0 +1,14 @@
+I'm continuing development of LightStudio, a 3D Car Lighting Studio project.
+
+Project root: /home/z/my-project/lightstudio/
+Context file: /home/z/my-project/lightstudio/CONTEXT_SUMMARY.md
+
+First, read CONTEXT_SUMMARY.md to understand the full project state (Phases 1–7 complete, zero build errors).
+
+Then implement Phase 8. Based on the progression:
+- Phases 1-6: scaffold → types/stores/UI → 3D engine → presets/materials → animation → export
+- Phase 7: Undo/Redo history system
+
+Phase 8 should be: Post-Processing Pipeline (wire real Three.js EffectComposer passes for Bloom, SSAO, Vignette, Color Grading — the UI controls already exist in RenderSettingsPanel but the actual GPU passes are not connected yet).
+
+After implementation: update AppLayout.tsx version label to "Phase 8", verify with npx tsc --noEmit = 0 errors.
