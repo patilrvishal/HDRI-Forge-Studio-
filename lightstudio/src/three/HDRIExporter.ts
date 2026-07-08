@@ -3,14 +3,16 @@
  * HDRI (.hdr) or EXR (.exr) file suitable for IBL in Blender, Photoshop, HDRView,
  * or any HDR-capable application.
  *
- * The export combines:
- *   - The scene's current environment (built-in presets re-created as emissive panels,
- *     or custom .hdr files re-loaded from stored binary data)
+ * The export captures user-added lighting only:
  *   - ALL physical lights (PointLight, SpotLight, RectAreaLight, DirectionalLight)
  *     represented as bright emissive proxy meshes with HDR color values
+ *   - Custom .hdr/.hdri files loaded by the user (re-loaded from stored binary data)
+ *
+ * Built-in environment presets are NOT included — they are viewport-only PBR
+ * ambiance and not user-placed light sources.
  *
  * Process:
- *   1. Build a dedicated capture scene with environment panels + light proxies
+ *   1. Build a dedicated capture scene with custom HDRI (if loaded) + light proxies
  *   2. Render 6 cube faces via CubeCamera (HalfFloatType for Windows/Chrome compat)
  *   3. Project cubemap → equirectangular via custom ShaderMaterial
  *   4. Read back Uint16Array (half-float), convert to Float32Array with Y-flip
@@ -19,8 +21,6 @@
  * No external libraries — pure Three.js r165 + TypeScript.
  */
 import * as THREE from 'three';
-import { getHDRIPresetById } from '../types/Environment';
-import type { HDRIPreset, EnvPanel } from '../types/Environment';
 import { getRawHDRIData } from '../store/hdriDataStore';
 import { RGBELoader } from 'three/addons/loaders/RGBELoader.js';
 
@@ -228,11 +228,11 @@ export async function captureSceneToHDRI(
 // ─── Environment capture helpers ────────────────────────────────────────────────
 
 /**
- * Adds the environment light sources to the capture scene.
+ * Adds the environment content to the capture scene.
  *
- * For built-in presets: Re-creates the emissive panels that define the environment.
+ * For built-in presets: Black background only (presets are viewport-only, not exported).
  * For custom .hdr: Re-loads the raw file and sets it as scene.background.
- * For 'none': No environment added.
+ * For 'none': Black background only.
  */
 async function addEnvironmentToCaptureScene(
   captureScene: THREE.Scene,
@@ -242,9 +242,6 @@ async function addEnvironmentToCaptureScene(
   // Lazy imports to avoid circular dependencies at module level
   const { useSceneStore } = await import('../store/sceneStore');
   const envState = useSceneStore.getState().environment;
-
-  // Handle environment rotation
-  const rotationDeg = envState.rotation ?? 0;
 
   if (envState.presetId === 'none') {
     // No environment — dark background only
@@ -274,46 +271,17 @@ async function addEnvironmentToCaptureScene(
     return;
   }
 
-  // Built-in preset: re-create the emissive panels
-  const preset = getHDRIPresetById(envState.presetId);
-  if (!preset) {
-    captureScene.background = new THREE.Color(0x000000);
-    return;
-  }
-
-  // Add each emissive panel from the preset
-  // HDR_BOOST: environment panel intensities (0.3–1.2) are designed for PMREM PBR rendering,
-  // not for direct HDRI export. Multiply by 30 so panels produce values of 9–36 in linear
-  // HDR space — bright enough that exposure adjustment in Photoshop/Blender reveals them
-  // as distinct light sources while the black (0.0) background stays black.
-  const HDR_BOOST = 30;
-  for (const panel of preset.panels) {
-    const color = new THREE.Color(panel.color);
-    color.multiplyScalar(panel.intensity * HDR_BOOST);
-    const geo = new THREE.PlaneGeometry(panel.size[0], panel.size[1]);
-    const mat = new THREE.MeshBasicMaterial({
-      color,
-      side: THREE.DoubleSide,
-    });
-    const mesh = new THREE.Mesh(geo, mat);
-    mesh.position.set(panel.position[0], panel.position[1], panel.position[2]);
-    if (panel.rotationX !== undefined) mesh.rotation.x = panel.rotationX;
-    if (panel.rotationY !== undefined) mesh.rotation.y = panel.rotationY;
-    captureScene.add(mesh);
-    disposables.push({ geometry: geo, material: mat });
-  }
-
-  // Apply rotation to the entire environment (same as EnvironmentLoader does)
-  if (rotationDeg !== 0) {
-    captureScene.rotation.y = (rotationDeg * Math.PI) / 180;
-  }
-
-  // Pure black background — critical for proper HDRI dynamic range.
-  // backgroundHint is only for the viewport UI, NOT for HDRI data.
-  // Any non-zero floor (e.g. '#2a2a3e' ≈ 0.16) would cause the entire image
-  // to shift when adjusting exposure in Photoshop/Blender, instead of only
-  // the light source pixels responding. With 0.0 background, 0×exposure = 0
-  // (dark stays dark) while light panels (values 9–36) respond to exposure.
+  // Built-in preset: The HDRI export captures only user-added content:
+  //   - Physical light proxies (PointLight, SpotLight, RectAreaLight, DirectionalLight)
+  //   - Custom .hdr files loaded by the user
+  // Built-in environment presets are viewport-only PBR lighting — they are NOT
+  // exported because they are not "lights" the user placed; they are the default
+  // scene ambiance. Exporting them would produce a non-black HDRI even when the
+  // scene has no user-added lighting, which is incorrect.
+  //
+  // Pure black background ensures proper HDRI dynamic range:
+  //   0 × exposure = 0 (dark stays dark)
+  //   Light proxy values (20–1000) respond correctly to exposure adjustment.
   captureScene.background = new THREE.Color(0x000000);
 }
 
