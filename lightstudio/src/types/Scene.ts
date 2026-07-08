@@ -13,6 +13,10 @@ export interface EnvironmentState {
   background: string;
   intensity: number;
   showBackground: boolean;
+  /** Backplate image (data URL). Shown as viewport background instead of HDRI */
+  backplate: string | null;
+  /** Backplate opacity (0-1) */
+  backplateOpacity: number;
 }
 
 export interface BloomSettings {
@@ -108,6 +112,8 @@ export const DEFAULT_SCENE_STATE: SceneState = {
     background: '#1a1a2e',
     intensity: 1.0,
     showBackground: false,
+    backplate: null,
+    backplateOpacity: 1.0,
   },
   renderSettings: DEFAULT_RENDER_SETTINGS,
   showGrid: true,

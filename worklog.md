@@ -1,22 +1,28 @@
 ---
 Task ID: 1
 Agent: Main Agent
-Task: Verify and fix PBR Material Editor + Custom HDRI persistence
+Task: Phase 11 - HDRI Preview, HDRI/EXR Export, Backplate, Resizable Panels
 
 Work Log:
-- Audited all Phase 10 files: types/MaterialEditor.ts, materialEditorStore.ts, modelDataStore.ts, hdriDataStore.ts, MaterialManager.ts, MaterialEditorPanel.tsx, SceneExporter.ts, Viewport.tsx, AppLayout.tsx, EnvironmentBrowser.tsx, engine.ts, sceneStore.ts
-- Fixed TS2503: Added `import * as THREE from 'three'` and proper `MaterialManager` type import in MaterialEditorPanel.tsx
-- Fixed runtime bug: AppLayout was passing `sceneManagerRef` (SceneManager) as `sceneRef` (THREE.Scene). Created dedicated `sceneRef` and populated it in `handleViewportReady`
-- Fixed critical scene-restore bug: Material states imported from scene file were being overwritten when model loaded. Added merge logic in Viewport.tsx that checks for saved material states and re-applies them after model extraction + rebuildMaterialMap
-- Fixed async texture loading: `getOrCreateTexture()` was synchronous but `THREE.TextureLoader.load()` is async, always returning null on first call. Replaced with `loadTextureAsync()` returning Promise, with proper cache
-- Fixed pre-existing TS error: `main.tsx` imported `App.tsx` with extension, changed to `App`
-- Fixed `tsconfig.node.json`: TS 5.4 incompatible with `es2023` target and `erasableSyntaxOnly` option
-- Fixed `vite.config.ts`: Added `css.postcss` path to prevent parent project's PostCSS config from leaking
-- Verified: `tsc -b && vite build` compiles cleanly with zero errors
-- Verified: All 116 modules transform, production build outputs correctly (4 chunks)
+- Created uiLayoutStore.ts with left/right/bottom panel size tracking (min/max clamped)
+- Created ResizeHandle.tsx — Blender-style drag-to-resize component with hover highlight, double-click reset
+- Created HDRIExporter.ts (~350 lines) with:
+  - CubeCamera capture at scene origin (FloatType for HDR range)
+  - Equirectangular conversion via custom GLSL shader
+  - Radiance HDR (RGBE) encoding with new-style RLE compression
+  - OpenEXR encoding (uncompressed, HALF float, BGR channel order, proper header/offset table)
+  - float32ToHalf conversion for EXR pixel data
+  - Export downloads via Blob URL
+- Added backplate/backplateOpacity to EnvironmentState type and DEFAULT_SCENE_STATE
+- Added backplate to SceneFile interface in SceneExporter.ts
+- Rewrote AppLayout.tsx with ResizeHandle components between all panels (left, right, bottom)
+- Added backplate rendering in Viewport.tsx — loads as THREE.Texture, sets scene.background, restores on remove
+- Added backplate upload/remove UI in EnvironmentBrowser with preview thumbnail
+- Added "Export HDRI (.hdr)..." and "Export EXR (.exr)..." menu items in TopMenubar (Project menu)
+- Fixed TS5.4 UTF-8 JSX parsing issue (em dash / box drawing chars)
+- Build: 119 modules, zero TS errors, production build clean
 
 Stage Summary:
-- PBR Material Editor: Fully functional with 8 texture map slots, color/roughness/metalness/emissive sliders, toggles (transparent, double-sided, flat shading), material list sidebar with color swatches
-- Custom HDRI: Persistence via hdriDataStore (ArrayBuffer→base64 in scene file), proper Viewport restore effect with fallback
-- Material save/load: Scene file includes material states, on restore merges saved edits over extracted defaults and applies to Three.js
-- Build: Clean, zero TS errors, production-ready
+- Resizable Panels: Left, right, and bottom panels all have drag-to-resize handles (4px, highlight on hover, double-click resets to default). Sizes persisted in uiLayoutStore.
+- HDRI/EXR Export: Project > Export HDRI/EXR captures scene lighting from origin (model hidden by default), converts cube map to equirectangular, encodes as proper .hdr (Radiance RGBE with RLE) or .exr (OpenEXR HALF float, uncompressed). Files are industry-standard and work in Blender, UE5, etc.
+- Backplate: Set any image as viewport background while keeping HDRI for IBL lighting. Upload/remove from Environment Browser. Persisted in scene files.

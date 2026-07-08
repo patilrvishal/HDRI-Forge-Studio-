@@ -51,6 +51,8 @@ export const Viewport: React.FC<ViewportProps> = ({ sceneManagerRef, onScreensho
   const clearPendingModelData = useSceneStore((s) => s.clearPendingModelData);
   const pendingHDRIData = useSceneStore((s) => s._pendingHDRIDataBase64);
   const clearPendingHDRIData = useSceneStore((s) => s.clearPendingHDRIData);
+  const backplate = useSceneStore((s) => s.environment.backplate);
+  const backplateOpacity = useSceneStore((s) => s.environment.backplateOpacity);
 
   const lights = useLightsStore((s) => s.lights);
   const updateLight = useLightsStore((s) => s.updateLight);
@@ -294,10 +296,55 @@ export const Viewport: React.FC<ViewportProps> = ({ sceneManagerRef, onScreensho
     sceneManagerRef.current?.setGrid(showGrid);
   }, [showGrid, sceneManagerRef]);
 
-  // Sync environment background
+  // Backplate: render as scene.background when set
+  const backplateTextureRef = useRef<THREE.Texture | null>(null);
+
   useEffect(() => {
-    sceneManagerRef.current?.setBackground(environment.background, environment.showBackground);
-  }, [environment.background, environment.showBackground, sceneManagerRef]);
+    const sm = sceneManagerRef.current;
+    if (!sm) return;
+
+    if (backplate) {
+      // Load backplate as texture for background
+      if (backplateTextureRef.current) {
+        backplateTextureRef.current.dispose();
+        backplateTextureRef.current = null;
+      }
+      const loader = new THREE.TextureLoader();
+      loader.load(backplate, (tex) => {
+        tex.colorSpace = THREE.SRGBColorSpace;
+        tex.minFilter = THREE.LinearFilter;
+        tex.magFilter = THREE.LinearFilter;
+        backplateTextureRef.current = tex;
+        if (backplateOpacity >= 0.99) {
+          sm.scene.background = tex;
+        }
+      });
+    } else {
+      if (backplateTextureRef.current) {
+        backplateTextureRef.current.dispose();
+        backplateTextureRef.current = null;
+      }
+      // Restore normal background behavior
+      sm.setBackground(
+        useSceneStore.getState().environment.background,
+        useSceneStore.getState().environment.showBackground,
+      );
+    }
+
+    return () => {
+      if (backplateTextureRef.current) {
+        backplateTextureRef.current.dispose();
+        backplateTextureRef.current = null;
+      }
+    };
+  }, [backplate, backplateOpacity, sceneManagerRef]);
+
+  // Sync environment background (only when no backplate)
+  useEffect(() => {
+    const sm = sceneManagerRef.current;
+    if (!sm || backplate) return; // Skip if backplate is active
+    sm.setBackground(environment.background, environment.showBackground);
+  }, [environment.background, environment.showBackground, sceneManagerRef, backplate]);
 
   // Phase 9: Sync environment preset to 3D scene (built-in presets only)
   useEffect(() => {

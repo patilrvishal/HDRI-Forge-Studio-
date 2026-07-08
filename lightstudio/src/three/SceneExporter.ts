@@ -38,8 +38,9 @@ export interface SceneFile {
       background: string;
       intensity: number;
       showBackground: boolean;
-      /** Base64-encoded custom HDRI binary (only when presetId === '__custom__') */
       customHDRIDataBase64: string | null;
+      backplate: string | null;
+      backplateOpacity: number;
     };
     renderSettings: {
       engine: string;

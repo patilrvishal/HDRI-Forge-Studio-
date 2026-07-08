@@ -29,6 +29,7 @@ const EnvironmentBrowser: React.FC<EnvironmentBrowserProps> = ({ onClose, onPres
   const [activeCategory, setActiveCategory] = useState<HDRIPreset['category'] | 'all'>('all');
   const [searchQuery, setSearchQuery] = useState('');
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const backplateInputRef = useRef<HTMLInputElement>(null);
   const [customLoading, setCustomLoading] = useState(false);
 
   // Filter presets
@@ -73,6 +74,28 @@ const EnvironmentBrowser: React.FC<EnvironmentBrowserProps> = ({ onClose, onPres
     },
     [setEnvironment],
   );
+
+  const handleBackplateUpload = useCallback(() => {
+    backplateInputRef.current?.click();
+  }, []);
+
+  const handleBackplateFileChange = useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) => {
+      const file = e.target.files?.[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = () => {
+        setEnvironment({ backplate: reader.result as string, backplateOpacity: 1 });
+      };
+      reader.readAsDataURL(file);
+      e.target.value = '';
+    },
+    [setEnvironment],
+  );
+
+  const handleRemoveBackplate = useCallback(() => {
+    setEnvironment({ backplate: null, backplateOpacity: 1 });
+  }, [setEnvironment]);
 
   const handleCustomUpload = useCallback(() => {
     fileInputRef.current?.click();
@@ -132,7 +155,7 @@ const EnvironmentBrowser: React.FC<EnvironmentBrowserProps> = ({ onClose, onPres
 
         {/* Body */}
         <div className="rs-body" style={{ overflow: 'hidden', display: 'flex', flexDirection: 'column', gap: 12 }}>
-          {/* ── Controls row ─────────────────────────────────────────── */}
+          {/* --- Controls row ---------------------------------------------------------------- */}
           <div style={{ display: 'flex', gap: 12, flexShrink: 0 }}>
             <Slider
               label="Intensity"
@@ -173,6 +196,22 @@ const EnvironmentBrowser: React.FC<EnvironmentBrowserProps> = ({ onClose, onPres
             >
               {customLoading ? 'Loading...' : 'Load Custom HDRI'}
             </button>
+            <button
+              className="btn-sm"
+              onClick={handleBackplateUpload}
+              style={{ fontSize: 10, whiteSpace: 'nowrap' }}
+            >
+              {environment.backplate ? 'Change Backplate' : 'Set Backplate'}
+            </button>
+            {environment.backplate && (
+              <button
+                className="btn-sm"
+                onClick={handleRemoveBackplate}
+                style={{ fontSize: 10, color: 'var(--danger)', whiteSpace: 'nowrap' }}
+              >
+                Remove
+              </button>
+            )}
             <input
               ref={fileInputRef}
               type="file"
@@ -180,9 +219,38 @@ const EnvironmentBrowser: React.FC<EnvironmentBrowserProps> = ({ onClose, onPres
               style={{ display: 'none' }}
               onChange={handleFileChange}
             />
+            <input
+              ref={backplateInputRef}
+              type="file"
+              accept="image/*"
+              style={{ display: 'none' }}
+              onChange={handleBackplateFileChange}
+            />
           </div>
 
-          {/* ── Category tabs + Search ───────────────────────────────── */}
+
+          {/* Backplate Preview */}
+          {environment.backplate ? (
+            <div style={{ flexShrink: 0, display: 'flex', gap: 8, alignItems: 'center' }}>
+              <div
+                style={{
+                  width: 80,
+                  height: 45,
+                  borderRadius: 'var(--radius-sm)',
+                  backgroundImage: 'url(' + environment.backplate + ')',
+                  backgroundSize: 'cover',
+                  backgroundPosition: 'center',
+                  border: '1px solid var(--border-light)',
+                  flexShrink: 0,
+                }}
+              />
+              <div style={{ fontSize: 10, color: 'var(--text-sec)' }}>
+                Backplate active - shown as viewport background
+              </div>
+            </div>
+          ) : null}
+
+          {/* --- Category tabs + Search ------------------------------------------------- */}
           <div style={{ display: 'flex', gap: 6, flexShrink: 0, alignItems: 'center' }}>
             {CATEGORIES.map((cat) => (
               <button
@@ -215,15 +283,15 @@ const EnvironmentBrowser: React.FC<EnvironmentBrowserProps> = ({ onClose, onPres
             />
           </div>
 
-          {/* ── Active preset indicator ──────────────────────────────── */}
+          {/* --- Active preset indicator ------------------------------------------------ */}
           {activePreset && (
             <div style={{ fontSize: 10, color: 'var(--text-dim)', flexShrink: 0 }}>
               Active: <span style={{ color: 'var(--accent)' }}>{activePreset.name}</span>
-              <span style={{ marginLeft: 8, color: 'var(--text-sec)' }}>— {activePreset.description}</span>
+              <span style={{ marginLeft: 8, color: 'var(--text-sec)' }}> -  {activePreset.description}</span>
             </div>
           )}
 
-          {/* ── Preset Grid ──────────────────────────────────────────── */}
+          {/* --- Preset Grid ------------------------------------------------------------------ */}
           <div
             style={{
               display: 'grid',

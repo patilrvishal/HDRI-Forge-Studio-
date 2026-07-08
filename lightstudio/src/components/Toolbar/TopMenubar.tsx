@@ -4,6 +4,7 @@ import { useSceneStore } from '../../store/sceneStore';
 import { useLightsStore } from '../../store/lightsStore';
 import { useHistoryStore } from '../../store/historyStore';
 import { SceneExporter } from '../../three/SceneExporter';
+import { exportSceneAsHDR, exportSceneAsEXR } from '../../three/HDRIExporter';
 import type { SceneManager } from '../../three/engine';
 
 interface MenuItem {
@@ -95,6 +96,23 @@ const MENU_DEFINITIONS = (
       label: 'Export Image...',
       shortcut: 'Ctrl+E',
       action: () => onExportImage?.(),
+    },
+    sep2b: { label: '', separator: true },
+    exportHDR: {
+      label: 'Export HDRI (.hdr)...',
+      action: () => {
+        if (!sceneManagerRef?.current) return;
+        const { renderer, scene } = sceneManagerRef.current;
+        exportSceneAsHDR(renderer, scene, { size: 2048, excludeModel: true });
+      },
+    },
+    exportEXR: {
+      label: 'Export EXR (.exr)...',
+      action: () => {
+        if (!sceneManagerRef?.current) return;
+        const { renderer, scene } = sceneManagerRef.current;
+        exportSceneAsEXR(renderer, scene, { size: 2048, excludeModel: true });
+      },
     },
     sep2: { label: '', separator: true },
     exit: { label: 'Exit', action: () => window.close() },

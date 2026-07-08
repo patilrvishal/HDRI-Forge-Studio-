@@ -9,10 +9,11 @@ import { LightPreview } from '../Previews/LightPreview';
 import { MaterialPreviewTab, getMaterialPreviewThumbnail } from '../Previews/MaterialPreviewTab';
 import { MaterialEditorPanel } from '../Materials/MaterialEditorPanel';
 import { RenderSettingsPanel } from '../Settings/RenderSettingsPanel';
+import { ResizeHandle } from '../UI/ResizeHandle';
 import { useUIStore } from '../../store/uiStore';
 import { useSceneStore } from '../../store/sceneStore';
 import { useLightsStore } from '../../store/lightsStore';
-import { usePresetsStore } from '../../store/presetsStore';
+import { useUILayoutStore } from '../../store/uiLayoutStore';
 import { useHistoryStore } from '../../store/historyStore';
 import { useKeyboardShortcuts } from '../../hooks/useKeyboardShortcuts';
 import { TimelinePanel } from '../Timeline/TimelinePanel';
@@ -23,15 +24,20 @@ import { SceneExporter } from '../../three/SceneExporter';
 import { MaterialManager } from '../../three/MaterialManager';
 import * as THREE from 'three';
 
-const LEFT_PANEL_WIDTH = 220;
-const RIGHT_PANEL_WIDTH = 320;
-const BOTTOM_PANEL_HEIGHT = 240;
-
 
 export const AppLayout: React.FC = () => {
   const sceneManagerRef = useRef<SceneManager | null>(null);
   const sceneRef = useRef<THREE.Scene | null>(null);
   const envMapRef = useRef<THREE.Texture | null>(null);
+
+  // Resizable panel sizes from store
+  const leftPanelWidth = useUILayoutStore((s) => s.leftPanelWidth);
+  const rightPanelWidth = useUILayoutStore((s) => s.rightPanelWidth);
+  const bottomPanelHeight = useUILayoutStore((s) => s.bottomPanelHeight);
+  const setLeftPanelWidth = useUILayoutStore((s) => s.setLeftPanelWidth);
+  const setRightPanelWidth = useUILayoutStore((s) => s.setRightPanelWidth);
+  const setBottomPanelHeight = useUILayoutStore((s) => s.setBottomPanelHeight);
+  const resetLayout = useUILayoutStore((s) => s.resetToDefaults);
 
   const leftPanelOpen = useUIStore((s) => s.leftPanelOpen);
   const rightPanelOpen = useUIStore((s) => s.rightPanelOpen);
@@ -93,12 +99,9 @@ export const AppLayout: React.FC = () => {
   // Keyboard shortcuts
   useKeyboardShortcuts({
     onSave: () => {
-      // Quick save to localStorage via SceneExporter
       SceneExporter.quickSave();
     },
     onOpen: () => {
-      // Quick load from localStorage via SceneExporter
-      // Pause history during import to avoid recording the restore as an undo point
       const hist = useHistoryStore.getState();
       hist.pause();
       const data = SceneExporter.quickLoad();
@@ -115,7 +118,6 @@ export const AppLayout: React.FC = () => {
           data.scene.camera.fov,
         );
       }
-      // Clear history after full scene load
       useHistoryStore.getState().clear();
     },
     onUndo: () => {
@@ -177,43 +179,52 @@ export const AppLayout: React.FC = () => {
           minHeight: 0,
         }}
       >
-        {/* Left Toolbar */}
+        {/* Left Toolbar (fixed width) */}
         <LeftToolbar sceneManagerRef={sceneManagerRef} />
 
-        {/* Left Panel — Light List */}
+        {/* Left Panel — Light List (resizable) */}
         {leftPanelOpen && (
-          <div
-            className="panel"
-            style={{
-              width: LEFT_PANEL_WIDTH,
-              borderRight: '1px solid var(--border)',
-              flexShrink: 0,
-              overflow: 'hidden',
-            }}
-          >
-            <div className="panel-header">
-              <h3>
-                <svg width="10" height="10" viewBox="0 0 10 10" fill="currentColor" style={{ opacity: 0.6 }}>
-                  <circle cx="5" cy="5" r="3" />
-                </svg>
-                Light List
-              </h3>
-              <button
-                className="btn-icon"
-                style={{ width: 20, height: 20 }}
-                onClick={() => useLightsStore.getState().addLight()}
-                title="Add Light"
-                aria-label="Add Light"
-              >
-                <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5">
-                  <path d="M6 1v10M1 6h10" />
-                </svg>
-              </button>
+          <>
+            <div
+              className="panel"
+              style={{
+                width: leftPanelWidth,
+                flexShrink: 0,
+                overflow: 'hidden',
+                borderRight: 'none',
+              }}
+            >
+              <div className="panel-header">
+                <h3>
+                  <svg width="10" height="10" viewBox="0 0 10 10" fill="currentColor" style={{ opacity: 0.6 }}>
+                    <circle cx="5" cy="5" r="3" />
+                  </svg>
+                  Light List
+                </h3>
+                <button
+                  className="btn-icon"
+                  style={{ width: 20, height: 20 }}
+                  onClick={() => useLightsStore.getState().addLight()}
+                  title="Add Light"
+                  aria-label="Add Light"
+                >
+                  <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5">
+                    <path d="M6 1v10M1 6h10" />
+                  </svg>
+                </button>
+              </div>
+              <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+                <LightListPanel />
+              </div>
             </div>
-            <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-              <LightListPanel />
-            </div>
-          </div>
+            {/* Left resize handle */}
+            <ResizeHandle
+              direction="horizontal"
+              side="left"
+              onResize={(delta) => setLeftPanelWidth(leftPanelWidth + delta)}
+              onDoubleClick={() => setLeftPanelWidth(220)}
+            />
+          </>
         )}
 
         {/* Center: Viewport + Bottom panels */}
@@ -238,14 +249,24 @@ export const AppLayout: React.FC = () => {
             <Viewport sceneManagerRef={sceneManagerRef} onScreenshot={handleScreenshot} onReady={handleViewportReady} />
           </div>
 
+          {/* Bottom resize handle */}
+          {bottomPanelOpen && (
+            <ResizeHandle
+              direction="vertical"
+              side="top"
+              onResize={(delta) => setBottomPanelHeight(bottomPanelHeight - delta)}
+              onDoubleClick={() => setBottomPanelHeight(240)}
+            />
+          )}
+
           {/* Bottom panels */}
           {bottomPanelOpen && (
             <div
               style={{
-                height: BOTTOM_PANEL_HEIGHT,
+                height: bottomPanelHeight,
                 display: 'flex',
-                borderTop: '1px solid var(--border)',
                 flexShrink: 0,
+                overflow: 'hidden',
               }}
             >
               {/* Bottom left: Timeline (Phase 5) */}
@@ -279,78 +300,87 @@ export const AppLayout: React.FC = () => {
           )}
         </div>
 
-        {/* Right Panel */}
+        {/* Right Panel (resizable) */}
         {rightPanelOpen && (
-          <div
-            className="panel"
-            style={{
-              width: RIGHT_PANEL_WIDTH,
-              borderLeft: '1px solid var(--border)',
-              flexShrink: 0,
-              overflow: 'hidden',
-            }}
-          >
-            {/* Tab bar */}
-            <div style={{ borderBottom: '1px solid var(--border)' }}>
-              <div className="tab-bar">
-                <div
-                  className={`tab-item ${rightTab === 'properties' ? 'active' : ''}`}
-                  onClick={() => setRightTab('properties')}
-                >
-                  Properties
-                </div>
-                <div
-                  className={`tab-item ${rightTab === 'preview' ? 'active' : ''}`}
-                  onClick={() => setRightTab('preview')}
-                >
-                  Light Prev
-                </div>
-                <div
-                  className={`tab-item ${rightTab === 'material' ? 'active' : ''}`}
-                  onClick={() => setRightTab('material')}
-                >
-                  Material
-                </div>
-                <div
-                  className={`tab-item ${rightTab === 'matEdit' ? 'active' : ''}`}
-                  onClick={() => setRightTab('matEdit')}
-                >
-                  Mat Edit
+          <>
+            {/* Right resize handle */}
+            <ResizeHandle
+              direction="horizontal"
+              side="right"
+              onResize={(delta) => setRightPanelWidth(rightPanelWidth - delta)}
+              onDoubleClick={() => setRightPanelWidth(320)}
+            />
+            <div
+              className="panel"
+              style={{
+                width: rightPanelWidth,
+                flexShrink: 0,
+                overflow: 'hidden',
+                borderLeft: 'none',
+              }}
+            >
+              {/* Tab bar */}
+              <div style={{ borderBottom: '1px solid var(--border)' }}>
+                <div className="tab-bar">
+                  <div
+                    className={`tab-item ${rightTab === 'properties' ? 'active' : ''}`}
+                    onClick={() => setRightTab('properties')}
+                  >
+                    Properties
+                  </div>
+                  <div
+                    className={`tab-item ${rightTab === 'preview' ? 'active' : ''}`}
+                    onClick={() => setRightTab('preview')}
+                  >
+                    Light Prev
+                  </div>
+                  <div
+                    className={`tab-item ${rightTab === 'material' ? 'active' : ''}`}
+                    onClick={() => setRightTab('material')}
+                  >
+                    Material
+                  </div>
+                  <div
+                    className={`tab-item ${rightTab === 'matEdit' ? 'active' : ''}`}
+                    onClick={() => setRightTab('matEdit')}
+                  >
+                    Mat Edit
+                  </div>
                 </div>
               </div>
-            </div>
 
-            {/* Tab content */}
-            <div className="panel-body" style={{ overflow: 'hidden', padding: 0, display: 'flex', flexDirection: 'column' }}>
-              {rightTab === 'properties' && (
-                <div style={{ flex: 1, overflowY: 'auto' }}>
-                  <LightProperties />
-                </div>
-              )}
-              {rightTab === 'preview' && (
-                <div style={{ flex: 1, overflow: 'hidden' }}>
-                  <LightPreview />
-                </div>
-              )}
-              {rightTab === 'material' && (
-                <div style={{ flex: 1, overflow: 'hidden' }}>
-                  <MaterialPreviewTab envMap={envMapRef.current} />
-                </div>
-              )}
-              {rightTab === 'matEdit' && (
-                <div style={{ flex: 1, overflow: 'hidden' }}>
-                  <MaterialEditorPanel
-                    materialManagerRef={materialManagerRef}
-                    sceneRef={sceneRef}
-                  />
-                </div>
-              )}
+              {/* Tab content */}
+              <div className="panel-body" style={{ overflow: 'hidden', padding: 0, display: 'flex', flexDirection: 'column' }}>
+                {rightTab === 'properties' && (
+                  <div style={{ flex: 1, overflowY: 'auto' }}>
+                    <LightProperties />
+                  </div>
+                )}
+                {rightTab === 'preview' && (
+                  <div style={{ flex: 1, overflow: 'hidden' }}>
+                    <LightPreview />
+                  </div>
+                )}
+                {rightTab === 'material' && (
+                  <div style={{ flex: 1, overflow: 'hidden' }}>
+                    <MaterialPreviewTab envMap={envMapRef.current} />
+                  </div>
+                )}
+                {rightTab === 'matEdit' && (
+                  <div style={{ flex: 1, overflow: 'hidden' }}>
+                    <MaterialEditorPanel
+                      materialManagerRef={materialManagerRef}
+                      sceneRef={sceneRef}
+                    />
+                  </div>
+                )}
+              </div>
             </div>
-          </div>
+          </>
         )}
       </div>
 
-      {/* Status bar (Phase 7) — shows undo/redo count */}
+      {/* Status bar */}
       <div
         className="status-bar"
         style={{
@@ -376,7 +406,7 @@ export const AppLayout: React.FC = () => {
         </div>
         <div style={{ display: 'flex', gap: 12 }}>
           <span>LightStudio v1.0.0</span>
-          <span>Phase 10</span>
+          <span>Phase 11</span>
         </div>
       </div>
 
@@ -391,7 +421,7 @@ export const AppLayout: React.FC = () => {
       {/* Settings Modal */}
       {settingsModalOpen && <RenderSettingsPanel onClose={() => setSettingsModal(false)} />}
 
-      {/* Phase 9: Environment Browser Modal */}
+      {/* Environment Browser Modal */}
       {envBrowserOpen && <EnvironmentBrowser onClose={() => setEnvBrowserModal(false)} />}
 
       {/* About Modal */}
@@ -424,7 +454,7 @@ export const AppLayout: React.FC = () => {
               3D Car Lighting Studio
             </div>
             <div style={{ fontSize: 10, color: 'var(--text-dim)' }}>
-              Version 1.0.0 — Phase 10
+              Version 1.0.0 — Phase 11
             </div>
             <button
               className="btn-primary"
