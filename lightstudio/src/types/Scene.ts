@@ -6,6 +6,10 @@ export interface CameraState {
 
 export interface EnvironmentState {
   hdri: string | null;
+  /** Phase 9: HDRI preset ID (from HDRI_PRESETS) */
+  presetId: string;
+  /** Phase 9: Environment map rotation in degrees (0-360) */
+  rotation: number;
   background: string;
   intensity: number;
   showBackground: boolean;
@@ -99,6 +103,8 @@ export const DEFAULT_SCENE_STATE: SceneState = {
   },
   environment: {
     hdri: null,
+    presetId: 'studio-neutral',
+    rotation: 0,
     background: '#1a1a2e',
     intensity: 1.0,
     showBackground: false,

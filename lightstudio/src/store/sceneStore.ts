@@ -17,6 +17,10 @@ interface SceneStore extends SceneState {
   // Environment
   setEnvironment: (env: Partial<SceneState['environment']>) => void;
   toggleBackground: () => void;
+  /** Phase 9: Set environment preset by ID */
+  setEnvironmentPreset: (presetId: string) => void;
+  /** Phase 9: Set environment rotation (0-360 degrees) */
+  setEnvironmentRotation: (rotation: number) => void;
   
   // Render settings
   setRenderSettings: (settings: Partial<SceneState['renderSettings']>) => void;
@@ -76,6 +80,20 @@ export const useSceneStore = create<SceneStore>((set, get) => ({
     history.record('Toggle Background');
     set((state) => ({
       environment: { ...state.environment, showBackground: !state.environment.showBackground },
+    }));
+  },
+
+  setEnvironmentPreset: (presetId) => {
+    history.record('Change Environment Preset');
+    set((state) => ({
+      environment: { ...state.environment, presetId, hdri: null },
+    }));
+  },
+
+  setEnvironmentRotation: (rotation) => {
+    history.recordThrottled('Change Environment Rotation');
+    set((state) => ({
+      environment: { ...state.environment, rotation },
     }));
   },
 

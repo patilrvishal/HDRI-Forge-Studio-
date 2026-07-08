@@ -166,6 +166,8 @@ const MENU_DEFINITIONS = (
     sep1: { label: '', separator: true },
     toggleGrid: { label: 'Toggle Grid', action: () => useSceneStore.getState().toggleGrid() },
     toggleBackground: { label: 'Toggle Background', action: () => useSceneStore.getState().toggleBackground() },
+    sep2b: { label: '', separator: true },
+    environmentBrowser: { label: 'Environment Browser...', action: () => useUIStore.getState().setEnvBrowserModal(true) },
     sep2: { label: '', separator: true },
     renderSettings: {
       label: 'Render Settings...',

@@ -6,6 +6,8 @@ import { useAnimationStore } from '../../store/animationStore';
 import { ThreeSceneProvider } from '../../hooks/useThreeScene';
 import { SceneManager, RenderPipeline, LightManager, ModelLoader } from '../../three/engine';
 import { animationEngine, AnimationEngine } from '../../three/AnimationEngine';
+import { EnvironmentLoader } from '../../three/EnvironmentLoader';
+import { getHDRIPresetById } from '../../types/Environment';
 import { ViewportToolbar } from './ViewportToolbar';
 import { CameraBookmarks } from './CameraBookmarks';
 import type { AnimatedProperty } from '../../types/Animation';
@@ -22,6 +24,7 @@ export const Viewport: React.FC<ViewportProps> = ({ sceneManagerRef, onScreensho
   const renderPipelineRef = useRef<RenderPipeline | null>(null);
   const lightManagerRef = useRef<LightManager | null>(null);
   const modelLoaderRef = useRef<ModelLoader | null>(null);
+  const envLoaderRef = useRef<EnvironmentLoader | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const animAccumulatorRef = useRef(0);
 
@@ -59,6 +62,10 @@ export const Viewport: React.FC<ViewportProps> = ({ sceneManagerRef, onScreensho
     const modelLoader = new ModelLoader(sceneManager.scene);
     modelLoaderRef.current = modelLoader;
 
+    // Phase 9: Environment loader
+    const envLoader = new EnvironmentLoader();
+    envLoaderRef.current = envLoader;
+
     modelLoader.setCallbacks({
       onProgress: (p) => setLoadProgress(p),
       onLoaded: (name) => {
@@ -80,6 +87,13 @@ export const Viewport: React.FC<ViewportProps> = ({ sceneManagerRef, onScreensho
     const renderPipeline = new RenderPipeline(sceneManager);
     renderPipelineRef.current = renderPipeline;
     renderPipeline.build();
+
+    // Phase 9: Apply default environment preset
+    const defaultPreset = getHDRIPresetById(useSceneStore.getState().environment.presetId);
+    if (defaultPreset && defaultPreset.id !== 'none') {
+      const envTexture = envLoader.generateFromPreset(defaultPreset, sceneManager.pmremGenerator, useSceneStore.getState().environment.rotation);
+      envLoader.setEnvironmentTexture(sceneManager.scene, envTexture, useSceneStore.getState().environment.intensity);
+    }
 
     // Notify parent that the render pipeline is ready (for export)
     onReady?.(renderPipeline);
@@ -210,11 +224,13 @@ export const Viewport: React.FC<ViewportProps> = ({ sceneManagerRef, onScreensho
       renderPipeline.dispose();
       modelLoader.dispose();
       lightManager.dispose();
+      envLoader.dispose();
       sceneManager.dispose();
       sceneManagerRef.current = null;
       renderPipelineRef.current = null;
       lightManagerRef.current = null;
       modelLoaderRef.current = null;
+      envLoaderRef.current = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -228,6 +244,19 @@ export const Viewport: React.FC<ViewportProps> = ({ sceneManagerRef, onScreensho
   useEffect(() => {
     sceneManagerRef.current?.setBackground(environment.background, environment.showBackground);
   }, [environment.background, environment.showBackground, sceneManagerRef]);
+
+  // Phase 9: Sync environment preset to 3D scene
+  useEffect(() => {
+    const sm = sceneManagerRef.current;
+    const el = envLoaderRef.current;
+    if (!sm || !el) return;
+
+    const preset = getHDRIPresetById(environment.presetId);
+    if (!preset) return;
+
+    const envTexture = el.generateFromPreset(preset, sm.pmremGenerator, environment.rotation);
+    el.setEnvironmentTexture(sm.scene, envTexture, environment.intensity);
+  }, [environment.presetId, environment.rotation, environment.intensity, sceneManagerRef, envLoaderRef]);
 
   // Sync render settings
   useEffect(() => {

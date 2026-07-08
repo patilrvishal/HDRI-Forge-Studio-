@@ -16,6 +16,7 @@ import { useHistoryStore } from '../../store/historyStore';
 import { useKeyboardShortcuts } from '../../hooks/useKeyboardShortcuts';
 import { TimelinePanel } from '../Timeline/TimelinePanel';
 import { ExportDialog } from '../Export/ExportDialog';
+import { EnvironmentBrowser } from '../Environment/EnvironmentBrowser';
 import { SceneManager, RenderPipeline } from '../../three/engine';
 import { SceneExporter } from '../../three/SceneExporter';
 import * as THREE from 'three';
@@ -34,8 +35,10 @@ export const AppLayout: React.FC = () => {
   const bottomPanelOpen = useUIStore((s) => s.bottomPanelOpen);
   const settingsModalOpen = useUIStore((s) => s.settingsModalOpen);
   const aboutModalOpen = useUIStore((s) => s.aboutModalOpen);
+  const envBrowserOpen = useUIStore((s) => s.envBrowserModalOpen);
   const setSettingsModal = useUIStore((s) => s.setSettingsModal);
   const setAboutModal = useUIStore((s) => s.setAboutModal);
+  const setEnvBrowserModal = useUIStore((s) => s.setEnvBrowserModal);
   const setActiveTool = useUIStore((s) => s.setActiveTool);
   const toggleFullscreen = useUIStore((s) => s.toggleFullscreen);
   const toggleTurntable = useSceneStore((s) => s.toggleTurntable);
@@ -353,7 +356,7 @@ export const AppLayout: React.FC = () => {
         </div>
         <div style={{ display: 'flex', gap: 12 }}>
           <span>LightStudio v1.0.0</span>
-          <span>Phase 8</span>
+          <span>Phase 9</span>
         </div>
       </div>
 
@@ -367,6 +370,9 @@ export const AppLayout: React.FC = () => {
 
       {/* Settings Modal */}
       {settingsModalOpen && <RenderSettingsPanel onClose={() => setSettingsModal(false)} />}
+
+      {/* Phase 9: Environment Browser Modal */}
+      {envBrowserOpen && <EnvironmentBrowser onClose={() => setEnvBrowserModal(false)} />}
 
       {/* About Modal */}
       {aboutModalOpen && (
@@ -398,7 +404,7 @@ export const AppLayout: React.FC = () => {
               3D Car Lighting Studio
             </div>
             <div style={{ fontSize: 10, color: 'var(--text-dim)' }}>
-              Version 1.0.0 — Phase 8
+              Version 1.0.0 — Phase 9
             </div>
             <button
               className="btn-primary"

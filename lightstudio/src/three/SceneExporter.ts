@@ -28,6 +28,8 @@ export interface SceneFile {
     };
     environment: {
       hdri: string | null;
+      presetId: string;
+      rotation: number;
       background: string;
       intensity: number;
       showBackground: boolean;

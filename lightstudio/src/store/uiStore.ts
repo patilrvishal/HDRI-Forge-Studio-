@@ -12,6 +12,8 @@ interface UIState {
   bottomPanelOpen: boolean;
   settingsModalOpen: boolean;
   aboutModalOpen: boolean;
+  /** Phase 9: Environment browser modal */
+  envBrowserModalOpen: boolean;
   
   // Tools
   activeTool: ActiveTool;
@@ -40,6 +42,8 @@ interface UIState {
   toggleBottomPanel: () => void;
   setSettingsModal: (open: boolean) => void;
   setAboutModal: (open: boolean) => void;
+  /** Phase 9 */
+  setEnvBrowserModal: (open: boolean) => void;
   setActiveTool: (tool: ActiveTool) => void;
   setPanelLayout: (layout: PanelLayout) => void;
   toggleFullscreen: () => void;
@@ -60,6 +64,7 @@ export const useUIStore = create<UIState>((set, get) => ({
   bottomPanelOpen: true,
   settingsModalOpen: false,
   aboutModalOpen: false,
+  envBrowserModalOpen: false,
   activeTool: 'select',
   panelLayout: 'default',
   isFullscreen: false,
@@ -77,6 +82,7 @@ export const useUIStore = create<UIState>((set, get) => ({
   toggleBottomPanel: () => set((s) => ({ bottomPanelOpen: !s.bottomPanelOpen })),
   setSettingsModal: (open) => set({ settingsModalOpen: open }),
   setAboutModal: (open) => set({ aboutModalOpen: open }),
+  setEnvBrowserModal: (open) => set({ envBrowserModalOpen: open }),
   setActiveTool: (tool) => set({ activeTool: tool }),
   setPanelLayout: (layout) => {
     set((s) => {
