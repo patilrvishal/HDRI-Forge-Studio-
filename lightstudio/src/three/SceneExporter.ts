@@ -1,8 +1,10 @@
 import { useSceneStore } from '../store/sceneStore';
 import { useLightsStore } from '../store/lightsStore';
 import { useAnimationStore } from '../store/animationStore';
+import { useMaterialEditorStore } from '../store/materialEditorStore';
 import { history } from '../store/historyStore';
 import { getRawModelDataBase64 } from '../store/modelDataStore';
+import { getRawHDRIDataBase64 } from '../store/hdriDataStore';
 import type { AnimationState } from '../types/Animation';
 import type { SceneState } from '../types/Scene';
 
@@ -36,6 +38,8 @@ export interface SceneFile {
       background: string;
       intensity: number;
       showBackground: boolean;
+      /** Base64-encoded custom HDRI binary (only when presetId === '__custom__') */
+      customHDRIDataBase64: string | null;
     };
     renderSettings: {
       engine: string;
@@ -73,6 +77,9 @@ export interface SceneFile {
     target: [number, number, number];
     fov: number;
   }>;
+
+  // ── Material Editor state (Phase 10) ─────────────────────────────────────
+  materials: unknown[] | null;
 }
 
 // ── SceneExporter ──────────────────────────────────────────────────────────
@@ -104,7 +111,12 @@ export class SceneExporter {
         modelName: sceneState.modelName,
         modelDataBase64: getRawModelDataBase64(),
         camera: { ...sceneState.camera },
-        environment: { ...sceneState.environment },
+        environment: {
+          ...sceneState.environment,
+          customHDRIDataBase64: sceneState.environment.presetId === '__custom__'
+            ? getRawHDRIDataBase64()
+            : null,
+        },
         renderSettings: {
           engine: sceneState.renderSettings.engine,
           tonemapping: sceneState.renderSettings.tonemapping,
@@ -135,6 +147,7 @@ export class SceneExporter {
         target: [...b.target] as [number, number, number],
         fov: b.fov,
       })),
+      materials: useMaterialEditorStore.getState().exportMaterials(),
     };
   }
 
@@ -216,11 +229,26 @@ export class SceneExporter {
         // For now, bookmarks are supplementary and non-critical.
       }
 
+      // ── Restore materials (Phase 10) ─────────────────────────────────────
+      if (Array.isArray(data.materials) && data.materials.length > 0) {
+        useMaterialEditorStore.getState().importMaterials(data.materials as never[]);
+      } else {
+        useMaterialEditorStore.getState().clearMaterials();
+      }
+
       // ── Restore model GLB data ──────────────────────────────────────────
       if (data.scene.modelDataBase64) {
         useSceneStore.getState().setPendingModelData(
           data.scene.modelDataBase64,
           sceneData.modelName || 'model.glb',
+        );
+      }
+
+      // ── Restore custom HDRI data ─────────────────────────────────────────
+      if (data.scene.environment.customHDRIDataBase64 && sceneData.environment.presetId === '__custom__') {
+        useSceneStore.getState().setPendingHDRIData(
+          data.scene.environment.customHDRIDataBase64,
+          'custom.hdr',
         );
       }
 

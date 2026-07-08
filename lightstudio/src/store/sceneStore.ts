@@ -11,6 +11,9 @@ interface SceneStore extends SceneState {
   // Not part of the persisted scene state — used to signal Viewport to reload the model
   _pendingModelDataBase64: string | null;
   _pendingModelFileName: string;
+  // Transient: pending custom HDRI data (base64) from scene file restore
+  _pendingHDRIDataBase64: string | null;
+  _pendingHDRIFileName: string;
   
   // Model
   setModel: (path: string, name: string) => void;
@@ -52,6 +55,9 @@ interface SceneStore extends SceneState {
   // Model data restore
   setPendingModelData: (base64: string | null, fileName: string) => void;
   clearPendingModelData: () => void;
+  // HDRI data restore
+  setPendingHDRIData: (base64: string | null, fileName: string) => void;
+  clearPendingHDRIData: () => void;
 }
 
 export const useSceneStore = create<SceneStore>((set, get) => ({
@@ -59,6 +65,8 @@ export const useSceneStore = create<SceneStore>((set, get) => ({
   cameraBookmarks: [],
   _pendingModelDataBase64: null,
   _pendingModelFileName: 'model.glb',
+  _pendingHDRIDataBase64: null,
+  _pendingHDRIFileName: 'custom.hdr',
 
   setModel: (path, name) => {
     // Model loading is NOT recorded — it's a file operation, not an edit
@@ -224,5 +232,13 @@ export const useSceneStore = create<SceneStore>((set, get) => ({
 
   clearPendingModelData: () => {
     set({ _pendingModelDataBase64: null, _pendingModelFileName: 'model.glb' });
+  },
+
+  setPendingHDRIData: (base64, fileName) => {
+    set({ _pendingHDRIDataBase64: base64, _pendingHDRIFileName: fileName });
+  },
+
+  clearPendingHDRIData: () => {
+    set({ _pendingHDRIDataBase64: null, _pendingHDRIFileName: 'custom.hdr' });
   },
 }));

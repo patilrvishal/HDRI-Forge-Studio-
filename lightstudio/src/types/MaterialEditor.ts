@@ -1,0 +1,118 @@
+/**
+ * PBR Material Editor types.
+ * Mirrors Three.js MeshStandardMaterial properties for UI editing.
+ */
+
+export interface MaterialTextureSlot {
+  /** Whether a texture is assigned */
+  enabled: boolean;
+  /** Base64 data URL of the texture image, or null */
+  dataUrl: string | null;
+  /** Original file name */
+  fileName: string;
+}
+
+export interface PBRMaterialState {
+  /** Unique ID (auto-generated from material index) */
+  id: string;
+  /** Original material name from the 3D model */
+  name: string;
+  /** Names of meshes that use this material */
+  meshNames: string[];
+  /** Index of the material in the original model */
+
+  // ── PBR Properties ─────────────────────────────────────────────────
+  /** Base color (hex string) */
+  color: string;
+  /** Emissive color (hex string) */
+  emissive: string;
+  /** Emissive intensity */
+  emissiveIntensity: number;
+  /** Roughness (0 = mirror, 1 = fully rough) */
+  roughness: number;
+  /** Metalness (0 = dielectric, 1 = metal) */
+  metalness: number;
+  /** Opacity (0 = invisible, 1 = opaque) */
+  opacity: number;
+  /** Whether the material is transparent */
+  transparent: boolean;
+  /** Whether the material is double-sided */
+  doubleSided: boolean;
+  /** Flat shading */
+  flatShading: boolean;
+
+  // ── Texture Slots ──────────────────────────────────────────────────
+  /** Base color / Albedo map */
+  map: MaterialTextureSlot;
+  /** Normal map */
+  normalMap: MaterialTextureSlot;
+  /** Roughness map */
+  roughnessMap: MaterialTextureSlot;
+  /** Metalness map */
+  metalnessMap: MaterialTextureSlot;
+  /** Emissive map */
+  emissiveMap: MaterialTextureSlot;
+  /** Ambient Occlusion map */
+  aoMap: MaterialTextureSlot;
+  /** Bump map */
+  bumpMap: MaterialTextureSlot;
+  /** Alpha map (for cutout transparency) */
+  alphaMap: MaterialTextureSlot;
+
+  // ── Advanced ───────────────────────────────────────────────────────
+  /** Normal map intensity (0-2, default 1) */
+  normalScale: number;
+  /** Bump map intensity */
+  bumpScale: number;
+  /** AO map intensity */
+  aoMapIntensity: number;
+}
+
+export type TextureSlotKey = 'map' | 'normalMap' | 'roughnessMap' | 'metalnessMap' | 'emissiveMap' | 'aoMap' | 'bumpMap' | 'alphaMap';
+
+export const TEXTURE_SLOT_LABELS: Record<TextureSlotKey, string> = {
+  map: 'Albedo',
+  normalMap: 'Normal',
+  roughnessMap: 'Roughness',
+  metalnessMap: 'Metalness',
+  emissiveMap: 'Emissive',
+  aoMap: 'AO',
+  bumpMap: 'Bump',
+  alphaMap: 'Alpha',
+};
+
+export function createEmptyTextureSlot(): MaterialTextureSlot {
+  return { enabled: false, dataUrl: null, fileName: '' };
+}
+
+export function createPBRMaterialState(
+  index: number,
+  name: string,
+  meshNames: string[],
+): PBRMaterialState {
+  return {
+    id: `mat_${index}_${Date.now()}`,
+    name: name || `Material ${index + 1}`,
+    meshNames,
+    color: '#cccccc',
+    emissive: '#000000',
+    emissiveIntensity: 1,
+    roughness: 0.5,
+    metalness: 0,
+    opacity: 1,
+    transparent: false,
+    doubleSided: false,
+    flatShading: false,
+    map: createEmptyTextureSlot(),
+    normalMap: createEmptyTextureSlot(),
+    roughnessMap: createEmptyTextureSlot(),
+    metalnessMap: createEmptyTextureSlot(),
+    emissiveMap: createEmptyTextureSlot(),
+    aoMap: createEmptyTextureSlot(),
+    bumpMap: createEmptyTextureSlot(),
+    alphaMap: createEmptyTextureSlot(),
+    normalScale: 1,
+    bumpScale: 1,
+    aoMapIntensity: 1,
+  };
+}

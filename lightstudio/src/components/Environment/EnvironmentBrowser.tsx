@@ -1,5 +1,6 @@
 import React, { useCallback, useRef, useState, useMemo } from 'react';
 import { useSceneStore } from '../../store/sceneStore';
+import { setRawHDRIData } from '../../store/hdriDataStore';
 import { Slider } from '../UI/Slider';
 import { Toggle } from '../UI/Toggle';
 import { HDRI_PRESETS, getHDRIPresetById } from '../../types/Environment';
@@ -83,7 +84,14 @@ const EnvironmentBrowser: React.FC<EnvironmentBrowserProps> = ({ onClose, onPres
       if (!file) return;
       setCustomLoading(true);
       try {
-        // Store the file reference — actual loading happens in Viewport
+        // Read raw binary for scene persistence
+        try {
+          const arrayBuffer = await file.arrayBuffer();
+          setRawHDRIData(arrayBuffer, file.name);
+        } catch {
+          // Non-critical
+        }
+        // Create blob URL for 3D scene loading
         const url = URL.createObjectURL(file);
         setEnvironment({ hdri: url, presetId: '__custom__' });
       } finally {

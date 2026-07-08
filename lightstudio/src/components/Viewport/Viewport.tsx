@@ -9,14 +9,17 @@ import { animationEngine, AnimationEngine } from '../../three/AnimationEngine';
 import { EnvironmentLoader } from '../../three/EnvironmentLoader';
 import { getHDRIPresetById } from '../../types/Environment';
 import { base64ToArrayBuffer } from '../../store/modelDataStore';
+import { hdriBase64ToArrayBuffer, setRawHDRIData } from '../../store/hdriDataStore';
 import { ViewportToolbar } from './ViewportToolbar';
 import { CameraBookmarks } from './CameraBookmarks';
 import type { AnimatedProperty } from '../../types/Animation';
+import { MaterialManager } from '../../three/MaterialManager';
+import { useMaterialEditorStore } from '../../store/materialEditorStore';
 
 interface ViewportProps {
   sceneManagerRef: React.MutableRefObject<SceneManager | null>;
   onScreenshot: (dataUrl: string) => void;
-  onReady?: (renderPipeline: RenderPipeline | null) => void;
+  onReady?: (renderPipeline: RenderPipeline | null, materialManager: MaterialManager | null) => void;
 }
 
 export const Viewport: React.FC<ViewportProps> = ({ sceneManagerRef, onScreenshot, onReady }) => {
@@ -26,6 +29,7 @@ export const Viewport: React.FC<ViewportProps> = ({ sceneManagerRef, onScreensho
   const lightManagerRef = useRef<LightManager | null>(null);
   const modelLoaderRef = useRef<ModelLoader | null>(null);
   const envLoaderRef = useRef<EnvironmentLoader | null>(null);
+  const materialManagerRef = useRef<MaterialManager | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const animAccumulatorRef = useRef(0);
 
@@ -45,6 +49,8 @@ export const Viewport: React.FC<ViewportProps> = ({ sceneManagerRef, onScreensho
   const pendingModelData = useSceneStore((s) => s._pendingModelDataBase64);
   const pendingModelFileName = useSceneStore((s) => s._pendingModelFileName);
   const clearPendingModelData = useSceneStore((s) => s.clearPendingModelData);
+  const pendingHDRIData = useSceneStore((s) => s._pendingHDRIDataBase64);
+  const clearPendingHDRIData = useSceneStore((s) => s.clearPendingHDRIData);
 
   const lights = useLightsStore((s) => s.lights);
   const updateLight = useLightsStore((s) => s.updateLight);
@@ -66,6 +72,10 @@ export const Viewport: React.FC<ViewportProps> = ({ sceneManagerRef, onScreensho
     const modelLoader = new ModelLoader(sceneManager.scene);
     modelLoaderRef.current = modelLoader;
 
+    // Material Manager
+    const materialManager = new MaterialManager();
+    materialManagerRef.current = materialManager;
+
     // Phase 9: Environment loader
     const envLoader = new EnvironmentLoader();
     envLoaderRef.current = envLoader;
@@ -76,6 +86,20 @@ export const Viewport: React.FC<ViewportProps> = ({ sceneManagerRef, onScreensho
         setIsLoading(false);
         setLoadProgress(100);
         setModel('', name);
+
+        // Extract materials from the loaded model
+        setTimeout(() => {
+          const model = modelLoader.getCurrentModel?.();
+          if (model && materialManager) {
+            const matStates = materialManager.extractMaterials(model);
+            useMaterialEditorStore.getState().setMaterials(matStates);
+            // Rebuild map after a frame (model fully in scene)
+            requestAnimationFrame(() => {
+              materialManager.rebuildMaterialMap(sceneManager.scene, matStates);
+            });
+          }
+        }, 100);
+
         setTimeout(() => setLoadProgress(0), 1000);
       },
       onError: (err) => {
@@ -100,7 +124,7 @@ export const Viewport: React.FC<ViewportProps> = ({ sceneManagerRef, onScreensho
     }
 
     // Notify parent that the render pipeline is ready (for export)
-    onReady?.(renderPipeline);
+    onReady?.(renderPipeline, materialManager);
 
     // ── Animation frame accumulator & tick callback ─────────────────────
     const clock = new THREE.Clock();
@@ -229,6 +253,7 @@ export const Viewport: React.FC<ViewportProps> = ({ sceneManagerRef, onScreensho
       modelLoader.dispose();
       lightManager.dispose();
       envLoader.dispose();
+      materialManager.dispose();
       sceneManager.dispose();
       sceneManagerRef.current = null;
       renderPipelineRef.current = null;
@@ -307,6 +332,37 @@ export const Viewport: React.FC<ViewportProps> = ({ sceneManagerRef, onScreensho
 
     clearPendingModelData();
   }, [pendingModelData, pendingModelFileName, modelLoaderRef, clearPendingModelData]);
+
+  // Restore custom HDRI from scene file
+  useEffect(() => {
+    if (!pendingHDRIData) return;
+    const sm = sceneManagerRef.current;
+    const el = envLoaderRef.current;
+    if (!sm || !el) return;
+
+    try {
+      const arrayBuffer = hdriBase64ToArrayBuffer(pendingHDRIData);
+      setRawHDRIData(arrayBuffer, 'custom.hdr');
+      const blob = new Blob([arrayBuffer], { type: 'application/octet-stream' });
+      const url = URL.createObjectURL(blob);
+      el.loadHDRI(url, sm.pmremGenerator)
+        .then((envTexture) => {
+          el.setEnvironmentTexture(sm.scene, envTexture, useSceneStore.getState().environment.intensity);
+        })
+        .catch(() => {
+          // Fallback to neutral studio
+          const fallback = getHDRIPresetById('studio-neutral');
+          if (fallback) {
+            const tex = el.generateFromPreset(fallback, sm.pmremGenerator, 0);
+            el.setEnvironmentTexture(sm.scene, tex, 1);
+          }
+        });
+    } catch {
+      // ignore
+    }
+
+    clearPendingHDRIData();
+  }, [pendingHDRIData, sceneManagerRef, envLoaderRef, clearPendingHDRIData]);
 
   // Sync render settings
   useEffect(() => {

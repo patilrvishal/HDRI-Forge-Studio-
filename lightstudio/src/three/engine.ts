@@ -1113,6 +1113,10 @@ export class ModelLoader {
   get loading(): boolean { return this._loading; }
   get progress(): number { return this._progress; }
 
+  getCurrentModel(): THREE.Group | null {
+    return this._currentModel;
+  }
+
   setCallbacks(callbacks: {
     onProgress?: (progress: number) => void;
     onLoaded?: (name: string) => void;

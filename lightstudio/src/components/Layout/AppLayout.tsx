@@ -7,6 +7,7 @@ import { LightProperties } from '../Lights/LightProperties';
 import { PresetBrowser } from '../Presets/PresetBrowser';
 import { LightPreview } from '../Previews/LightPreview';
 import { MaterialPreviewTab, getMaterialPreviewThumbnail } from '../Previews/MaterialPreviewTab';
+import { MaterialEditorPanel } from '../Materials/MaterialEditorPanel';
 import { RenderSettingsPanel } from '../Settings/RenderSettingsPanel';
 import { useUIStore } from '../../store/uiStore';
 import { useSceneStore } from '../../store/sceneStore';
@@ -19,6 +20,7 @@ import { ExportDialog } from '../Export/ExportDialog';
 import { EnvironmentBrowser } from '../Environment/EnvironmentBrowser';
 import { SceneManager, RenderPipeline } from '../../three/engine';
 import { SceneExporter } from '../../three/SceneExporter';
+import { MaterialManager } from '../../three/MaterialManager';
 import * as THREE from 'three';
 
 const LEFT_PANEL_WIDTH = 220;
@@ -47,10 +49,11 @@ export const AppLayout: React.FC = () => {
   const undoCount = useHistoryStore((s) => s.undoStack.length);
   const redoCount = useHistoryStore((s) => s.redoStack.length);
 
-  const [rightTab, setRightTab] = useState<'properties' | 'preview' | 'material'>('properties');
+  const [rightTab, setRightTab] = useState<'properties' | 'preview' | 'material' | 'matEdit'>('properties');
   const [, setScreenshotUrl] = useState<string | null>(null);
   const [exportDialogOpen, setExportDialogOpen] = useState(false);
   const renderPipelineRef = useRef<RenderPipeline | null>(null);
+  const materialManagerRef = useRef<MaterialManager | null>(null);
 
   // Generate studio env map on mount for material preview
   useEffect(() => {
@@ -80,8 +83,9 @@ export const AppLayout: React.FC = () => {
   }, []);
 
   // Pass renderPipeline ref from Viewport to ExportDialog
-  const handleViewportReady = useCallback((rp: RenderPipeline | null) => {
+  const handleViewportReady = useCallback((rp: RenderPipeline | null, mm: MaterialManager | null) => {
     renderPipelineRef.current = rp;
+    materialManagerRef.current = mm;
   }, []);
 
   // Keyboard shortcuts
@@ -305,6 +309,12 @@ export const AppLayout: React.FC = () => {
                 >
                   Material
                 </div>
+                <div
+                  className={`tab-item ${rightTab === 'matEdit' ? 'active' : ''}`}
+                  onClick={() => setRightTab('matEdit')}
+                >
+                  Mat Edit
+                </div>
               </div>
             </div>
 
@@ -323,6 +333,14 @@ export const AppLayout: React.FC = () => {
               {rightTab === 'material' && (
                 <div style={{ flex: 1, overflow: 'hidden' }}>
                   <MaterialPreviewTab envMap={envMapRef.current} />
+                </div>
+              )}
+              {rightTab === 'matEdit' && (
+                <div style={{ flex: 1, overflow: 'hidden' }}>
+                  <MaterialEditorPanel
+                    materialManagerRef={materialManagerRef}
+                    sceneRef={sceneManagerRef as React.RefObject<THREE.Scene | null>}
+                  />
                 </div>
               )}
             </div>
@@ -356,7 +374,7 @@ export const AppLayout: React.FC = () => {
         </div>
         <div style={{ display: 'flex', gap: 12 }}>
           <span>LightStudio v1.0.0</span>
-          <span>Phase 9</span>
+          <span>Phase 10</span>
         </div>
       </div>
 
@@ -404,7 +422,7 @@ export const AppLayout: React.FC = () => {
               3D Car Lighting Studio
             </div>
             <div style={{ fontSize: 10, color: 'var(--text-dim)' }}>
-              Version 1.0.0 — Phase 9
+              Version 1.0.0 — Phase 10
             </div>
             <button
               className="btn-primary"
