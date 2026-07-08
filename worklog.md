@@ -25,4 +25,23 @@ Work Log:
 Stage Summary:
 - Resizable Panels: Left, right, and bottom panels all have drag-to-resize handles (4px, highlight on hover, double-click resets to default). Sizes persisted in uiLayoutStore.
 - HDRI/EXR Export: Project > Export HDRI/EXR captures scene lighting from origin (model hidden by default), converts cube map to equirectangular, encodes as proper .hdr (Radiance RGBE with RLE) or .exr (OpenEXR HALF float, uncompressed). Files are industry-standard and work in Blender, UE5, etc.
-- Backplate: Set any image as viewport background while keeping HDRI for IBL lighting. Upload/remove from Environment Browser. Persisted in scene files.
+- Backplate: Set any image as viewport background while keeping HDRI for IBL lighting. Upload/remove from Environment Browser. Persisted in scene files.---
+Task ID: 1
+Agent: Main Agent
+Task: Fix HDRI export — pure black background + proper HDR dynamic range
+
+Work Log:
+- Analyzed 6 reference images via VLM: identified wrong (uniform brightening) vs correct (only light sources respond to exposure) behavior
+- Read HDRIExporter.ts, EnvironmentLoader.ts, sceneStore, Environment types
+- Identified root cause 1: captureScene.background set to backgroundHint (e.g. #2a2a3e ≈ 0.16) for built-in presets — non-zero floor makes entire image respond to exposure
+- Identified root cause 2: Panel intensities 0.3-1.2 produce max pixel values ~1.2, insufficient for HDR dynamic range
+- Fix 1: Changed captureScene.background to Color(0x000000) for all built-in presets
+- Fix 2: Added HDR_BOOST=30 multiplier to environment panel colors (values now 9-36 in linear HDR)
+- Fix 3: Increased light proxy brightness from intensity*10 to intensity*50 (min 20, max 1000)
+- TypeScript compilation: zero errors
+
+Stage Summary:
+- HDRIExporter.ts: 3 edits applied — black background, boosted panel HDR values, improved proxy brightness
+- Key insight: backgroundHint is for viewport UI only, NOT for HDRI data
+- With 0.0 background: exposure*0=0 (dark stays dark), exposure*30=30*exposure (lights respond)
+

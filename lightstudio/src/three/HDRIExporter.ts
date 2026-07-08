@@ -282,9 +282,14 @@ async function addEnvironmentToCaptureScene(
   }
 
   // Add each emissive panel from the preset
+  // HDR_BOOST: environment panel intensities (0.3–1.2) are designed for PMREM PBR rendering,
+  // not for direct HDRI export. Multiply by 30 so panels produce values of 9–36 in linear
+  // HDR space — bright enough that exposure adjustment in Photoshop/Blender reveals them
+  // as distinct light sources while the black (0.0) background stays black.
+  const HDR_BOOST = 30;
   for (const panel of preset.panels) {
     const color = new THREE.Color(panel.color);
-    color.multiplyScalar(panel.intensity);
+    color.multiplyScalar(panel.intensity * HDR_BOOST);
     const geo = new THREE.PlaneGeometry(panel.size[0], panel.size[1]);
     const mat = new THREE.MeshBasicMaterial({
       color,
@@ -303,9 +308,13 @@ async function addEnvironmentToCaptureScene(
     captureScene.rotation.y = (rotationDeg * Math.PI) / 180;
   }
 
-  // Dark background behind the panels
-  const bgColor = preset.backgroundHint ?? '#000000';
-  captureScene.background = new THREE.Color(bgColor);
+  // Pure black background — critical for proper HDRI dynamic range.
+  // backgroundHint is only for the viewport UI, NOT for HDRI data.
+  // Any non-zero floor (e.g. '#2a2a3e' ≈ 0.16) would cause the entire image
+  // to shift when adjusting exposure in Photoshop/Blender, instead of only
+  // the light source pixels responding. With 0.0 background, 0×exposure = 0
+  // (dark stays dark) while light panels (values 9–36) respond to exposure.
+  captureScene.background = new THREE.Color(0x000000);
 }
 
 /**
@@ -342,13 +351,15 @@ function loadHDRITexture(buffer: ArrayBuffer): Promise<THREE.DataTexture | null>
  *   (candela, lux, nits). For HDRI purposes, we need the proxy to produce values
  *   well above 1.0 so the light source is clearly visible as an HDR hotspot.
  *
- *   Mapping: proxyColor = baseColor * max(5, intensity * 10)
- *   - intensity 0.1  → color value ~5.0   (minimum HDR)
- *   - intensity 1.0  → color value ~10.0  (clearly HDR)
- *   - intensity 5.0  → color value ~50.0  (bright)
- *   - intensity 50.0 → color value ~500.0 (very bright, capped)
+ *   Mapping: proxyColor = baseColor * max(20, intensity * 50)
+ *   - intensity 0.1  → color value ~20.0  (minimum HDR)
+ *   - intensity 1.0  → color value ~50.0  (clearly HDR, responds to exposure)
+ *   - intensity 5.0  → color value ~250.0 (very bright)
+ *   - intensity 50.0 → color value ~1000.0 (capped)
  *
  *   Cap at 1000 to avoid numerical issues in the HalfFloat render target.
+ *   With a pure black (0.0) background, these values create proper dynamic range
+ *   so exposure adjustment in Photoshop/Blender only affects light source pixels.
  */
 function addLightProxies(
   mainScene: THREE.Scene,
@@ -369,8 +380,8 @@ function addLightProxies(
 
     const baseColor = light.color ? light.color.clone() : new THREE.Color(1, 1, 1);
 
-    // Scale to HDR range: ensure even dim lights produce values > 1.0
-    const hdrBrightness = Math.min(1000, Math.max(5, intensity * 10));
+    // Scale to HDR range: ensure even dim lights produce values well above 1.0
+    const hdrBrightness = Math.min(1000, Math.max(20, intensity * 50));
     const emissiveColor = baseColor.clone().multiplyScalar(hdrBrightness);
 
     let proxy: THREE.Mesh | null = null;
