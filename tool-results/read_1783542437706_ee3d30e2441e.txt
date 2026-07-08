@@ -1,0 +1,1295 @@
+     1→import * as THREE from 'three';
+     2→import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+     3→import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+     4→import { RectAreaLightUniformsLib } from 'three/addons/lights/RectAreaLightUniformsLib.js';
+     5→import { setRawModelData, clearRawModelData } from '../store/modelDataStore';
+     6→import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+     7→import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+     8→import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
+     9→import { SMAAPass } from 'three/addons/postprocessing/SMAAPass.js';
+    10→import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
+    11→import { SSAOPass } from 'three/addons/postprocessing/SSAOPass.js';
+    12→import { FXAAShader } from 'three/addons/shaders/FXAAShader.js';
+    13→
+    14→let _rectAreaLibInitialized = false;
+    15→function ensureRectAreaLib(): void {
+    16→  if (!_rectAreaLibInitialized) {
+    17→    RectAreaLightUniformsLib.init();
+    18→    _rectAreaLibInitialized = true;
+    19→  }
+    20→}
+    21→
+    22→export interface SceneInstances {
+    23→  sceneManager: SceneManager;
+    24→  renderPipeline: RenderPipeline;
+    25→  lightManager: LightManager;
+    26→  modelLoader: ModelLoader;
+    27→}
+    28→
+    29→export class SceneManager {
+    30→  scene: THREE.Scene;
+    31→  camera: THREE.PerspectiveCamera;
+    32→  renderer: THREE.WebGLRenderer;
+    33→  controls: OrbitControls;
+    34→  container: HTMLElement | null = null;
+    35→  ground: THREE.Mesh | null = null;
+    36→  grid: THREE.GridHelper | null = null;
+    37→  pmremGenerator: THREE.PMREMGenerator;
+    38→  _animationId: number = 0;
+    39→  _clock = new THREE.Clock();
+    40→  _onFrame: ((delta: number) => void) | null = null;
+    41→  _turntableActive = false;
+    42→  _turntableSpeed = 1.0;
+    43→
+    44→  constructor() {
+    45→    this.scene = new THREE.Scene();
+    46→    this.scene.background = new THREE.Color('#0d0d1a');
+    47→
+    48→    this.camera = new THREE.PerspectiveCamera(45, 1, 0.1, 1000);
+    49→    this.camera.position.set(5, 3, 5);
+    50→    this.camera.lookAt(0, 0, 0);
+    51→
+    52→    this.renderer = new THREE.WebGLRenderer({
+    53→      antialias: true,
+    54→      alpha: false,
+    55→      powerPreference: 'high-performance',
+    56→      preserveDrawingBuffer: true,
+    57→    });
+    58→    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    59→    this.renderer.outputColorSpace = THREE.SRGBColorSpace;
+    60→    this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    61→    this.renderer.toneMappingExposure = 1.0;
+    62→    this.renderer.shadowMap.enabled = true;
+    63→    this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    64→
+    65→    this.controls = new OrbitControls(this.camera, this.renderer.domElement);
+    66→    this.controls.enableDamping = true;
+    67→    this.controls.dampingFactor = 0.08;
+    68→    this.controls.minDistance = 1;
+    69→    this.controls.maxDistance = 50;
+    70→    this.controls.maxPolarAngle = Math.PI * 0.85;
+    71→    this.controls.target.set(0, 0.5, 0);
+    72→    this.controls.update();
+    73→
+    74→    this.pmremGenerator = new THREE.PMREMGenerator(this.renderer);
+    75→    this.pmremGenerator.compileEquirectangularShader();
+    76→
+    77→    // Ambient light
+    78→    const ambient = new THREE.AmbientLight(0x404060, 0.15);
+    79→    this.scene.add(ambient);
+    80→  }
+    81→
+    82→  attach(container: HTMLElement): void {
+    83→    this.container = container;
+    84→    container.appendChild(this.renderer.domElement);
+    85→    this.renderer.domElement.style.display = 'block';
+    86→    this.renderer.domElement.style.width = '100%';
+    87→    this.renderer.domElement.style.height = '100%';
+    88→
+    89→    // Ground plane
+    90→    const groundGeo = new THREE.PlaneGeometry(40, 40);
+    91→    const groundMat = new THREE.MeshStandardMaterial({
+    92→      color: 0x2a2a3e,
+    93→      metalness: 0.3,
+    94→      roughness: 0.7,
+    95→      envMapIntensity: 0.4,
+    96→    });
+    97→    this.ground = new THREE.Mesh(groundGeo, groundMat);
+    98→    this.ground.rotation.x = -Math.PI / 2;
+    99→    this.ground.position.y = -0.01;
+   100→    this.ground.receiveShadow = true;
+   101→    this.scene.add(this.ground);
+   102→
+   103→    this.setGrid(true);
+   104→    this.resize();
+   105→  }
+   106→
+   107→  detach(): void {
+   108→    if (this.container && this.renderer.domElement.parentNode === this.container) {
+   109→      this.container.removeChild(this.renderer.domElement);
+   110→    }
+   111→    this.container = null;
+   112→  }
+   113→
+   114→  resize(): void {
+   115→    if (!this.container) return;
+   116→    const w = Math.max(2, this.container.clientWidth);
+   117→    const h = Math.max(2, this.container.clientHeight);
+   118→    if (w === 0 || h === 0) return;
+   119→    this.camera.aspect = w / h;
+   120→    this.camera.updateProjectionMatrix();
+   121→    this.renderer.setSize(w, h);
+   122→  }
+   123→
+   124→  getContainerSize(): { width: number; height: number } {
+   125→    if (!this.container) return { width: 0, height: 0 };
+   126→    const dpr = this.renderer.getPixelRatio();
+   127→    return {
+   128→      width: Math.round(this.container.clientWidth * dpr),
+   129→      height: Math.round(this.container.clientHeight * dpr),
+   130→    };
+   131→  }
+   132→
+   133→  setGrid(visible: boolean): void {
+   134→    if (visible && !this.grid) {
+   135→      this.grid = new THREE.GridHelper(20, 40, 0x444466, 0x2a2a44);
+   136→      this.grid.position.y = 0.005;
+   137→      this.scene.add(this.grid);
+   138→    } else if (!visible && this.grid) {
+   139→      this.scene.remove(this.grid);
+   140→      this.grid.geometry.dispose();
+   141→      (this.grid.material as THREE.Material).dispose();
+   142→      this.grid = null;
+   143→    }
+   144→    if (this.grid) this.grid.visible = visible;
+   145→  }
+   146→
+   147→  setBackground(color: string, show: boolean): void {
+   148→    if (show) {
+   149→      this.scene.background = new THREE.Color(color);
+   150→    } else {
+   151→      this.scene.background = new THREE.Color('#0d0d1a');
+   152→    }
+   153→  }
+   154→
+   155→  setTurntable(active: boolean, speed: number): void {
+   156→    this._turntableActive = active;
+   157→    this._turntableSpeed = speed;
+   158→  }
+   159→
+   160→  animateCameraTo(
+   161→    position: [number, number, number],
+   162→    target: [number, number, number],
+   163→    duration: number = 600
+   164→  ): void {
+   165→    const startPos = this.camera.position.clone();
+   166→    const startTarget = this.controls.target.clone();
+   167→    const endPos = new THREE.Vector3(...position);
+   168→    const endTarget = new THREE.Vector3(...target);
+   169→    const startTime = performance.now();
+   170→
+   171→    const animate = () => {
+   172→      const elapsed = performance.now() - startTime;
+   173→      const t = Math.min(elapsed / duration, 1);
+   174→      const ease = t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+   175→
+   176→      this.camera.position.lerpVectors(startPos, endPos, ease);
+   177→      this.controls.target.lerpVectors(startTarget, endTarget, ease);
+   178→      this.controls.update();
+   179→
+   180→      if (t < 1) {
+   181→        requestAnimationFrame(animate);
+   182→      }
+   183→    };
+   184→    requestAnimationFrame(animate);
+   185→  }
+   186→
+   187→  setOnFrame(cb: (delta: number) => void): void {
+   188→    this._onFrame = cb;
+   189→  }
+   190→
+   191→  startRenderLoop(): void {
+   192→    const loop = () => {
+   193→      this._animationId = requestAnimationFrame(loop);
+   194→      const delta = this._clock.getDelta();
+   195→
+   196→      // Turntable rotation
+   197→      if (this._turntableActive) {
+   198→        const model = this._findModel();
+   199→        if (model) {
+   200→          model.rotation.y += delta * this._turntableSpeed * 0.5;
+   201→        }
+   202→      }
+   203→
+   204→      if (this._onFrame) this._onFrame(delta);
+   205→      this.controls.update();
+   206→      this.renderer.render(this.scene, this.camera);
+   207→    };
+   208→    loop();
+   209→  }
+   210→
+   211→  _findModel(): THREE.Object3D | null {
+   212→    for (const child of this.scene.children) {
+   213→      if (
+   214→        child.type === 'Group' &&
+   215→        !(child instanceof THREE.GridHelper) &&
+   216→        !child.userData.isHelper &&
+   217→        child !== this.ground
+   218→      ) {
+   219→        return child;
+   220→      }
+   221→    }
+   222→    return null;
+   223→  }
+   224→
+   225→  stopRenderLoop(): void {
+   226→    cancelAnimationFrame(this._animationId);
+   227→  }
+   228→
+   229→  getCameraState(): { position: [number, number, number]; target: [number, number, number]; fov: number } {
+   230→    const target = this.controls.target;
+   231→    return {
+   232→      position: [
+   233→        this.camera.position.x,
+   234→        this.camera.position.y,
+   235→        this.camera.position.z,
+   236→      ] as [number, number, number],
+   237→      target: [target.x, target.y, target.z] as [number, number, number],
+   238→      fov: this.camera.fov,
+   239→    };
+   240→  }
+   241→
+   242→  setCameraState(position: [number, number, number], target: [number, number, number], fov?: number): void {
+   243→    this.camera.position.set(...position);
+   244→    this.controls.target.set(...target);
+   245→    this.controls.update();
+   246→    if (fov !== undefined) {
+   247→      this.camera.fov = fov;
+   248→      this.camera.updateProjectionMatrix();
+   249→    }
+   250→  }
+   251→
+   252→  takeScreenshot(): string {
+   253→    this.renderer.render(this.scene, this.camera);
+   254→    return this.renderer.domElement.toDataURL('image/png');
+   255→  }
+   256→
+   257→  dispose(): void {
+   258→    this.stopRenderLoop();
+   259→    this.detach();
+   260→    this.pmremGenerator.dispose();
+   261→    this.scene.traverse((obj) => {
+   262→      if (obj instanceof THREE.Mesh) {
+   263→        obj.geometry.dispose();
+   264→        if (Array.isArray(obj.material)) {
+   265→          obj.material.forEach((m) => m.dispose());
+   266→        } else {
+   267→          obj.material.dispose();
+   268→        }
+   269→      }
+   270→    });
+   271→    this.controls.dispose();
+   272→    this.renderer.dispose();
+   273→  }
+   274→}
+   275→
+   276→// ── Vignette shader (custom) ────────────────────────────────────────────────
+   277→const VignetteShader = {
+   278→  uniforms: {
+   279→    tDiffuse: { value: null as THREE.Texture | null },
+   280→    intensity: { value: 0.4 },
+   281→    offset: { value: 1.1 },
+   282→    darkness: { value: 1.2 },
+   283→  },
+   284→  vertexShader: /* glsl */ `
+   285→    varying vec2 vUv;
+   286→    void main() {
+   287→      vUv = uv;
+   288→      gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+   289→    }
+   290→  `,
+   291→  fragmentShader: /* glsl */ `
+   292→    uniform sampler2D tDiffuse;
+   293→    uniform float intensity;
+   294→    uniform float offset;
+   295→    uniform float darkness;
+   296→    varying vec2 vUv;
+   297→    void main() {
+   298→      vec4 texel = texture2D(tDiffuse, vUv);
+   299→      vec2 uv = (vUv - vec2(0.5)) * vec2(offset);
+   300→      float vig = clamp(1.0 - dot(uv, uv), 0.0, 1.0);
+   301→      float f = mix(1.0, vig, intensity * darkness);
+   302→      gl_FragColor = vec4(texel.rgb * f, texel.a);
+   303→    }
+   304→  `,
+   305→};
+   306→
+   307→// ── Color Grading shader (brightness / contrast / saturation) ───────────────
+   308→const ColorGradingShader = {
+   309→  uniforms: {
+   310→    tDiffuse: { value: null as THREE.Texture | null },
+   311→    brightness: { value: 0.0 },
+   312→    contrast: { value: 0.0 },
+   313→    saturation: { value: 0.0 },
+   314→  },
+   315→  vertexShader: /* glsl */ `
+   316→    varying vec2 vUv;
+   317→    void main() {
+   318→      vUv = uv;
+   319→      gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+   320→    }
+   321→  `,
+   322→  fragmentShader: /* glsl */ `
+   323→    uniform sampler2D tDiffuse;
+   324→    uniform float brightness;
+   325→    uniform float contrast;
+   326→    uniform float saturation;
+   327→    varying vec2 vUv;
+   328→
+   329→    void main() {
+   330→      vec4 texel = texture2D(tDiffuse, vUv);
+   331→      vec3 c = texel.rgb;
+   332→
+   333→      // Brightness
+   334→      c += brightness * 0.5;
+   335→
+   336→      // Contrast
+   337→      c = (c - 0.5) * (1.0 + contrast) + 0.5;
+   338→
+   339→      // Saturation
+   340→      float lum = dot(c, vec3(0.2126, 0.7152, 0.0722));
+   341→      c = mix(vec3(lum), c, 1.0 + saturation);
+   342→
+   343→      gl_FragColor = vec4(clamp(c, 0.0, 1.0), texel.a);
+   344→    }
+   345→  `,
+   346→};
+   347→
+   348→// ── Pipeline settings interface ─────────────────────────────────────────────
+   349→export interface PipelineConfig {
+   350→  bloom: { enabled: boolean; intensity: number; threshold: number; radius: number };
+   351→  ao: { enabled: boolean; radius: number; intensity: number };
+   352→  vignette: { enabled: boolean; intensity: number };
+   353→  colorGrading: { enabled: boolean; brightness: number; contrast: number; saturation: number };
+   354→  antialiasing: 'none' | 'fxaa' | 'smaa' | 'taa';
+   355→  shadowQuality: 'none' | 'low' | 'medium' | 'high';
+   356→  quality: 'low' | 'medium' | 'high' | 'ultra';
+   357→  tonemapping: 'aces' | 'reinhard' | 'linear';
+   358→  exposure: number;
+   359→}
+   360→
+   361→export class RenderPipeline {
+   362→  private _sm: SceneManager;
+   363→  private _composer: EffectComposer | null = null;
+   364→  private _renderPass: RenderPass | null = null;
+   365→  private _bloomPass: UnrealBloomPass | null = null;
+   366→  private _smaaPass: SMAAPass | null = null;
+   367→  private _fxaaPass: ShaderPass | null = null;
+   368→  private _ssaoPass: SSAOPass | null = null;
+   369→  private _vignettePass: ShaderPass | null = null;
+   370→  private _colorGradingPass: ShaderPass | null = null;
+   371→  private _config: PipelineConfig;
+   372→  private _needsRebuild = false;
+   373→
+   374→  constructor(sceneManager: SceneManager) {
+   375→    this._sm = sceneManager;
+   376→    this._config = {
+   377→      bloom: { enabled: true, intensity: 0.3, threshold: 0.8, radius: 0.5 },
+   378→      ao: { enabled: false, radius: 0.5, intensity: 0.5 },
+   379→      vignette: { enabled: false, intensity: 0.4 },
+   380→      colorGrading: { enabled: false, brightness: 0, contrast: 0, saturation: 0 },
+   381→      antialiasing: 'smaa',
+   382→      shadowQuality: 'high',
+   383→      quality: 'high',
+   384→      tonemapping: 'aces',
+   385→      exposure: 1.0,
+   386→    };
+   387→  }
+   388→
+   389→  /** Build (or rebuild) the EffectComposer from scratch. */
+   390→  build(): void {
+   391→    this.dispose();
+   392→    const r = this._sm.renderer;
+   393→    const w = r.domElement.width || r.getSize(new THREE.Vector2()).x || 2;
+   394→    const h = r.domElement.height || r.getSize(new THREE.Vector2()).y || 2;
+   395→
+   396→    this._composer = new EffectComposer(r);
+   397→    this._renderPass = new RenderPass(this._sm.scene, this._sm.camera);
+   398→    this._composer.addPass(this._renderPass);
+   399→
+   400→    // Bloom
+   401→    if (this._config.bloom.enabled) {
+   402→      this._bloomPass = new UnrealBloomPass(
+   403→        new THREE.Vector2(w / 2, h / 2),
+   404→        this._config.bloom.intensity,
+   405→        this._config.bloom.radius,
+   406→        this._config.bloom.threshold,
+   407→      );
+   408→      this._composer.addPass(this._bloomPass);
+   409→    }
+   410→
+   411→    // Anti-aliasing
+   412→    if (this._config.antialiasing === 'smaa') {
+   413→      // @ts-expect-error — SMAAPass types are incomplete in @types/three
+   414→      this._smaaPass = new SMAAPass(w, h);
+   415→      this._composer.addPass(this._smaaPass);
+   416→    } else if (this._config.antialiasing === 'fxaa') {
+   417→      const fxaaMat = new THREE.ShaderMaterial({ ...FXAAShader, uniforms: { ...FXAAShader.uniforms, resolution: { value: new THREE.Vector2(1 / w, 1 / h) } } });
+   418→      this._fxaaPass = new ShaderPass(fxaaMat);
+   419→      this._composer.addPass(this._fxaaPass);
+   420→    }
+   421→    // 'taa' — handled via renderer settings + jitter; we keep SMAA as fallback
+   422→    // 'none' — no AA pass
+   423→
+   424→    // SSAO
+   425→    if (this._config.ao.enabled) {
+   426→      this._ssaoPass = new SSAOPass(
+   427→        this._sm.scene,
+   428→        this._sm.camera,
+   429→        w,
+   430→        h,
+   431→      );
+   432→      this._applyAOParams(this._config.ao.radius, this._config.ao.intensity);
+   433→      this._ssaoPass.output = SSAOPass.OUTPUT.Default;
+   434→      this._composer.addPass(this._ssaoPass);
+   435→    }
+   436→
+   437→    // Vignette
+   438→    if (this._config.vignette.enabled) {
+   439→      const vMat = new THREE.ShaderMaterial(VignetteShader);
+   440→      vMat.uniforms['intensity'].value = this._config.vignette.intensity;
+   441→      this._vignettePass = new ShaderPass(vMat);
+   442→      this._composer.addPass(this._vignettePass);
+   443→    }
+   444→
+   445→    // Color grading
+   446→    if (this._config.colorGrading.enabled) {
+   447→      const cgMat = new THREE.ShaderMaterial(ColorGradingShader);
+   448→      cgMat.uniforms['brightness'].value = this._config.colorGrading.brightness;
+   449→      cgMat.uniforms['contrast'].value = this._config.colorGrading.contrast;
+   450→      cgMat.uniforms['saturation'].value = this._config.colorGrading.saturation;
+   451→      this._colorGradingPass = new ShaderPass(cgMat);
+   452→      this._composer.addPass(this._colorGradingPass);
+   453→    }
+   454→
+   455→    // Apply tone mapping & exposure to the renderer
+   456→    this._applyToneMapping(this._config.tonemapping);
+   457→    this._sm.renderer.toneMappingExposure = this._config.exposure;
+   458→
+   459→    // Shadow quality
+   460→    this._applyShadowQuality(this._config.shadowQuality);
+   461→  }
+   462→
+   463→  /** Render one frame through the composer (or fallback direct render). */
+   464→  render(): void {
+   465→    if (this._composer) {
+   466→      this._composer.render();
+   467→    } else {
+   468→      this._sm.renderer.render(this._sm.scene, this._sm.camera);
+   469→    }
+   470→  }
+   471→
+   472→  /** Resize the composer and internal passes. */
+   473→  resize(): void {
+   474→    if (!this._composer) return;
+   475→    const r = this._sm.renderer;
+   476→    const size = r.getSize(new THREE.Vector2());
+   477→    const w = size.x || 2;
+   478→    const h = size.y || 2;
+   479→    this._composer.setSize(w, h);
+   480→
+   481→    if (this._bloomPass) {
+   482→      this._bloomPass.resolution.set(w / 2, h / 2);
+   483→    }
+   484→    if (this._ssaoPass) {
+   485→      this._ssaoPass.setSize(w, h);
+   486→    }
+   487→    if (this._smaaPass) {
+   488→      this._smaaPass.setSize(w, h);
+   489→    }
+   490→    if (this._fxaaPass) {
+   491→      const mat = this._fxaaPass.material as THREE.ShaderMaterial;
+   492→      const res = mat.uniforms['resolution'];
+   493→      if (res && res.value instanceof THREE.Vector2) {
+   494→        res.value.set(1 / w, 1 / h);
+   495→      }
+   496→    }
+   497→  }
+   498→
+   499→  /** Update the full pipeline config. Rebuilds composer if structural changes detected. */
+   500→  updateConfig(cfg: Partial<PipelineConfig>): void {
+   501→    const prev = { ...this._config };
+   502→    this._config = { ...this._config, ...cfg };
+   503→
+   504→    const structuralChange =
+   505→      cfg.bloom?.enabled !== undefined && cfg.bloom.enabled !== prev.bloom.enabled ||
+   506→      cfg.antialiasing !== undefined && cfg.antialiasing !== prev.antialiasing ||
+   507→      cfg.vignette?.enabled !== undefined && cfg.vignette.enabled !== prev.vignette.enabled ||
+   508→      cfg.ao?.enabled !== undefined && cfg.ao.enabled !== prev.ao.enabled ||
+   509→      cfg.colorGrading?.enabled !== undefined && cfg.colorGrading.enabled !== prev.colorGrading.enabled;
+   510→
+   511→    if (structuralChange) {
+   512→      this.build();
+   513→      return;
+   514→    }
+   515→
+   516→    // In-place parameter updates (no rebuild needed)
+   517→    if (this._bloomPass && cfg.bloom) {
+   518→      this._bloomPass.strength = cfg.bloom.intensity ?? this._bloomPass.strength;
+   519→      this._bloomPass.radius = cfg.bloom.radius ?? this._bloomPass.radius;
+   520→      this._bloomPass.threshold = cfg.bloom.threshold ?? this._bloomPass.threshold;
+   521→    }
+   522→
+   523→    if (this._ssaoPass && cfg.ao) {
+   524→      this._applyAOParams(
+   525→        cfg.ao.radius ?? this._config.ao.radius,
+   526→        cfg.ao.intensity ?? this._config.ao.intensity,
+   527→      );
+   528→    }
+   529→
+   530→    if (this._vignettePass && cfg.vignette) {
+   531→      const mat = this._vignettePass.material as THREE.ShaderMaterial;
+   532→      mat.uniforms['intensity'].value = cfg.vignette.intensity ?? 0.4;
+   533→    }
+   534→
+   535→    if (this._colorGradingPass && cfg.colorGrading) {
+   536→      const mat = this._colorGradingPass.material as THREE.ShaderMaterial;
+   537→      if (cfg.colorGrading.brightness !== undefined) mat.uniforms['brightness'].value = cfg.colorGrading.brightness;
+   538→      if (cfg.colorGrading.contrast !== undefined) mat.uniforms['contrast'].value = cfg.colorGrading.contrast;
+   539→      if (cfg.colorGrading.saturation !== undefined) mat.uniforms['saturation'].value = cfg.colorGrading.saturation;
+   540→    }
+   541→
+   542→    if (cfg.tonemapping !== undefined) {
+   543→      this._applyToneMapping(cfg.tonemapping);
+   544→    }
+   545→    if (cfg.exposure !== undefined) {
+   546→      this._sm.renderer.toneMappingExposure = cfg.exposure;
+   547→    }
+   548→    if (cfg.shadowQuality !== undefined) {
+   549→      this._applyShadowQuality(cfg.shadowQuality);
+   550→    }
+   551→    if (cfg.quality !== undefined) {
+   552→      this._applyQuality(cfg.quality);
+   553→    }
+   554→  }
+   555→
+   556→  // ── Convenience setters (called from Viewport sync) ───────────────────────
+   557→
+   558→  setEngine(engine: 'pbr' | 'pathtracer'): void {
+   559→    if (engine === 'pbr') {
+   560→      this._applyToneMapping(this._config.tonemapping);
+   561→    } else {
+   562→      this._sm.renderer.toneMapping = THREE.NoToneMapping;
+   563→    }
+   564→  }
+   565→
+   566→  setToneMapping(mapping: 'aces' | 'reinhard' | 'linear'): void {
+   567→    this._config.tonemapping = mapping;
+   568→    this._applyToneMapping(mapping);
+   569→  }
+   570→
+   571→  setBloom(enabled: boolean, intensity: number, threshold: number, radius: number): void {
+   572→    this.updateConfig({
+   573→      bloom: { enabled, intensity, threshold, radius },
+   574→    });
+   575→  }
+   576→
+   577→  setAO(enabled: boolean, radius: number, intensity: number): void {
+   578→    this.updateConfig({
+   579→      ao: { enabled, radius, intensity },
+   580→    });
+   581→  }
+   582→
+   583→  setAntialiasing(mode: 'none' | 'fxaa' | 'smaa' | 'taa'): void {
+   584→    this.updateConfig({ antialiasing: mode });
+   585→  }
+   586→
+   587→  setShadowQuality(quality: 'none' | 'low' | 'medium' | 'high'): void {
+   588→    this._config.shadowQuality = quality;
+   589→    this._applyShadowQuality(quality);
+   590→  }
+   591→
+   592→  setQuality(quality: 'low' | 'medium' | 'high' | 'ultra'): void {
+   593→    this._config.quality = quality;
+   594→    this._applyQuality(quality);
+   595→  }
+   596→
+   597→  setExposure(exposure: number): void {
+   598→    this._config.exposure = exposure;
+   599→    this._sm.renderer.toneMappingExposure = exposure;
+   600→  }
+   601→
+   602→  setVignette(enabled: boolean, intensity: number): void {
+   603→    this.updateConfig({ vignette: { enabled, intensity } });
+   604→  }
+   605→
+   606→  setColorGrading(enabled: boolean, brightness: number, contrast: number, saturation: number): void {
+   607→    this.updateConfig({ colorGrading: { enabled, brightness, contrast, saturation } });
+   608→  }
+   609→
+   610→  /** Get the EffectComposer (for screenshot / export via composer). */
+   611→  getComposer(): EffectComposer | null {
+   612→    return this._composer;
+   613→  }
+   614→
+   615→  /** Take a screenshot — renders one frame and returns a data URL. */
+   616→  capture(): string {
+   617→    this.render();
+   618→    return this._sm.renderer.domElement.toDataURL('image/png');
+   619→  }
+   620→
+   621→  /** Dispose all passes and the composer. */
+   622→  dispose(): void {
+   623→    if (this._composer) {
+   624→      const passes = this._composer.passes.slice().reverse();
+   625→      for (const pass of passes) {
+   626→        if ('dispose' in pass && typeof (pass as { dispose: () => void }).dispose === 'function') {
+   627→          (pass as { dispose: () => void }).dispose();
+   628→        }
+   629→      }
+   630→      this._composer.dispose();
+   631→    }
+   632→    this._composer = null;
+   633→    this._renderPass = null;
+   634→    this._bloomPass = null;
+   635→    this._ssaoPass = null;
+   636→    this._smaaPass = null;
+   637→    this._fxaaPass = null;
+   638→    this._vignettePass = null;
+   639→    this._colorGradingPass = null;
+   640→  }
+   641→
+   642→  // ── Private helpers ───────────────────────────────────────────────────────
+   643→
+   644→  /** Apply SSAO parameters — radius controls kernel spread, intensity controls maxDistance scaling. */
+   645→  private _applyAOParams(radius: number, intensity: number): void {
+   646→    if (!this._ssaoPass) return;
+   647→    this._ssaoPass.kernelRadius = radius;
+   648→    this._ssaoPass.minDistance = 0.001;
+   649→    // Scale maxDistance with intensity: higher intensity → AO visible at greater depth range
+   650→    this._ssaoPass.maxDistance = 0.02 + intensity * 0.08;
+   651→  }
+   652→
+   653→  private _applyToneMapping(mapping: 'aces' | 'reinhard' | 'linear'): void {
+   654→    const r = this._sm.renderer;
+   655→    switch (mapping) {
+   656→      case 'aces':
+   657→        r.toneMapping = THREE.ACESFilmicToneMapping;
+   658→        break;
+   659→      case 'reinhard':
+   660→        r.toneMapping = THREE.ReinhardToneMapping;
+   661→        break;
+   662→      case 'linear':
+   663→        r.toneMapping = THREE.LinearToneMapping;
+   664→        break;
+   665→    }
+   666→    r.toneMappingExposure = this._config.exposure;
+   667→  }
+   668→
+   669→  private _applyShadowQuality(quality: string): void {
+   670→    const r = this._sm.renderer;
+   671→    switch (quality) {
+   672→      case 'none':
+   673→        r.shadowMap.enabled = false;
+   674→        break;
+   675→      case 'low':
+   676→        r.shadowMap.enabled = true;
+   677→        r.shadowMap.type = THREE.BasicShadowMap;
+   678→        break;
+   679→      case 'medium':
+   680→        r.shadowMap.enabled = true;
+   681→        r.shadowMap.type = THREE.PCFShadowMap;
+   682→        break;
+   683→      case 'high':
+   684→      default:
+   685→        r.shadowMap.enabled = true;
+   686→        r.shadowMap.type = THREE.PCFSoftShadowMap;
+   687→        break;
+   688→    }
+   689→
+   690→    // Update shadow map sizes on all lights
+   691→    this._sm.scene.traverse((child) => {
+   692→      const light = child as THREE.DirectionalLight | THREE.SpotLight | THREE.PointLight;
+   693→      if (light.isLight && light.shadow) {
+   694→        const shadow = light.shadow;
+   695→        switch (quality) {
+   696→          case 'low':
+   697→            shadow.mapSize.set(512, 512);
+   698→            break;
+   699→          case 'medium':
+   700→            shadow.mapSize.set(1024, 1024);
+   701→            break;
+   702→          case 'high':
+   703→          default:
+   704→            shadow.mapSize.set(2048, 2048);
+   705→            break;
+   706→        }
+   707→        if (shadow.map) {
+   708→          shadow.map.dispose();
+   709→          shadow.map = null;
+   710→        }
+   711→      }
+   712→    });
+   713→  }
+   714→
+   715→  private _applyQuality(quality: 'low' | 'medium' | 'high' | 'ultra'): void {
+   716→    const r = this._sm.renderer;
+   717→    switch (quality) {
+   718→      case 'low':
+   719→        r.setPixelRatio(1);
+   720→        break;
+   721→      case 'medium':
+   722→        r.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
+   723→        break;
+   724→      case 'high':
+   725→        r.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+   726→        break;
+   727→      case 'ultra':
+   728→        r.setPixelRatio(window.devicePixelRatio);
+   729→        break;
+   730→    }
+   731→    this._sm.resize();
+   732→    if (this._composer) {
+   733→      this.resize();
+   734→    }
+   735→  }
+   736→}
+   737→
+   738→interface LightSyncEntry {
+   739→  id: string;
+   740→  type: string;
+   741→  color: string;
+   742→  brightness: number;
+   743→  opacity: number;
+   744→  visible: boolean;
+   745→  solo: boolean;
+   746→  falloff: string;
+   747→  gearVisible: boolean;
+   748→  transform: {
+   749→    position: { x: number; y: number; z: number };
+   750→    spherical: { lat: number; lng: number; radius: number; height: number };
+   751→    rotation: { x: number; y: number; z: number; enabled: boolean };
+   752→  };
+   753→  // Spotlight-specific
+   754→  spotAngle?: number;
+   755→  spotPenumbra?: number;
+   756→  spotDecay?: number;
+   757→  // Area light specific
+   758→  areaWidth?: number;
+   759→  areaHeight?: number;
+   760→}
+   761→
+   762→interface LightObjectEntry {
+   763→  object: THREE.Object3D;
+   764→  lightType: string;
+   765→  target?: THREE.Object3D;
+   766→}
+   767→
+   768→export class LightManager {
+   769→  private _scene: THREE.Scene;
+   770→  private _entries: Map<string, LightObjectEntry> = new Map();
+   771→  private _helpers: Map<string, THREE.Object3D> = new Map();
+   772→  private _types: Map<string, string> = new Map();
+   773→
+   774→  constructor(scene: THREE.Scene) {
+   775→    this._scene = scene;
+   776→    ensureRectAreaLib();
+   777→  }
+   778→
+   779→  syncLights(lights: LightSyncEntry[]): void {
+   780→    const activeIds = new Set(lights.map((l) => l.id));
+   781→    const hasSolo = lights.some((l) => l.solo);
+   782→
+   783→    // Remove stale lights
+   784→    for (const [id] of this._entries) {
+   785→      if (!activeIds.has(id)) {
+   786→        this._removeLight(id);
+   787→      }
+   788→    }
+   789→
+   790→    // Create or update each light
+   791→    for (const ld of lights) {
+   792→      const isEffectiveSolo = hasSolo ? ld.solo : true;
+   793→      const shouldShow = ld.visible && isEffectiveSolo;
+   794→
+   795→      const existing = this._entries.get(ld.id);
+   796→      const currentType = this._types.get(ld.id);
+   797→
+   798→      // If type changed, recreate the light
+   799→      if (existing && currentType !== ld.type) {
+   800→        this._removeLight(ld.id);
+   801→      }
+   802→
+   803→      if (!this._entries.has(ld.id)) {
+   804→        this._createLight(ld);
+   805→      }
+   806→
+   807→      this._updateLight(ld, shouldShow);
+   808→    }
+   809→  }
+   810→
+   811→  private _createLight(ld: LightSyncEntry): void {
+   812→    ensureRectAreaLib();
+   813→    const lightObj = this._createLightByType(ld.type);
+   814→
+   815→    // For spot/directional, add a target object
+   816→    let target: THREE.Object3D | undefined;
+   817→    if (lightObj instanceof THREE.SpotLight || lightObj instanceof THREE.DirectionalLight) {
+   818→      target = new THREE.Object3D();
+   819→      target.position.set(0, 0, 0);
+   820→      this._scene.add(target);
+   821→      lightObj.target = target;
+   822→    }
+   823→
+   824→    this._scene.add(lightObj);
+   825→    this._entries.set(ld.id, { object: lightObj, lightType: ld.type, target });
+   826→    this._types.set(ld.id, ld.type);
+   827→
+   828→    // Create helper
+   829→    const helper = this._createHelper(ld.type, lightObj as THREE.Light);
+   830→    if (helper) {
+   831→      this._helpers.set(ld.id, helper);
+   832→      this._scene.add(helper);
+   833→    }
+   834→  }
+   835→
+   836→  private _updateLight(ld: LightSyncEntry, shouldShow: boolean): void {
+   837→    const entry = this._entries.get(ld.id);
+   838→    if (!entry) return;
+   839→
+   840→    const { object: lightObj } = entry;
+   841→
+   842→    // Compute position from spherical
+   843→    const s = ld.transform.spherical;
+   844→    const latRad = (s.lat * Math.PI) / 180;
+   845→    const lngRad = (s.lng * Math.PI) / 180;
+   846→    const px = s.radius * Math.cos(latRad) * Math.cos(lngRad);
+   847→    const py = s.height;
+   848→    const pz = s.radius * Math.cos(latRad) * Math.sin(lngRad);
+   849→
+   850→    lightObj.position.set(px, py, pz);
+   851→    lightObj.visible = shouldShow;
+   852→
+   853→    // Apply rotation if enabled
+   854→    if (ld.transform.rotation.enabled) {
+   855→      lightObj.rotation.set(
+   856→        (ld.transform.rotation.x * Math.PI) / 180,
+   857→        (ld.transform.rotation.y * Math.PI) / 180,
+   858→        (ld.transform.rotation.z * Math.PI) / 180,
+   859→      );
+   860→    }
+   861→
+   862→    if (lightObj instanceof THREE.Light) {
+   863→      lightObj.color.set(ld.color);
+   864→      // Map brightness 0-1000 to intensity 0-10
+   865→      lightObj.intensity = (ld.brightness / 1000) * 10;
+   866→
+   867→      // Apply opacity (only meaningful via distance/decay for physically-based)
+   868→      // We scale intensity by opacity/100 to simulate dimming
+   869→      if (ld.opacity < 100) {
+   870→        lightObj.intensity *= ld.opacity / 100;
+   871→      }
+   872→
+   873→      // Falloff
+   874→      if (lightObj instanceof THREE.PointLight || lightObj instanceof THREE.SpotLight) {
+   875→        switch (ld.falloff) {
+   876→          case 'linear':
+   877→            lightObj.decay = 1;
+   878→            break;
+   879→          case 'none':
+   880→            lightObj.decay = 0;
+   881→            break;
+   882→          case 'custom':
+   883→            lightObj.decay = 1.5;
+   884→            break;
+   885→          case 'quadratic':
+   886→          default:
+   887→            lightObj.decay = 2;
+   888→            break;
+   889→        }
+   890→      }
+   891→
+   892→      // Spotlight-specific
+   893→      if (lightObj instanceof THREE.SpotLight) {
+   894→        if (ld.spotAngle !== undefined) {
+   895→          lightObj.angle = (ld.spotAngle * Math.PI) / 180;
+   896→        }
+   897→        if (ld.spotPenumbra !== undefined) {
+   898→          lightObj.penumbra = ld.spotPenumbra;
+   899→        }
+   900→        if (ld.spotDecay !== undefined) {
+   901→          lightObj.decay = ld.spotDecay;
+   902→        }
+   903→      }
+   904→
+   905→      // Area light dimensions
+   906→      if (lightObj instanceof THREE.RectAreaLight) {
+   907→        if (ld.areaWidth !== undefined) lightObj.width = ld.areaWidth;
+   908→        if (ld.areaHeight !== undefined) lightObj.height = ld.areaHeight;
+   909→      }
+   910→
+   911→      // Shadow config
+   912→      this._configureShadows(lightObj, ld.type);
+   913→    }
+   914→
+   915→    // Update target to look at origin for spot/directional
+   916→    if (entry.target) {
+   917→      entry.target.position.set(0, 0, 0);
+   918→    }
+   919→
+   920→    // Update helper
+   921→    const helper = this._helpers.get(ld.id);
+   922→    if (helper) {
+   923→      helper.visible = shouldShow && ld.gearVisible;
+   924→      helper.position.copy(lightObj.position);
+   925→      helper.rotation.copy(lightObj.rotation);
+   926→      if (helper instanceof THREE.Mesh && lightObj instanceof THREE.Light) {
+   927→        (helper.material as THREE.MeshBasicMaterial).color.copy(lightObj.color);
+   928→      }
+   929→    }
+   930→  }
+   931→
+   932→  private _createLightByType(type: string): THREE.Object3D {
+   933→    const color = 0xffffff;
+   934→    const intensity = 1;
+   935→    switch (type) {
+   936→      case 'directional': {
+   937→        const dl = new THREE.DirectionalLight(color, intensity);
+   938→        dl.castShadow = true;
+   939→        dl.shadow.mapSize.set(2048, 2048);
+   940→        dl.shadow.camera.near = 0.5;
+   941→        dl.shadow.camera.far = 50;
+   942→        dl.shadow.camera.left = -10;
+   943→        dl.shadow.camera.right = 10;
+   944→        dl.shadow.camera.top = 10;
+   945→        dl.shadow.camera.bottom = -10;
+   946→        dl.shadow.bias = -0.001;
+   947→        return dl;
+   948→      }
+   949→      case 'spot': {
+   950→        const sl = new THREE.SpotLight(color, intensity, 50, Math.PI / 4, 0.5, 2);
+   951→        sl.castShadow = true;
+   952→        sl.shadow.mapSize.set(2048, 2048);
+   953→        sl.shadow.bias = -0.001;
+   954→        return sl;
+   955→      }
+   956→      case 'area': {
+   957→        ensureRectAreaLib();
+   958→        return new THREE.RectAreaLight(color, intensity, 2, 2);
+   959→      }
+   960→      case 'overhead': {
+   961→        ensureRectAreaLib();
+   962→        return new THREE.RectAreaLight(color, intensity, 4, 4);
+   963→      }
+   964→      case 'rim': {
+   965→        const sl = new THREE.SpotLight(color, intensity, 50, Math.PI / 6, 0.3, 2);
+   966→        sl.castShadow = true;
+   967→        sl.shadow.mapSize.set(2048, 2048);
+   968→        sl.shadow.bias = -0.001;
+   969→        return sl;
+   970→      }
+   971→      case 'underlight': {
+   972→        const pl = new THREE.PointLight(color, intensity, 50, 2);
+   973→        pl.castShadow = true;
+   974→        pl.shadow.mapSize.set(1024, 1024);
+   975→        return pl;
+   976→      }
+   977→      case 'ies':
+   978→      case 'point':
+   979→      default: {
+   980→        const pl = new THREE.PointLight(color, intensity, 50, 2);
+   981→        pl.castShadow = true;
+   982→        pl.shadow.mapSize.set(1024, 1024);
+   983→        return pl;
+   984→      }
+   985→    }
+   986→  }
+   987→
+   988→  private _configureShadows(light: THREE.Object3D, _type: string): void {
+   989→    const sl = light as THREE.SpotLight;
+   990→    const dl = light as THREE.DirectionalLight;
+   991→    const pl = light as THREE.PointLight;
+   992→    const shadowCapable = light instanceof THREE.SpotLight
+   993→      || light instanceof THREE.DirectionalLight
+   994→      || light instanceof THREE.PointLight;
+   995→
+   996→    if (!shadowCapable || !sl.shadow) return;
+   997→
+   998→    sl.castShadow = true;
+   999→    sl.shadow.bias = -0.001;
+  1000→
+  1001→    if (light instanceof THREE.DirectionalLight) {
+  1002→      dl.shadow.mapSize.set(2048, 2048);
+  1003→      dl.shadow.camera.near = 0.5;
+  1004→      dl.shadow.camera.far = 50;
+  1005→      dl.shadow.camera.left = -10;
+  1006→      dl.shadow.camera.right = 10;
+  1007→      dl.shadow.camera.top = 10;
+  1008→      dl.shadow.camera.bottom = -10;
+  1009→    } else if (light instanceof THREE.SpotLight) {
+  1010→      sl.shadow.mapSize.set(2048, 2048);
+  1011→      sl.shadow.camera.near = 0.5;
+  1012→      sl.shadow.camera.far = 50;
+  1013→    } else if (light instanceof THREE.PointLight) {
+  1014→      pl.shadow.mapSize.set(1024, 1024);
+  1015→      pl.shadow.camera.near = 0.1;
+  1016→      pl.shadow.camera.far = 50;
+  1017→    }
+  1018→  }
+  1019→
+  1020→  private _createHelper(type: string, light: THREE.Light): THREE.Object3D | null {
+  1021→    const isArea = type === 'area' || type === 'overhead';
+  1022→    let geo: THREE.BufferGeometry;
+  1023→    if (isArea) {
+  1024→      geo = new THREE.PlaneGeometry(0.3, 0.3);
+  1025→    } else if (type === 'directional') {
+  1026→      // Use a slightly larger sphere for directional
+  1027→      geo = new THREE.SphereGeometry(0.1, 12, 12);
+  1028→    } else {
+  1029→      geo = new THREE.SphereGeometry(0.06, 10, 10);
+  1030→    }
+  1031→    const mat = new THREE.MeshBasicMaterial({
+  1032→      color: light.color,
+  1033→      transparent: true,
+  1034→      opacity: 0.7,
+  1035→      depthTest: false,
+  1036→    });
+  1037→    const mesh = new THREE.Mesh(geo, mat);
+  1038→    mesh.userData.isHelper = true;
+  1039→    mesh.renderOrder = 999;
+  1040→    return mesh;
+  1041→  }
+  1042→
+  1043→  private _removeLight(id: string): void {
+  1044→    const entry = this._entries.get(id);
+  1045→    if (!entry) return;
+  1046→
+  1047→    const { object, target } = entry;
+  1048→
+  1049→    // Dispose shadow maps
+  1050→    const shadowLight = object as THREE.SpotLight | THREE.DirectionalLight | THREE.PointLight;
+  1051→    if (object instanceof THREE.Light && shadowLight.shadow && shadowLight.shadow.map) {
+  1052→      shadowLight.shadow.map.dispose();
+  1053→    }
+  1054→
+  1055→    this._scene.remove(object);
+  1056→    this._disposeObject(object);
+  1057→    if (target) {
+  1058→      this._scene.remove(target);
+  1059→    }
+  1060→
+  1061→    this._entries.delete(id);
+  1062→    this._types.delete(id);
+  1063→
+  1064→    const helper = this._helpers.get(id);
+  1065→    if (helper) {
+  1066→      this._scene.remove(helper);
+  1067→      this._disposeObject(helper);
+  1068→      this._helpers.delete(id);
+  1069→    }
+  1070→  }
+  1071→
+  1072→  private _disposeObject(obj: THREE.Object3D): void {
+  1073→    obj.traverse((child) => {
+  1074→      if (child instanceof THREE.Mesh) {
+  1075→        child.geometry.dispose();
+  1076→        if (child.material instanceof THREE.Material) {
+  1077→          child.material.dispose();
+  1078→        }
+  1079→      }
+  1080→    });
+  1081→  }
+  1082→
+  1083→  getLightObject(id: string): THREE.Object3D | undefined {
+  1084→    return this._entries.get(id)?.object;
+  1085→  }
+  1086→
+  1087→  getLightCount(): number {
+  1088→    return this._entries.size;
+  1089→  }
+  1090→
+  1091→  dispose(): void {
+  1092→    const ids = Array.from(this._entries.keys());
+  1093→    for (const id of ids) {
+  1094→      this._removeLight(id);
+  1095→    }
+  1096→  }
+  1097→}
+  1098→
+  1099→export class ModelLoader {
+  1100→  private _scene: THREE.Scene;
+  1101→  private _currentModel: THREE.Group | null = null;
+  1102→  private _loader = new GLTFLoader();
+  1103→  private _loading = false;
+  1104→  private _progress = 0;
+  1105→  private _onProgress: ((progress: number) => void) | null = null;
+  1106→  private _onLoaded: ((name: string) => void) | null = null;
+  1107→  private _onError: ((error: string) => void) | null = null;
+  1108→
+  1109→  constructor(scene: THREE.Scene) {
+  1110→    this._scene = scene;
+  1111→  }
+  1112→
+  1113→  get loading(): boolean { return this._loading; }
+  1114→  get progress(): number { return this._progress; }
+  1115→
+  1116→  getCurrentModel(): THREE.Group | null {
+  1117→    return this._currentModel;
+  1118→  }
+  1119→
+  1120→  setCallbacks(callbacks: {
+  1121→    onProgress?: (progress: number) => void;
+  1122→    onLoaded?: (name: string) => void;
+  1123→    onError?: (error: string) => void;
+  1124→  }): void {
+  1125→    this._onProgress = callbacks.onProgress ?? null;
+  1126→    this._onLoaded = callbacks.onLoaded ?? null;
+  1127→    this._onError = callbacks.onError ?? null;
+  1128→  }
+  1129→
+  1130→  async loadFromFile(file: File): Promise<void> {
+  1131→    if (this._loading) return;
+  1132→    this._loading = true;
+  1133→    this._progress = 0;
+  1134→    this._onProgress?.(0);
+  1135→
+  1136→    // Read file as ArrayBuffer to store raw data for scene persistence
+  1137→    let arrayBuffer: ArrayBuffer | null = null;
+  1138→    try {
+  1139→      arrayBuffer = await file.arrayBuffer();
+  1140→      setRawModelData(arrayBuffer, file.name);
+  1141→    } catch {
+  1142→      // Non-critical — model will load but won't be saveable
+  1143→    }
+  1144→
+  1145→    const url = URL.createObjectURL(file);
+  1146→
+  1147→    try {
+  1148→      const gltf = await new Promise<{ scene: THREE.Group }>((resolve, reject) => {
+  1149→        this._loader.load(
+  1150→          url,
+  1151→          (result) => resolve(result),
+  1152→          (event) => {
+  1153→            if (event.lengthComputable) {
+  1154→              this._progress = (event.loaded / event.total) * 100;
+  1155→              this._onProgress?.(this._progress);
+  1156→            }
+  1157→          },
+  1158→          (error) => reject(error)
+  1159→        );
+  1160→      });
+  1161→
+  1162→      this.removeCurrentModel();
+  1163→
+  1164→      this._currentModel = gltf.scene;
+  1165→      this._scene.add(gltf.scene);
+  1166→
+  1167→      // Enable shadows
+  1168→      gltf.scene.traverse((child) => {
+  1169→        if (child instanceof THREE.Mesh) {
+  1170→          child.castShadow = true;
+  1171→          child.receiveShadow = true;
+  1172→        }
+  1173→      });
+  1174→
+  1175→      // Center and scale
+  1176→      const box = new THREE.Box3().setFromObject(gltf.scene);
+  1177→      const center = box.getCenter(new THREE.Vector3());
+  1178→      const size = box.getSize(new THREE.Vector3());
+  1179→      const maxDim = Math.max(size.x, size.y, size.z);
+  1180→      if (maxDim > 0) {
+  1181→        const scale = 4 / maxDim;
+  1182→        gltf.scene.scale.multiplyScalar(scale);
+  1183→      }
+  1184→      // Recompute after scaling
+  1185→      const box2 = new THREE.Box3().setFromObject(gltf.scene);
+  1186→      const center2 = box2.getCenter(new THREE.Vector3());
+  1187→      gltf.scene.position.sub(center2);
+  1188→      gltf.scene.position.y += box2.getSize(new THREE.Vector3()).y / 2;
+  1189→
+  1190→      this._loading = false;
+  1191→      this._progress = 100;
+  1192→      this._onProgress?.(100);
+  1193→      this._onLoaded?.(file.name.replace(/\.(glb|gltf)$/i, ''));
+  1194→    } catch (err) {
+  1195→      this._loading = false;
+  1196→      this._progress = 0;
+  1197→      const msg = err instanceof Error ? err.message : 'Failed to load model';
+  1198→      this._onError?.(msg);
+  1199→    } finally {
+  1200→      URL.revokeObjectURL(url);
+  1201→    }
+  1202→  }
+  1203→
+  1204→  /**
+  1205→   * Load a model from an ArrayBuffer (e.g., restored from a scene file).
+  1206→   */
+  1207→  async loadFromBuffer(arrayBuffer: ArrayBuffer, fileName: string): Promise<void> {
+  1208→    if (this._loading) return;
+  1209→    this._loading = true;
+  1210→    this._progress = 0;
+  1211→    this._onProgress?.(0);
+  1212→
+  1213→    setRawModelData(arrayBuffer, fileName);
+  1214→
+  1215→    const blob = new Blob([arrayBuffer], { type: 'model/gltf-binary' });
+  1216→    const url = URL.createObjectURL(blob);
+  1217→
+  1218→    try {
+  1219→      const gltf = await new Promise<{ scene: THREE.Group }>((resolve, reject) => {
+  1220→        this._loader.load(
+  1221→          url,
+  1222→          (result) => resolve(result),
+  1223→          (event) => {
+  1224→            if (event.lengthComputable) {
+  1225→              this._progress = (event.loaded / event.total) * 100;
+  1226→              this._onProgress?.(this._progress);
+  1227→            }
+  1228→          },
+  1229→          (error) => reject(error)
+  1230→        );
+  1231→      });
+  1232→
+  1233→      this.removeCurrentModel();
+  1234→
+  1235→      this._currentModel = gltf.scene;
+  1236→      this._scene.add(gltf.scene);
+  1237→
+  1238→      // Enable shadows
+  1239→      gltf.scene.traverse((child) => {
+  1240→        if (child instanceof THREE.Mesh) {
+  1241→          child.castShadow = true;
+  1242→          child.receiveShadow = true;
+  1243→        }
+  1244→      });
+  1245→
+  1246→      // Center and scale
+  1247→      const box = new THREE.Box3().setFromObject(gltf.scene);
+  1248→      const center = box.getCenter(new THREE.Vector3());
+  1249→      const size = box.getSize(new THREE.Vector3());
+  1250→      const maxDim = Math.max(size.x, size.y, size.z);
+  1251→      if (maxDim > 0) {
+  1252→        const scale = 4 / maxDim;
+  1253→        gltf.scene.scale.multiplyScalar(scale);
+  1254→      }
+  1255→      const box2 = new THREE.Box3().setFromObject(gltf.scene);
+  1256→      const center2 = box2.getCenter(new THREE.Vector3());
+  1257→      gltf.scene.position.sub(center2);
+  1258→      gltf.scene.position.y += box2.getSize(new THREE.Vector3()).y / 2;
+  1259→
+  1260→      this._loading = false;
+  1261→      this._progress = 100;
+  1262→      this._onProgress?.(100);
+  1263→      this._onLoaded?.(fileName.replace(/\.(glb|gltf)$/i, ''));
+  1264→    } catch (err) {
+  1265→      this._loading = false;
+  1266→      this._progress = 0;
+  1267→      const msg = err instanceof Error ? err.message : 'Failed to load model from buffer';
+  1268→      this._onError?.(msg);
+  1269→    } finally {
+  1270→      URL.revokeObjectURL(url);
+  1271→    }
+  1272→  }
+  1273→
+  1274→  removeCurrentModel(): void {
+  1275→    if (this._currentModel) {
+  1276→      this._scene.remove(this._currentModel);
+  1277→      this._currentModel.traverse((child) => {
+  1278→        if (child instanceof THREE.Mesh) {
+  1279→          child.geometry.dispose();
+  1280→          if (Array.isArray(child.material)) {
+  1281→            child.material.forEach((m) => m.dispose());
+  1282→          } else {
+  1283→            child.material.dispose();
+  1284→          }
+  1285→        }
+  1286→      });
+  1287→      this._currentModel = null;
+  1288→      clearRawModelData();
+  1289→    }
+  1290→  }
+  1291→
+  1292→  dispose(): void {
+  1293→    this.removeCurrentModel();
+  1294→  }
+  1295→}
