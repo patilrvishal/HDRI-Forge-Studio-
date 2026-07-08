@@ -30,6 +30,7 @@ const BOTTOM_PANEL_HEIGHT = 240;
 
 export const AppLayout: React.FC = () => {
   const sceneManagerRef = useRef<SceneManager | null>(null);
+  const sceneRef = useRef<THREE.Scene | null>(null);
   const envMapRef = useRef<THREE.Texture | null>(null);
 
   const leftPanelOpen = useUIStore((s) => s.leftPanelOpen);
@@ -86,6 +87,7 @@ export const AppLayout: React.FC = () => {
   const handleViewportReady = useCallback((rp: RenderPipeline | null, mm: MaterialManager | null) => {
     renderPipelineRef.current = rp;
     materialManagerRef.current = mm;
+    sceneRef.current = sceneManagerRef.current?.scene ?? null;
   }, []);
 
   // Keyboard shortcuts
@@ -339,7 +341,7 @@ export const AppLayout: React.FC = () => {
                 <div style={{ flex: 1, overflow: 'hidden' }}>
                   <MaterialEditorPanel
                     materialManagerRef={materialManagerRef}
-                    sceneRef={sceneManagerRef as React.RefObject<THREE.Scene | null>}
+                    sceneRef={sceneRef}
                   />
                 </div>
               )}

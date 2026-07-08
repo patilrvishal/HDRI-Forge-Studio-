@@ -91,12 +91,37 @@ export const Viewport: React.FC<ViewportProps> = ({ sceneManagerRef, onScreensho
         setTimeout(() => {
           const model = modelLoader.getCurrentModel?.();
           if (model && materialManager) {
+            // Check if we have saved material states (from a scene file restore)
+            const savedMaterials = useMaterialEditorStore.getState().materials;
+            const hasSavedStates = savedMaterials.length > 0;
+
             const matStates = materialManager.extractMaterials(model);
-            useMaterialEditorStore.getState().setMaterials(matStates);
-            // Rebuild map after a frame (model fully in scene)
-            requestAnimationFrame(() => {
-              materialManager.rebuildMaterialMap(sceneManager.scene, matStates);
-            });
+
+            if (hasSavedStates) {
+              // Merge saved edits over the freshly extracted defaults
+              const merged = matStates.map((extracted) => {
+                const saved = savedMaterials.find((s) => s.name === extracted.name);
+                if (saved) {
+                  // Keep the extracted ID (it's linked to the materialMap), but use saved values
+                  return { ...extracted, ...saved, id: extracted.id };
+                }
+                return extracted;
+              });
+              useMaterialEditorStore.getState().setMaterials(merged);
+
+              requestAnimationFrame(() => {
+                materialManager.rebuildMaterialMap(sceneManager.scene, merged);
+                // Apply saved property overrides to Three.js materials
+                for (const state of merged) {
+                  materialManager.applyMaterialState(state, sceneManager.scene);
+                }
+              });
+            } else {
+              useMaterialEditorStore.getState().setMaterials(matStates);
+              requestAnimationFrame(() => {
+                materialManager.rebuildMaterialMap(sceneManager.scene, matStates);
+              });
+            }
           }
         }, 100);
 

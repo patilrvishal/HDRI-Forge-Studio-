@@ -136,8 +136,8 @@ export class MaterialManager {
       for (const slotKey of slotKeys) {
         const slot = state[slotKey];
         if (slot.enabled && slot.dataUrl) {
-          const texture = this.getOrCreateTexture(slot.dataUrl);
-          if (texture) {
+          this.loadTextureAsync(slot.dataUrl).then((texture) => {
+            if (!texture) return;
             // Assign texture wrap and color space
             texture.wrapS = THREE.RepeatWrapping;
             texture.wrapT = THREE.RepeatWrapping;
@@ -145,14 +145,16 @@ export class MaterialManager {
               ? THREE.SRGBColorSpace
               : THREE.LinearSRGBColorSpace;
             texture.needsUpdate = true;
-            mat[slotKey] = texture;
-          }
+            // Re-read mat from map in case it changed
+            const currentMats = this.materialMap.get(state.id);
+            if (currentMats) {
+              for (const m of currentMats) {
+                m[slotKey] = texture;
+                m.needsUpdate = true;
+              }
+            }
+          });
         }
-      }
-
-      // Re-compile shader if flatShading changed
-      if (state.flatShading) {
-        mat.needsUpdate = true;
       }
     }
   }
@@ -175,27 +177,27 @@ export class MaterialManager {
   }
 
   /**
-   * Get or create a Three.js texture from a data URL.
+   * Load a texture from a data URL asynchronously.
+   * Returns a cached texture if available.
    */
-  private getOrCreateTexture(dataUrl: string): THREE.Texture | null {
+  private loadTextureAsync(dataUrl: string): Promise<THREE.Texture | null> {
     if (this.textureCache.has(dataUrl)) {
-      return this.textureCache.get(dataUrl)!;
+      return Promise.resolve(this.textureCache.get(dataUrl)!);
     }
 
-    let texture: THREE.Texture | null = null;
-    this.textureLoader.load(
-      dataUrl,
-      (tex) => {
-        texture = tex;
-        this.textureCache.set(dataUrl, tex);
-      },
-      undefined,
-      () => {
-        // Failed to load texture
-      },
-    );
-
-    return texture;
+    return new Promise((resolve) => {
+      this.textureLoader.load(
+        dataUrl,
+        (tex) => {
+          this.textureCache.set(dataUrl, tex);
+          resolve(tex);
+        },
+        undefined,
+        () => {
+          resolve(null);
+        },
+      );
+    });
   }
 
   /**

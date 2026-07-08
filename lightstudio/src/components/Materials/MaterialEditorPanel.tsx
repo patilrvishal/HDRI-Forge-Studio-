@@ -1,10 +1,12 @@
 import React, { useCallback, useRef } from 'react';
+import * as THREE from 'three';
 import { useMaterialEditorStore } from '../../store/materialEditorStore';
 import type { PBRMaterialState, TextureSlotKey } from '../../types/MaterialEditor';
 import { TEXTURE_SLOT_LABELS } from '../../types/MaterialEditor';
+import type { MaterialManager } from '../../three/MaterialManager';
 
 interface MaterialEditorPanelProps {
-  materialManagerRef: React.MutableRefObject<import('../../three/MaterialManager').MaterialManager | null>;
+  materialManagerRef: React.MutableRefObject<MaterialManager | null>;
   sceneRef: React.MutableRefObject<THREE.Scene | null>;
 }
 
