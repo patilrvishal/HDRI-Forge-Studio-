@@ -1,6 +1,7 @@
 import React, { useCallback, useRef, useState, useMemo } from 'react';
 import { useSceneStore } from '../../store/sceneStore';
 import { setRawHDRIData } from '../../store/hdriDataStore';
+import { useHDRIAssetStore } from '../../store/hdriAssetStore';
 import { Slider } from '../UI/Slider';
 import { Toggle } from '../UI/Toggle';
 import { HDRI_PRESETS, getHDRIPresetById } from '../../types/Environment';
@@ -28,6 +29,7 @@ const EnvironmentBrowser: React.FC<EnvironmentBrowserProps> = ({ onClose, onPres
 
   const [activeCategory, setActiveCategory] = useState<HDRIPreset['category'] | 'all'>('all');
   const [searchQuery, setSearchQuery] = useState('');
+  const hdriAssets = useHDRIAssetStore((s) => s.assets);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const backplateInputRef = useRef<HTMLInputElement>(null);
   const [customLoading, setCustomLoading] = useState(false);
@@ -108,8 +110,8 @@ const EnvironmentBrowser: React.FC<EnvironmentBrowserProps> = ({ onClose, onPres
       setCustomLoading(true);
       try {
         // Read raw binary for scene persistence
+        const arrayBuffer = await file.arrayBuffer();
         try {
-          const arrayBuffer = await file.arrayBuffer();
           setRawHDRIData(arrayBuffer, file.name);
         } catch {
           // Non-critical
@@ -117,6 +119,13 @@ const EnvironmentBrowser: React.FC<EnvironmentBrowserProps> = ({ onClose, onPres
         // Create blob URL for 3D scene loading
         const url = URL.createObjectURL(file);
         setEnvironment({ hdri: url, presetId: '__custom__' });
+
+        // Also add to the HDRI asset store so it appears in the Environment panel
+        try {
+          useHDRIAssetStore.getState().addAsset(file, arrayBuffer);
+        } catch {
+          // Non-critical — the HDRI still works via the blob URL above
+        }
       } finally {
         setCustomLoading(false);
         e.target.value = '';
@@ -284,14 +293,93 @@ const EnvironmentBrowser: React.FC<EnvironmentBrowserProps> = ({ onClose, onPres
           </div>
 
           {/* --- Active preset indicator ------------------------------------------------ */}
-          {activePreset && (
+          {activePreset ? (
             <div style={{ fontSize: 10, color: 'var(--text-dim)', flexShrink: 0 }}>
               Active: <span style={{ color: 'var(--accent)' }}>{activePreset.name}</span>
               <span style={{ marginLeft: 8, color: 'var(--text-sec)' }}> -  {activePreset.description}</span>
             </div>
+          ) : environment.presetId === '__custom__' ? (
+            <div style={{ fontSize: 10, color: 'var(--text-dim)', flexShrink: 0 }}>
+              Active: <span style={{ color: 'var(--accent)' }}>Custom HDRI</span>
+              <span style={{ marginLeft: 8, color: 'var(--text-sec)' }}> - Loaded from file. Manage in the Environment panel.</span>
+            </div>
+          ) : null}
+
+          {/* --- Custom HDRI assets section --------------------------------------------- */}
+          {hdriAssets.length > 0 && (
+            <>
+              <div style={{ fontSize: 10, fontWeight: 600, color: 'var(--text-sec)', textTransform: 'uppercase', letterSpacing: '0.5px', flexShrink: 0 }}>
+                Custom HDRIs
+              </div>
+              <div
+                style={{
+                  display: 'grid',
+                  gridTemplateColumns: 'repeat(auto-fill, minmax(110px, 1fr))',
+                  gap: 8,
+                  overflowY: 'auto',
+                  flexShrink: 0,
+                  padding: '4px 0',
+                }}
+              >
+                {hdriAssets.map((asset) => {
+                  const isActive = environment.presetId === '__custom__' && asset.active;
+                  return (
+                    <div
+                      key={asset.id}
+                      onClick={() => {
+                        useHDRIAssetStore.getState().selectAsset(asset.id);
+                        if (asset.blobUrl) {
+                          setEnvironment({ hdri: asset.blobUrl, presetId: '__custom__' });
+                        }
+                      }}
+                      style={{
+                        cursor: 'pointer',
+                        borderRadius: 'var(--radius)',
+                        overflow: 'hidden',
+                        border: isActive ? '2px solid var(--accent)' : '2px solid transparent',
+                        background: 'var(--bg-card)',
+                        transition: 'border-color 0.15s, transform 0.15s',
+                        transform: isActive ? 'scale(1.02)' : undefined,
+                      }}
+                    >
+                      <div
+                        style={{
+                          width: '100%',
+                          height: 64,
+                          background: 'linear-gradient(135deg, #1a1a3e, #2a2a5e, #1a1a3e)',
+                          position: 'relative',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                        }}
+                      >
+                        <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="#888" strokeWidth="1">
+                          <circle cx="10" cy="10" r="8" />
+                          <circle cx="10" cy="10" r="3" opacity="0.4" />
+                          <path d="M10 2v16M2 10h16" opacity="0.3" />
+                        </svg>
+                        {isActive && (
+                          <div style={{ position: 'absolute', top: 4, right: 4, width: 16, height: 16, borderRadius: '50%', background: 'var(--accent)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                            <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="#fff" strokeWidth="1.5">
+                              <path d="M2 5l2 2 4-4" />
+                            </svg>
+                          </div>
+                        )}
+                        <div style={{ position: 'absolute', bottom: 4, left: 4, fontSize: 8, padding: '1px 5px', borderRadius: 3, background: 'rgba(0,0,0,0.5)', color: '#ccc', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                          CUSTOM
+                        </div>
+                      </div>
+                      <div style={{ padding: '4px 6px', fontSize: 10, fontWeight: 500, color: isActive ? 'var(--text)' : 'var(--text-sec)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                        {asset.name}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </>
           )}
 
-          {/* --- Preset Grid ------------------------------------------------------------------ */}
+          {/* --- Built-in Preset Grid --------------------------------------------------- */}
           <div
             style={{
               display: 'grid',
@@ -402,6 +490,7 @@ const EnvironmentBrowser: React.FC<EnvironmentBrowserProps> = ({ onClose, onPres
         <div className="rs-footer">
           <div style={{ fontSize: 10, color: 'var(--text-dim)' }}>
             {HDRI_PRESETS.length} built-in presets
+            {hdriAssets.length > 0 && ` + ${hdriAssets.length} custom HDRI(s)`}
           </div>
           <button className="btn-primary" onClick={onClose}>
             Done

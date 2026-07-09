@@ -348,381 +348,388 @@
    348→    sm.setBackground(environment.background, environment.showBackground);
    349→  }, [environment.background, environment.showBackground, sceneManagerRef, backplate]);
    350→
-   351→  // Phase 9: Sync environment preset to 3D scene (built-in presets only)
+   351→  // Sync ground settings (reflections, fade, color, PBR)
    352→  useEffect(() => {
    353→    const sm = sceneManagerRef.current;
-   354→    const el = envLoaderRef.current;
-   355→    if (!sm || !el) return;
-   356→
-   357→    // Skip custom HDRI — handled by the separate effect below
-   358→    if (environment.presetId === '__custom__') return;
-   359→
-   360→    const preset = getHDRIPresetById(environment.presetId);
-   361→    if (!preset) return;
-   362→
-   363→    const envTexture = el.generateFromPreset(preset, sm.pmremGenerator, environment.rotation);
-   364→    el.setEnvironmentTexture(sm.scene, envTexture, environment.intensity);
-   365→  }, [environment.presetId, environment.rotation, environment.intensity, sceneManagerRef, envLoaderRef]);
+   354→    if (!sm) return;
+   355→    sm.updateGround(renderSettings.ground);
+   356→  }, [renderSettings.ground, sceneManagerRef]);
+   357→
+   358→  // Phase 9: Sync environment preset to 3D scene (built-in presets only)
+   359→  useEffect(() => {
+   360→    const sm = sceneManagerRef.current;
+   361→    const el = envLoaderRef.current;
+   362→    if (!sm || !el) return;
+   363→
+   364→    // Skip custom HDRI — handled by the separate effect below
+   365→    if (environment.presetId === '__custom__') return;
    366→
-   367→  // Phase 9: Load custom HDRI file into the 3D scene
-   368→  useEffect(() => {
-   369→    const sm = sceneManagerRef.current;
-   370→    const el = envLoaderRef.current;
-   371→    if (!sm || !el) return;
-   372→
-   373→    if (environment.presetId === '__custom__' && environment.hdri) {
-   374→      el.loadHDRI(environment.hdri, sm.pmremGenerator)
-   375→        .then((envTexture) => {
-   376→          el.setEnvironmentTexture(sm.scene, envTexture, environment.intensity);
-   377→        })
-   378→        .catch(() => {
-   379→          // Fallback to neutral studio on error
-   380→          const fallback = getHDRIPresetById('studio-neutral');
-   381→          if (fallback) {
-   382→            const envTexture = el.generateFromPreset(fallback, sm.pmremGenerator, 0);
-   383→            el.setEnvironmentTexture(sm.scene, envTexture, environment.intensity);
-   384→          }
-   385→        });
-   386→    }
-   387→  }, [environment.presetId, environment.hdri, environment.intensity, sceneManagerRef, envLoaderRef]);
-   388→
-   389→  // Restore model from scene file (triggered when _pendingModelDataBase64 is set)
-   390→  useEffect(() => {
-   391→    if (!pendingModelData) return;
-   392→    const ml = modelLoaderRef.current;
-   393→    if (!ml) return;
-   394→
-   395→    setIsLoading(true);
-   396→    setLoadError(null);
-   397→    setLoadProgress(0);
-   398→
-   399→    try {
-   400→      const arrayBuffer = base64ToArrayBuffer(pendingModelData);
-   401→      ml.loadFromBuffer(arrayBuffer, pendingModelFileName);
-   402→    } catch {
-   403→      setLoadError('Failed to restore model from scene file');
-   404→      setIsLoading(false);
-   405→    }
-   406→
-   407→    clearPendingModelData();
-   408→  }, [pendingModelData, pendingModelFileName, modelLoaderRef, clearPendingModelData]);
-   409→
-   410→  // Restore custom HDRI from scene file
-   411→  useEffect(() => {
-   412→    if (!pendingHDRIData) return;
-   413→    const sm = sceneManagerRef.current;
-   414→    const el = envLoaderRef.current;
-   415→    if (!sm || !el) return;
+   367→    const preset = getHDRIPresetById(environment.presetId);
+   368→    if (!preset) return;
+   369→
+   370→    const envTexture = el.generateFromPreset(preset, sm.pmremGenerator, environment.rotation);
+   371→    el.setEnvironmentTexture(sm.scene, envTexture, environment.intensity);
+   372→  }, [environment.presetId, environment.rotation, environment.intensity, sceneManagerRef, envLoaderRef]);
+   373→
+   374→  // Phase 9: Load custom HDRI file into the 3D scene
+   375→  useEffect(() => {
+   376→    const sm = sceneManagerRef.current;
+   377→    const el = envLoaderRef.current;
+   378→    if (!sm || !el) return;
+   379→
+   380→    if (environment.presetId === '__custom__' && environment.hdri) {
+   381→      el.loadHDRI(environment.hdri, sm.pmremGenerator)
+   382→        .then((envTexture) => {
+   383→          el.setEnvironmentTexture(sm.scene, envTexture, environment.intensity);
+   384→        })
+   385→        .catch(() => {
+   386→          // Fallback to neutral studio on error
+   387→          const fallback = getHDRIPresetById('studio-neutral');
+   388→          if (fallback) {
+   389→            const envTexture = el.generateFromPreset(fallback, sm.pmremGenerator, 0);
+   390→            el.setEnvironmentTexture(sm.scene, envTexture, environment.intensity);
+   391→          }
+   392→        });
+   393→    }
+   394→  }, [environment.presetId, environment.hdri, environment.intensity, sceneManagerRef, envLoaderRef]);
+   395→
+   396→  // Restore model from scene file (triggered when _pendingModelDataBase64 is set)
+   397→  useEffect(() => {
+   398→    if (!pendingModelData) return;
+   399→    const ml = modelLoaderRef.current;
+   400→    if (!ml) return;
+   401→
+   402→    setIsLoading(true);
+   403→    setLoadError(null);
+   404→    setLoadProgress(0);
+   405→
+   406→    try {
+   407→      const arrayBuffer = base64ToArrayBuffer(pendingModelData);
+   408→      ml.loadFromBuffer(arrayBuffer, pendingModelFileName);
+   409→    } catch {
+   410→      setLoadError('Failed to restore model from scene file');
+   411→      setIsLoading(false);
+   412→    }
+   413→
+   414→    clearPendingModelData();
+   415→  }, [pendingModelData, pendingModelFileName, modelLoaderRef, clearPendingModelData]);
    416→
-   417→    try {
-   418→      const arrayBuffer = hdriBase64ToArrayBuffer(pendingHDRIData);
-   419→      setRawHDRIData(arrayBuffer, 'custom.hdr');
-   420→      const blob = new Blob([arrayBuffer], { type: 'application/octet-stream' });
-   421→      const url = URL.createObjectURL(blob);
-   422→      el.loadHDRI(url, sm.pmremGenerator)
-   423→        .then((envTexture) => {
-   424→          el.setEnvironmentTexture(sm.scene, envTexture, useSceneStore.getState().environment.intensity);
-   425→        })
-   426→        .catch(() => {
-   427→          // Fallback to neutral studio
-   428→          const fallback = getHDRIPresetById('studio-neutral');
-   429→          if (fallback) {
-   430→            const tex = el.generateFromPreset(fallback, sm.pmremGenerator, 0);
-   431→            el.setEnvironmentTexture(sm.scene, tex, 1);
-   432→          }
-   433→        });
-   434→    } catch {
-   435→      // ignore
-   436→    }
-   437→
-   438→    clearPendingHDRIData();
-   439→  }, [pendingHDRIData, sceneManagerRef, envLoaderRef, clearPendingHDRIData]);
-   440→
-   441→  // Sync render settings
-   442→  useEffect(() => {
-   443→    const rp = renderPipelineRef.current;
-   444→    if (!rp) return;
-   445→    rp.setEngine(renderSettings.engine);
-   446→    rp.setToneMapping(renderSettings.tonemapping);
-   447→    rp.setExposure(renderSettings.exposure);
-   448→    rp.setQuality(renderSettings.quality);
-   449→    rp.setShadowQuality(renderSettings.shadowQuality);
-   450→    rp.setBloom(
-   451→      renderSettings.bloom.enabled,
-   452→      renderSettings.bloom.intensity,
-   453→      renderSettings.bloom.threshold,
-   454→      renderSettings.bloom.radius
-   455→    );
-   456→    rp.setAO(
-   457→      renderSettings.ao.enabled,
-   458→      renderSettings.ao.radius,
-   459→      renderSettings.ao.intensity
-   460→    );
-   461→    rp.setAntialiasing(renderSettings.antialiasing);
-   462→    rp.setVignette(
-   463→      renderSettings.vignette.enabled,
-   464→      renderSettings.vignette.intensity
-   465→    );
-   466→    rp.setColorGrading(
-   467→      renderSettings.colorGrading.enabled,
-   468→      renderSettings.colorGrading.brightness,
-   469→      renderSettings.colorGrading.contrast,
-   470→      renderSettings.colorGrading.saturation
-   471→    );
-   472→  }, [renderSettings, renderPipelineRef]);
-   473→
-   474→  // Sync lights to scene
-   475→  useEffect(() => {
-   476→    lightManagerRef.current?.syncLights(
-   477→      lights.map((l) => ({
-   478→        id: l.id,
-   479→        type: l.type,
-   480→        color: l.color,
-   481→        brightness: l.brightness,
-   482→        opacity: l.opacity,
-   483→        visible: l.visible,
-   484→        solo: l.solo,
-   485→        falloff: l.falloff,
-   486→        gearVisible: l.gearVisible,
-   487→        transform: l.transform,
-   488→        spotAngle: l.spotAngle,
-   489→        spotPenumbra: l.spotPenumbra,
-   490→        spotDecay: 2,
-   491→        areaWidth: l.areaWidth,
-   492→        areaHeight: l.areaHeight,
-   493→      }))
-   494→    );
-   495→  }, [lights, lightManagerRef]);
-   496→
-   497→  // Sync turntable state to SceneManager
-   498→  useEffect(() => {
-   499→    const sm = sceneManagerRef.current;
-   500→    if (!sm) return;
-   501→    sm._turntableActive = turntable.active;
-   502→    sm._turntableSpeed = turntable.speed;
-   503→  }, [turntable.active, turntable.speed, sceneManagerRef]);
-   504→
-   505→  // Click-to-select material from viewport
-   506→  const handleViewportClick = useCallback((event: React.MouseEvent) => {
-   507→    // Only work with select tool
-   508→    if (useUIStore.getState().activeTool !== 'select') return;
-   509→
-   510→    const container = containerRef.current;
-   511→    const sm = sceneManagerRef.current;
-   512→    if (!container || !sm) return;
-   513→
-   514→    const rect = container.getBoundingClientRect();
-   515→    const mouse = new THREE.Vector2(
-   516→      ((event.clientX - rect.left) / rect.width) * 2 - 1,
-   517→      -((event.clientY - rect.top) / rect.height) * 2 + 1
-   518→    );
-   519→
-   520→    const raycaster = new THREE.Raycaster();
-   521→    raycaster.setFromCamera(mouse, sm.camera);
-   522→
-   523→    const meshes: THREE.Mesh[] = [];
-   524→    sm.scene.traverse((obj) => {
-   525→      if (obj instanceof THREE.Mesh && !(obj as any).userData?.isHelper) {
-   526→        meshes.push(obj);
-   527→      }
-   528→    });
+   417→  // Restore custom HDRI from scene file
+   418→  useEffect(() => {
+   419→    if (!pendingHDRIData) return;
+   420→    const sm = sceneManagerRef.current;
+   421→    const el = envLoaderRef.current;
+   422→    if (!sm || !el) return;
+   423→
+   424→    try {
+   425→      const arrayBuffer = hdriBase64ToArrayBuffer(pendingHDRIData);
+   426→      setRawHDRIData(arrayBuffer, 'custom.hdr');
+   427→      const blob = new Blob([arrayBuffer], { type: 'application/octet-stream' });
+   428→      const url = URL.createObjectURL(blob);
+   429→      el.loadHDRI(url, sm.pmremGenerator)
+   430→        .then((envTexture) => {
+   431→          el.setEnvironmentTexture(sm.scene, envTexture, useSceneStore.getState().environment.intensity);
+   432→        })
+   433→        .catch(() => {
+   434→          // Fallback to neutral studio
+   435→          const fallback = getHDRIPresetById('studio-neutral');
+   436→          if (fallback) {
+   437→            const tex = el.generateFromPreset(fallback, sm.pmremGenerator, 0);
+   438→            el.setEnvironmentTexture(sm.scene, tex, 1);
+   439→          }
+   440→        });
+   441→    } catch {
+   442→      // ignore
+   443→    }
+   444→
+   445→    clearPendingHDRIData();
+   446→  }, [pendingHDRIData, sceneManagerRef, envLoaderRef, clearPendingHDRIData]);
+   447→
+   448→  // Sync render settings
+   449→  useEffect(() => {
+   450→    const rp = renderPipelineRef.current;
+   451→    if (!rp) return;
+   452→    rp.setEngine(renderSettings.engine);
+   453→    rp.setToneMapping(renderSettings.tonemapping);
+   454→    rp.setExposure(renderSettings.exposure);
+   455→    rp.setQuality(renderSettings.quality);
+   456→    rp.setShadowQuality(renderSettings.shadowQuality);
+   457→    rp.setBloom(
+   458→      renderSettings.bloom.enabled,
+   459→      renderSettings.bloom.intensity,
+   460→      renderSettings.bloom.threshold,
+   461→      renderSettings.bloom.radius
+   462→    );
+   463→    rp.setAO(
+   464→      renderSettings.ao.enabled,
+   465→      renderSettings.ao.radius,
+   466→      renderSettings.ao.intensity
+   467→    );
+   468→    rp.setAntialiasing(renderSettings.antialiasing);
+   469→    rp.setVignette(
+   470→      renderSettings.vignette.enabled,
+   471→      renderSettings.vignette.intensity
+   472→    );
+   473→    rp.setColorGrading(
+   474→      renderSettings.colorGrading.enabled,
+   475→      renderSettings.colorGrading.brightness,
+   476→      renderSettings.colorGrading.contrast,
+   477→      renderSettings.colorGrading.saturation
+   478→    );
+   479→  }, [renderSettings, renderPipelineRef]);
+   480→
+   481→  // Sync lights to scene
+   482→  useEffect(() => {
+   483→    lightManagerRef.current?.syncLights(
+   484→      lights.map((l) => ({
+   485→        id: l.id,
+   486→        type: l.type,
+   487→        color: l.color,
+   488→        brightness: l.brightness,
+   489→        opacity: l.opacity,
+   490→        visible: l.visible,
+   491→        solo: l.solo,
+   492→        falloff: l.falloff,
+   493→        gearVisible: l.gearVisible,
+   494→        transform: l.transform,
+   495→        spotAngle: l.spotAngle,
+   496→        spotPenumbra: l.spotPenumbra,
+   497→        spotDecay: 2,
+   498→        areaWidth: l.areaWidth,
+   499→        areaHeight: l.areaHeight,
+   500→      }))
+   501→    );
+   502→  }, [lights, lightManagerRef]);
+   503→
+   504→  // Sync turntable state to SceneManager
+   505→  useEffect(() => {
+   506→    const sm = sceneManagerRef.current;
+   507→    if (!sm) return;
+   508→    sm._turntableActive = turntable.active;
+   509→    sm._turntableSpeed = turntable.speed;
+   510→  }, [turntable.active, turntable.speed, sceneManagerRef]);
+   511→
+   512→  // Click-to-select material from viewport
+   513→  const handleViewportClick = useCallback((event: React.MouseEvent) => {
+   514→    // Only work with select tool
+   515→    if (useUIStore.getState().activeTool !== 'select') return;
+   516→
+   517→    const container = containerRef.current;
+   518→    const sm = sceneManagerRef.current;
+   519→    if (!container || !sm) return;
+   520→
+   521→    const rect = container.getBoundingClientRect();
+   522→    const mouse = new THREE.Vector2(
+   523→      ((event.clientX - rect.left) / rect.width) * 2 - 1,
+   524→      -((event.clientY - rect.top) / rect.height) * 2 + 1
+   525→    );
+   526→
+   527→    const raycaster = new THREE.Raycaster();
+   528→    raycaster.setFromCamera(mouse, sm.camera);
    529→
-   530→    const hits = raycaster.intersectObjects(meshes, false);
-   531→    if (hits.length > 0) {
-   532→      const mesh = hits[0].object as THREE.Mesh;
-   533→      // Get material name from Three.js material
-   534→      const material = Array.isArray(mesh.material) ? mesh.material[0] : mesh.material;
-   535→      const matName = material.name || mesh.name;
+   530→    const meshes: THREE.Mesh[] = [];
+   531→    sm.scene.traverse((obj) => {
+   532→      if (obj instanceof THREE.Mesh && !(obj as any).userData?.isHelper) {
+   533→        meshes.push(obj);
+   534→      }
+   535→    });
    536→
-   537→      // Find matching material in store by name or mesh name
-   538→      const matState = useMaterialEditorStore.getState().materials;
-   539→      const match = matState.find((m) =>
-   540→        m.name === matName || m.meshNames.includes(mesh.name)
-   541→      );
-   542→
-   543→      if (match) {
-   544→        useMaterialEditorStore.getState().selectMaterial(match.id);
-   545→
-   546→        // Open right panel and switch to matEdit tab if needed
-   547→        const ui = useUIStore.getState();
-   548→        if (!ui.rightPanelOpen) ui.showPanel('rightPanel');
+   537→    const hits = raycaster.intersectObjects(meshes, false);
+   538→    if (hits.length > 0) {
+   539→      const mesh = hits[0].object as THREE.Mesh;
+   540→      // Get material name from Three.js material
+   541→      const material = Array.isArray(mesh.material) ? mesh.material[0] : mesh.material;
+   542→      const matName = material.name || mesh.name;
+   543→
+   544→      // Find matching material in store by name or mesh name
+   545→      const matState = useMaterialEditorStore.getState().materials;
+   546→      const match = matState.find((m) =>
+   547→        m.name === matName || m.meshNames.includes(mesh.name)
+   548→      );
    549→
-   550→        // Visual feedback: brief emissive flash on the mesh
-   551→        if (material && 'emissive' in material) {
-   552→          const mat = material as THREE.MeshStandardMaterial;
-   553→          const origEmissive = mat.emissive.clone();
-   554→          mat.emissive.set(0x444466);
-   555→          setTimeout(() => {
-   556→            mat.emissive.copy(origEmissive);
-   557→            mat.needsUpdate = true;
-   558→          }, 200);
-   559→        }
-   560→      }
-   561→    }
-   562→  }, [sceneManagerRef]);
-   563→
-   564→  // Drag and drop handlers
-   565→  const handleDragEnter = useCallback((e: React.DragEvent) => {
-   566→    e.preventDefault();
-   567→    e.stopPropagation();
-   568→    setIsDragging(true);
-   569→  }, []);
+   550→      if (match) {
+   551→        useMaterialEditorStore.getState().selectMaterial(match.id);
+   552→
+   553→        // Open right panel and switch to matEdit tab if needed
+   554→        const ui = useUIStore.getState();
+   555→        if (!ui.rightPanelOpen) ui.showPanel('rightPanel');
+   556→
+   557→        // Visual feedback: brief emissive flash on the mesh
+   558→        if (material && 'emissive' in material) {
+   559→          const mat = material as THREE.MeshStandardMaterial;
+   560→          const origEmissive = mat.emissive.clone();
+   561→          mat.emissive.set(0x444466);
+   562→          setTimeout(() => {
+   563→            mat.emissive.copy(origEmissive);
+   564→            mat.needsUpdate = true;
+   565→          }, 200);
+   566→        }
+   567→      }
+   568→    }
+   569→  }, [sceneManagerRef]);
    570→
-   571→  const handleDragLeave = useCallback((e: React.DragEvent) => {
-   572→    e.preventDefault();
-   573→    e.stopPropagation();
-   574→    if (e.currentTarget === e.target) {
-   575→      setIsDragging(false);
-   576→    }
-   577→  }, []);
-   578→
-   579→  const handleDragOver = useCallback((e: React.DragEvent) => {
-   580→    e.preventDefault();
-   581→    e.stopPropagation();
-   582→    e.dataTransfer.dropEffect = 'copy';
-   583→  }, []);
-   584→
-   585→  const handleDrop = useCallback(
-   586→    (e: React.DragEvent) => {
-   587→      e.preventDefault();
-   588→      e.stopPropagation();
-   589→      setIsDragging(false);
-   590→
-   591→      const files = e.dataTransfer.files;
-   592→      if (files.length === 0) return;
-   593→
-   594→      const file = files[0];
-   595→      const ext = file.name.toLowerCase().split('.').pop();
-   596→      if (ext === 'glb' || ext === 'gltf') {
-   597→        loadModelFile(file);
-   598→      }
-   599→    },
-   600→    // eslint-disable-next-line react-hooks/exhaustive-deps
-   601→    [modelLoaderRef]
-   602→  );
-   603→
-   604→  // Load model from file
-   605→  const loadModelFile = useCallback(
-   606→    (file: File) => {
-   607→      if (!modelLoaderRef.current) return;
-   608→      setIsLoading(true);
-   609→      setLoadError(null);
-   610→      setLoadProgress(0);
-   611→      modelLoaderRef.current.loadFromFile(file);
-   612→    },
-   613→    [modelLoaderRef]
-   614→  );
-   615→
-   616→  // File picker
-   617→  const handleFileInput = useCallback(
-   618→    (e: React.ChangeEvent<HTMLInputElement>) => {
-   619→      const file = e.target.files?.[0];
-   620→      if (file) loadModelFile(file);
-   621→      e.target.value = '';
-   622→    },
-   623→    [loadModelFile]
-   624→  );
-   625→
-   626→  const handleOpenFilePicker = useCallback(() => {
-   627→    fileInputRef.current?.click();
-   628→  }, []);
-   629→
-   630→  // Screenshot handler
-   631→  const handleScreenshot = useCallback(() => {
-   632→    const dataUrl = renderPipelineRef.current
-   633→      ? renderPipelineRef.current.capture()
-   634→      : sceneManagerRef.current?.takeScreenshot() ?? '';
-   635→    if (dataUrl) onScreenshot(dataUrl);
-   636→  }, [sceneManagerRef, renderPipelineRef, onScreenshot]);
-   637→
-   638→  return (
-   639→    <ThreeSceneProvider>
-   640→      <div style={{ display: 'flex', flexDirection: 'column', width: '100%', height: '100%' }}>
-   641→        <ViewportToolbar
-   642→          sceneManagerRef={sceneManagerRef}
-   643→          onScreenshot={handleScreenshot}
-   644→          onLoadModel={handleOpenFilePicker}
-   645→        />
-   646→        <div
-   647→          ref={containerRef}
-   648→          style={{
-   649→            position: 'relative',
-   650→            flex: 1,
-   651→            overflow: 'hidden',
-   652→            background: 'var(--bg-deep)',
-   653→          }}
-   654→          onMouseDown={(e) => { mouseDownPos.current = { x: e.clientX, y: e.clientY }; }}
-   655→          onClick={(e) => {
-   656→            if (mouseDownPos.current) {
-   657→              const dx = e.clientX - mouseDownPos.current.x;
-   658→              const dy = e.clientY - mouseDownPos.current.y;
-   659→              if (Math.sqrt(dx*dx + dy*dy) < 3) {
-   660→                handleViewportClick(e);
-   661→              }
-   662→            }
-   663→            mouseDownPos.current = null;
-   664→          }}
-   665→          onDragEnter={handleDragEnter}
-   666→          onDragLeave={handleDragLeave}
-   667→          onDragOver={handleDragOver}
-   668→          onDrop={handleDrop}
-   669→        >
-   670→          {isDragging && (
-   671→            <div className="drop-overlay">
-   672→              <span>Drop .glb file to load model</span>
-   673→            </div>
-   674→          )}
-   675→
-   676→          {isLoading && loadProgress < 100 && (
-   677→            <div
-   678→              style={{
-   679→                position: 'absolute',
-   680→                top: 0,
-   681→                left: 0,
-   682→                right: 0,
-   683→                zIndex: 10,
-   684→                padding: '6px 12px',
-   685→              }}
-   686→            >
-   687→              <div className="progress-bar">
-   688→                <div
-   689→                  className="progress-bar-fill"
-   690→                  style={{ width: `${loadProgress}%` }}
-   691→                />
-   692→              </div>
-   693→            </div>
-   694→          )}
-   695→
-   696→          {loadError && (
-   697→            <div
-   698→              style={{
-   699→                position: 'absolute',
-   700→                bottom: 12,
-   701→                left: '50%',
-   702→                transform: 'translateX(-50%)',
-   703→                zIndex: 10,
-   704→                background: 'var(--danger)',
-   705→                color: '#fff',
-   706→                padding: '4px 12px',
-   707→                borderRadius: 'var(--radius-sm)',
-   708→                fontSize: 11,
-   709→              }}
-   710→            >
-   711→              {loadError}
-   712→            </div>
-   713→          )}
-   714→
-   715→          <input
-   716→            ref={fileInputRef}
-   717→            type="file"
-   718→            accept=".glb,.gltf"
-   719→            style={{ display: 'none' }}
-   720→            onChange={handleFileInput}
-   721→          />
-   722→
-   723→          <CameraBookmarks sceneManagerRef={sceneManagerRef} />
-   724→        </div>
-   725→      </div>
-   726→    </ThreeSceneProvider>
-   727→  );
-   728→};
+   571→  // Drag and drop handlers
+   572→  const handleDragEnter = useCallback((e: React.DragEvent) => {
+   573→    e.preventDefault();
+   574→    e.stopPropagation();
+   575→    setIsDragging(true);
+   576→  }, []);
+   577→
+   578→  const handleDragLeave = useCallback((e: React.DragEvent) => {
+   579→    e.preventDefault();
+   580→    e.stopPropagation();
+   581→    if (e.currentTarget === e.target) {
+   582→      setIsDragging(false);
+   583→    }
+   584→  }, []);
+   585→
+   586→  const handleDragOver = useCallback((e: React.DragEvent) => {
+   587→    e.preventDefault();
+   588→    e.stopPropagation();
+   589→    e.dataTransfer.dropEffect = 'copy';
+   590→  }, []);
+   591→
+   592→  const handleDrop = useCallback(
+   593→    (e: React.DragEvent) => {
+   594→      e.preventDefault();
+   595→      e.stopPropagation();
+   596→      setIsDragging(false);
+   597→
+   598→      const files = e.dataTransfer.files;
+   599→      if (files.length === 0) return;
+   600→
+   601→      const file = files[0];
+   602→      const ext = file.name.toLowerCase().split('.').pop();
+   603→      if (ext === 'glb' || ext === 'gltf') {
+   604→        loadModelFile(file);
+   605→      }
+   606→    },
+   607→    // eslint-disable-next-line react-hooks/exhaustive-deps
+   608→    [modelLoaderRef]
+   609→  );
+   610→
+   611→  // Load model from file
+   612→  const loadModelFile = useCallback(
+   613→    (file: File) => {
+   614→      if (!modelLoaderRef.current) return;
+   615→      setIsLoading(true);
+   616→      setLoadError(null);
+   617→      setLoadProgress(0);
+   618→      modelLoaderRef.current.loadFromFile(file);
+   619→    },
+   620→    [modelLoaderRef]
+   621→  );
+   622→
+   623→  // File picker
+   624→  const handleFileInput = useCallback(
+   625→    (e: React.ChangeEvent<HTMLInputElement>) => {
+   626→      const file = e.target.files?.[0];
+   627→      if (file) loadModelFile(file);
+   628→      e.target.value = '';
+   629→    },
+   630→    [loadModelFile]
+   631→  );
+   632→
+   633→  const handleOpenFilePicker = useCallback(() => {
+   634→    fileInputRef.current?.click();
+   635→  }, []);
+   636→
+   637→  // Screenshot handler
+   638→  const handleScreenshot = useCallback(() => {
+   639→    const dataUrl = renderPipelineRef.current
+   640→      ? renderPipelineRef.current.capture()
+   641→      : sceneManagerRef.current?.takeScreenshot() ?? '';
+   642→    if (dataUrl) onScreenshot(dataUrl);
+   643→  }, [sceneManagerRef, renderPipelineRef, onScreenshot]);
+   644→
+   645→  return (
+   646→    <ThreeSceneProvider>
+   647→      <div style={{ display: 'flex', flexDirection: 'column', width: '100%', height: '100%' }}>
+   648→        <ViewportToolbar
+   649→          sceneManagerRef={sceneManagerRef}
+   650→          onScreenshot={handleScreenshot}
+   651→          onLoadModel={handleOpenFilePicker}
+   652→        />
+   653→        <div
+   654→          ref={containerRef}
+   655→          style={{
+   656→            position: 'relative',
+   657→            flex: 1,
+   658→            overflow: 'hidden',
+   659→            background: 'var(--bg-deep)',
+   660→          }}
+   661→          onMouseDown={(e) => { mouseDownPos.current = { x: e.clientX, y: e.clientY }; }}
+   662→          onClick={(e) => {
+   663→            if (mouseDownPos.current) {
+   664→              const dx = e.clientX - mouseDownPos.current.x;
+   665→              const dy = e.clientY - mouseDownPos.current.y;
+   666→              if (Math.sqrt(dx*dx + dy*dy) < 3) {
+   667→                handleViewportClick(e);
+   668→              }
+   669→            }
+   670→            mouseDownPos.current = null;
+   671→          }}
+   672→          onDragEnter={handleDragEnter}
+   673→          onDragLeave={handleDragLeave}
+   674→          onDragOver={handleDragOver}
+   675→          onDrop={handleDrop}
+   676→        >
+   677→          {isDragging && (
+   678→            <div className="drop-overlay">
+   679→              <span>Drop .glb file to load model</span>
+   680→            </div>
+   681→          )}
+   682→
+   683→          {isLoading && loadProgress < 100 && (
+   684→            <div
+   685→              style={{
+   686→                position: 'absolute',
+   687→                top: 0,
+   688→                left: 0,
+   689→                right: 0,
+   690→                zIndex: 10,
+   691→                padding: '6px 12px',
+   692→              }}
+   693→            >
+   694→              <div className="progress-bar">
+   695→                <div
+   696→                  className="progress-bar-fill"
+   697→                  style={{ width: `${loadProgress}%` }}
+   698→                />
+   699→              </div>
+   700→            </div>
+   701→          )}
+   702→
+   703→          {loadError && (
+   704→            <div
+   705→              style={{
+   706→                position: 'absolute',
+   707→                bottom: 12,
+   708→                left: '50%',
+   709→                transform: 'translateX(-50%)',
+   710→                zIndex: 10,
+   711→                background: 'var(--danger)',
+   712→                color: '#fff',
+   713→                padding: '4px 12px',
+   714→                borderRadius: 'var(--radius-sm)',
+   715→                fontSize: 11,
+   716→              }}
+   717→            >
+   718→              {loadError}
+   719→            </div>
+   720→          )}
+   721→
+   722→          <input
+   723→            ref={fileInputRef}
+   724→            type="file"
+   725→            accept=".glb,.gltf"
+   726→            style={{ display: 'none' }}
+   727→            onChange={handleFileInput}
+   728→          />
+   729→
+   730→          <CameraBookmarks sceneManagerRef={sceneManagerRef} />
+   731→        </div>
+   732→      </div>
+   733→    </ThreeSceneProvider>
+   734→  );
+   735→};

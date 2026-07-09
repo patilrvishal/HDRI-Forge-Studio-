@@ -21,6 +21,7 @@ import { TimelinePanel } from '../Timeline/TimelinePanel';
 import { ExportDialog } from '../Export/ExportDialog';
 import { FinalRenderPanel } from '../Export/FinalRenderPanel';
 import { EnvironmentBrowser } from '../Environment/EnvironmentBrowser';
+import { EnvironmentAssetsPanel } from '../Environment/EnvironmentAssetsPanel';
 import { SceneManager, RenderPipeline } from '../../three/engine';
 import { SceneExporter } from '../../three/SceneExporter';
 import { MaterialManager } from '../../three/MaterialManager';
@@ -66,6 +67,9 @@ export const AppLayout: React.FC = () => {
   const sceneManagerRef = useRef<SceneManager | null>(null);
   const sceneRef = useRef<THREE.Scene | null>(null);
   const envMapRef = useRef<THREE.Texture | null>(null);
+
+  // Left panel tab state
+  const [leftTab, setLeftTab] = useState<'lights' | 'environment'>('lights');
 
   // Resizable panel sizes from store
   const leftPanelWidth = useUILayoutStore((s) => s.leftPanelWidth);
@@ -249,6 +253,8 @@ export const AppLayout: React.FC = () => {
               flexShrink: 0,
               overflow: 'hidden',
               borderRight: 'none',
+              display: 'flex',
+              flexDirection: 'column',
             }}
           >
             <div className="panel-header">
@@ -256,28 +262,66 @@ export const AppLayout: React.FC = () => {
                 <svg width="10" height="10" viewBox="0 0 10 10" fill="currentColor" style={{ opacity: 0.6 }}>
                   <circle cx="5" cy="5" r="3" />
                 </svg>
-                Light List
+                {leftTab === 'lights' ? 'Light List' : 'Environment'}
               </h3>
               <div style={{ display: 'flex', gap: 2, alignItems: 'center' }}>
-                <button
-                  className="btn-icon"
-                  style={{ width: 20, height: 20 }}
-                  onClick={() => useLightsStore.getState().addLight()}
-                  title="Add Light"
-                  aria-label="Add Light"
-                >
-                  <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5">
-                    <path d="M6 1v10M1 6h10" />
-                  </svg>
-                </button>
+                {leftTab === 'lights' && (
+                  <button
+                    className="btn-icon"
+                    style={{ width: 20, height: 20 }}
+                    onClick={() => useLightsStore.getState().addLight()}
+                    title="Add Light"
+                    aria-label="Add Light"
+                  >
+                    <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5">
+                      <path d="M6 1v10M1 6h10" />
+                    </svg>
+                  </button>
+                )}
                 <PanelCloseButton panel="leftPanel" />
               </div>
             </div>
+
+            {/* Tab bar */}
+            <div
+              style={{
+                display: 'flex',
+                borderBottom: '1px solid var(--border)',
+                flexShrink: 0,
+              }}
+            >
+              {(['lights', 'environment'] as const).map((tab) => (
+                <button
+                  key={tab}
+                  className={`tab-item ${leftTab === tab ? 'active' : ''}`}
+                  onClick={() => setLeftTab(tab)}
+                  style={{
+                    flex: 1,
+                    fontSize: 10,
+                    padding: '5px 0',
+                    borderRadius: 0,
+                    border: 'none',
+                    borderBottom: leftTab === tab ? '2px solid var(--accent)' : '2px solid transparent',
+                    marginBottom: -1,
+                  }}
+                >
+                  {tab === 'lights' ? 'Lights' : 'Environment'}
+                </button>
+              ))}
+            </div>
+
+            {/* Tab content */}
             <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-              <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
-                <LightListPanel />
-              </div>
-              <LightProfileSection />
+              {leftTab === 'lights' ? (
+                <>
+                  <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+                    <LightListPanel />
+                  </div>
+                  <LightProfileSection />
+                </>
+              ) : (
+                <EnvironmentAssetsPanel />
+              )}
             </div>
           </div>
         </div>

@@ -2,6 +2,7 @@ import { useSceneStore } from '../store/sceneStore';
 import { useLightsStore } from '../store/lightsStore';
 import { useAnimationStore } from '../store/animationStore';
 import { useMaterialEditorStore } from '../store/materialEditorStore';
+import { useHDRIAssetStore } from '../store/hdriAssetStore';
 import { history } from '../store/historyStore';
 import { getRawModelDataBase64 } from '../store/modelDataStore';
 import { getRawHDRIDataBase64 } from '../store/hdriDataStore';
@@ -81,6 +82,8 @@ export interface SceneFile {
 
   // ── Material Editor state (Phase 10) ─────────────────────────────────────
   materials: unknown[] | null;
+  // ── HDRI Assets ──────────────────────────────────────────────────────────
+  hdriAssets: unknown[] | null;
 }
 
 // ── SceneExporter ──────────────────────────────────────────────────────────
@@ -127,6 +130,7 @@ export class SceneExporter {
           shadowQuality: sceneState.renderSettings.shadowQuality,
           bloom: { ...sceneState.renderSettings.bloom },
           ao: { ...sceneState.renderSettings.ao },
+          ground: { ...sceneState.renderSettings.ground },
           vignette: { ...sceneState.renderSettings.vignette },
           colorGrading: { ...sceneState.renderSettings.colorGrading },
           exportFormat: sceneState.renderSettings.exportFormat,
@@ -149,6 +153,7 @@ export class SceneExporter {
         fov: b.fov,
       })),
       materials: useMaterialEditorStore.getState().exportMaterials(),
+      hdriAssets: useHDRIAssetStore.getState().exportAssets(),
     };
   }
 
@@ -235,6 +240,27 @@ export class SceneExporter {
         useMaterialEditorStore.getState().importMaterials(data.materials as never[]);
       } else {
         useMaterialEditorStore.getState().clearMaterials();
+      }
+
+      // ── Restore HDRI assets ────────────────────────────────────────────
+      if (Array.isArray(data.hdriAssets) && data.hdriAssets.length > 0) {
+        useHDRIAssetStore.getState().importAssets(data.hdriAssets as never[]);
+        // Restore blob URLs for each asset that has base64 data
+        for (const asset of data.hdriAssets) {
+          const a = asset as { id: string; dataBase64: string | null; fileName: string };
+          if (a.dataBase64) {
+            const binary = atob(a.dataBase64);
+            const bytes = new Uint8Array(binary.length);
+            for (let i = 0; i < binary.length; i++) {
+              bytes[i] = binary.charCodeAt(i);
+            }
+            const blob = new Blob([bytes.buffer], { type: 'application/octet-stream' });
+            const url = URL.createObjectURL(blob);
+            useHDRIAssetStore.getState().setAssetBlobUrl(a.id, url);
+          }
+        }
+      } else {
+        useHDRIAssetStore.getState().clearAssets();
       }
 
       // ── Restore model GLB data ──────────────────────────────────────────

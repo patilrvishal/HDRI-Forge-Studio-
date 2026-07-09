@@ -1,0 +1,1019 @@
+You are rebuilding the HDRI export system in LightForge Studio
+from scratch. The current implementation is FUNDAMENTALLY WRONG.
+
+TECH STACK:
+- Three.js r165+
+- TypeScript strict mode
+- Vite + React 18
+
+═══════════════════════════════════════════════════════════════
+UNDERSTANDING THE PROBLEM — READ THIS FIRST
+═══════════════════════════════════════════════════════════════
+
+CURRENT WRONG APPROACH:
+The current code places visible proxy sphere meshes 
+where lights are, then captures them with CubeCamera.
+This produces a 360° PHOTO of colored spheres — NOT an HDRI.
+
+WHY IT'S WRONG:
+1. CubeCamera captures REFLECTED/EMITTED light from surfaces
+   NOT the raw light energy emanating in each direction
+2. Proxy meshes have limited brightness even with ShaderMaterial
+   because WebGL clamps fragment output in many configurations
+3. The result looks like a photo, not a radiance map
+4. When imported into Blender — it acts as LDR background image
+   not as actual lighting source
+
+WHAT A TRUE HDRI IS:
+An HDRI (High Dynamic Range Image) in equirectangular format
+represents the RADIANCE (light energy) arriving from every 
+direction in a sphere around the capture point.
+
+Each pixel value = how many watts per steradian arrive
+from that direction.
+
+Example values in a real HDRI:
+- Sky (overcast): 1.0 - 3.0
+- Sunlit wall: 5.0 - 20.0  
+- Direct sun disk: 50000 - 100000
+- Studio softbox: 100 - 2000
+- Dark shadow area: 0.001 - 0.1
+
+WHAT BLENDER/MAYA DO:
+They analytically compute the radiance contribution of each
+light source in every direction, then write those VALUES
+directly into the equirectangular image — they do NOT
+render a scene and capture it as a photo.
+
+═══════════════════════════════════════════════════════════════
+CORRECT IMPLEMENTATION — ANALYTICAL HDRI GENERATION
+═══════════════════════════════════════════════════════════════
+
+The correct approach is ANALYTICAL — for each pixel in the
+output equirectangular image, calculate the total radiance
+arriving from that direction by evaluating each light's
+contribution mathematically.
+
+STEP 1 — Map every pixel to a world direction:
+
+For output image of width W x height H:
+For pixel at (x, y):
+  u = x / W                    // 0.0 to 1.0
+  v = y / H                    // 0.0 to 1.0
+  theta = u * 2 * PI           // azimuth: 0 to 2PI
+  phi = v * PI                 // elevation: 0 to PI
+  
+  // Convert to world direction vector (Y-up):
+  dir.x = sin(phi) * sin(theta)
+  dir.y = cos(phi)
+  dir.z = sin(phi) * cos(theta)
+
+STEP 2 — For each direction, evaluate ALL lights:
+
+For each light in scene:
+  contribution = evaluateLightInDirection(light, dir)
+  totalRadiance += contribution
+
+STEP 3 — Light evaluation functions per type:
+
+POINT LIGHT:
+  lightDir = normalize(light.position - capturePoint)
+  // Point light shines in ALL directions from its position
+  // Contribution in direction 'dir' = 
+  //   if dir points TOWARD light position:
+  //     intensity / (distance^2) * angularSize
+  //   else: 0
+
+  More precisely — point light contribution in direction D:
+  angle = acos(dot(D, lightDir))
+  if angle < angularRadius:
+    // We're looking directly at/toward the light
+    radiance = intensity * color / (4 * PI * dist^2)
+  else:
+    radiance = 0  // Not visible from this direction
+
+SPOT LIGHT:
+  lightDir = normalize(light.position - capturePoint)
+  angle = acos(dot(dir, -light.direction))
+  if angle < light.angle:
+    // Inside spot cone
+    falloff = smoothstep(light.angle, 
+                         light.angle - light.penumbra, 
+                         angle)
+    radiance = intensity * color * falloff
+  else:
+    radiance = 0
+
+DIRECTIONAL LIGHT (sun):
+  // Directional = infinitely far away, parallel rays
+  // Contribution in direction D:
+  angle = acos(dot(D, -light.direction))
+  if angle < sunAngularRadius (0.00465 radians = 0.267°):
+    radiance = intensity * color * SOLAR_CONSTANT
+  else:
+    // Sky contribution (simple gradient)
+    radiance = skyColor * max(0, dot(D, up)) * skyIntensity
+
+RECT AREA LIGHT (area light):
+  // Rectangle light — sample multiple points on the rect
+  // For each sample point P on rectangle:
+  //   sampleDir = normalize(P - capturePoint)
+  //   if dot(sampleDir, dir) > cos(angularSize/2):
+  //     radiance += intensity * color / (dist^2 * area)
+  
+  // Use 8x8 grid sampling for accuracy:
+  const SAMPLES = 8;
+  for i in 0..SAMPLES:
+    for j in 0..SAMPLES:
+      samplePoint = getRectSample(light, i/SAMPLES, j/SAMPLES)
+      contribution = evaluatePointContribution(
+        samplePoint, dir, intensity, color
+      )
+      radiance += contribution / (SAMPLES * SAMPLES)
+
+HEMISPHERE LIGHT:
+  // Sky/ground ambient
+  // skyColor for directions with Y > 0
+  // groundColor for directions with Y < 0
+  t = (dir.y + 1) / 2  // 0=ground, 1=sky
+  radiance = mix(groundColor, skyColor, t) * intensity
+
+═══════════════════════════════════════════════════════════════
+IMPLEMENTATION — TypeScript
+═══════════════════════════════════════════════════════════════
+
+```typescript
+// src/three/HDRIExporter.ts — Complete Rewrite
+
+import * as THREE from 'three';
+
+// ─────────────────────────────────────────────
+// TYPES
+// ─────────────────────────────────────────────
+
+interface LightData {
+  type: 'point' | 'spot' | 'directional' | 
+        'area' | 'hemisphere';
+  position: THREE.Vector3;
+  direction: THREE.Vector3;  // normalized
+  color: THREE.Color;
+  intensity: number;
+  // Spot light
+  angle?: number;        // radians
+  penumbra?: number;     // radians
+  // Area light  
+  areaWidth?: number;
+  areaHeight?: number;
+  areaRight?: THREE.Vector3;   // right axis of rect
+  areaUp?: THREE.Vector3;      // up axis of rect
+  // Hemisphere
+  groundColor?: THREE.Color;
+  // Point/spot
+  distance?: number;     // 0 = infinite
+  decay?: number;        // 2 = physical
+}
+
+interface HDRIExportOptions {
+  width: number;          // e.g. 4096
+  height: number;         // e.g. 2048
+  capturePoint: THREE.Vector3;  // usually (0,0,0)
+  includeEnvironment: boolean;
+  environmentTexture?: THREE.Texture | null;
+  environmentIntensity: number;
+  environmentRotation: number;  // radians
+}
+
+// ─────────────────────────────────────────────
+// MAIN EXPORT FUNCTION
+// ─────────────────────────────────────────────
+
+export async function generateAnalyticalHDRI(
+  scene: THREE.Scene,
+  options: HDRIExportOptions
+): Promise<Float32Array> {
+
+  const { width, height, capturePoint } = options;
+  const pixels = new Float32Array(width * height * 4);
+
+  // 1. Extract all lights from scene
+  const lights = extractSceneLights(scene);
+  console.log(`[LightForge] Extracting ${lights.length} lights`);
+
+  // 2. Extract environment if available
+  let envSampler: EnvSampler | null = null;
+  if (options.includeEnvironment && 
+      options.environmentTexture) {
+    envSampler = createEnvSampler(
+      options.environmentTexture,
+      options.environmentRotation,
+      options.environmentIntensity
+    );
+  }
+
+  // 3. For each pixel, compute radiance analytically
+  // Use Web Worker for performance on large resolutions
+  const totalPixels = width * height;
+  let processed = 0;
+
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      
+      // Map pixel to direction
+      const dir = pixelToDirection(x, y, width, height);
+      
+      // Accumulate radiance from all lights
+      let r = 0, g = 0, b = 0;
+      
+      for (const light of lights) {
+        if (!light.visible) continue;
+        const contrib = evaluateLightRadiance(
+          light, dir, capturePoint
+        );
+        r += contrib.r;
+        g += contrib.g;
+        b += contrib.b;
+      }
+      
+      // Add environment contribution
+      if (envSampler) {
+        const envContrib = envSampler.sample(dir);
+        r += envContrib.r;
+        g += envContrib.g;
+        b += envContrib.b;
+      }
+      
+      // Write pixel (top-down, no flip needed 
+      // since we're generating analytically)
+      const idx = (y * width + x) * 4;
+      pixels[idx]     = r;
+      pixels[idx + 1] = g;
+      pixels[idx + 2] = b;
+      pixels[idx + 3] = 1.0;
+    }
+
+    // Progress callback every row
+    processed += width;
+    if (y % 50 === 0) {
+      const pct = Math.round(processed / totalPixels * 100);
+      console.log(`[LightForge HDRI] Progress: ${pct}%`);
+    }
+  }
+
+  // 4. Verify HDR values
+  let maxVal = 0;
+  for (let i = 0; i < pixels.length; i += 4) {
+    maxVal = Math.max(maxVal, pixels[i], 
+                      pixels[i+1], pixels[i+2]);
+  }
+  console.log(`[LightForge HDRI] Max radiance: ${maxVal}`);
+  console.log(`[LightForge HDRI] True HDR: ${maxVal > 1.0}`);
+
+  return pixels;
+}
+
+// ─────────────────────────────────────────────
+// PIXEL → DIRECTION
+// ─────────────────────────────────────────────
+
+function pixelToDirection(
+  x: number, y: number, 
+  width: number, height: number
+): THREE.Vector3 {
+  // Equirectangular: 
+  // x=0 → theta=0 (front, +Z)
+  // x=W/2 → theta=PI (back, -Z)  
+  // y=0 → phi=0 (top, +Y)
+  // y=H → phi=PI (bottom, -Y)
+  
+  const u = (x + 0.5) / width;
+  const v = (y + 0.5) / height;
+  
+  const theta = u * 2 * Math.PI;  // azimuth
+  const phi = v * Math.PI;        // elevation
+  
+  return new THREE.Vector3(
+    Math.sin(phi) * Math.sin(theta),
+    Math.cos(phi),
+    Math.sin(phi) * Math.cos(theta)
+  ).normalize();
+}
+
+// ─────────────────────────────────────────────
+// EXTRACT LIGHTS FROM THREE.JS SCENE
+// ─────────────────────────────────────────────
+
+function extractSceneLights(scene: THREE.Scene): LightData[] {
+  const lights: LightData[] = [];
+  
+  scene.traverse((obj) => {
+    // Skip helpers and non-lights
+    if (obj.userData.isLightHelper) return;
+    if (obj.userData.isProxy) return;
+    
+    if (obj instanceof THREE.PointLight) {
+      lights.push({
+        type: 'point',
+        position: obj.getWorldPosition(new THREE.Vector3()),
+        direction: new THREE.Vector3(0, -1, 0),
+        color: obj.color.clone(),
+        intensity: obj.intensity,
+        distance: obj.distance,
+        decay: obj.decay,
+        visible: obj.visible,
+      });
+    }
+    
+    else if (obj instanceof THREE.SpotLight) {
+      const dir = new THREE.Vector3(0, -1, 0)
+        .applyQuaternion(obj.getWorldQuaternion(
+          new THREE.Quaternion()
+        ));
+      lights.push({
+        type: 'spot',
+        position: obj.getWorldPosition(new THREE.Vector3()),
+        direction: dir.normalize(),
+        color: obj.color.clone(),
+        intensity: obj.intensity,
+        angle: obj.angle,
+        penumbra: obj.penumbra,
+        distance: obj.distance,
+        decay: obj.decay,
+        visible: obj.visible,
+      });
+    }
+    
+    else if (obj instanceof THREE.DirectionalLight) {
+      const dir = new THREE.Vector3()
+        .subVectors(
+          obj.target.getWorldPosition(new THREE.Vector3()),
+          obj.getWorldPosition(new THREE.Vector3())
+        ).normalize();
+      lights.push({
+        type: 'directional',
+        position: obj.getWorldPosition(new THREE.Vector3()),
+        direction: dir,
+        color: obj.color.clone(),
+        intensity: obj.intensity,
+        visible: obj.visible,
+      });
+    }
+    
+    else if (obj instanceof THREE.RectAreaLight) {
+      const worldPos = obj.getWorldPosition(
+        new THREE.Vector3()
+      );
+      const worldQuat = obj.getWorldQuaternion(
+        new THREE.Quaternion()
+      );
+      // Area light faces -Z by default
+      const right = new THREE.Vector3(1, 0, 0)
+        .applyQuaternion(worldQuat);
+      const up = new THREE.Vector3(0, 1, 0)
+        .applyQuaternion(worldQuat);
+      const normal = new THREE.Vector3(0, 0, -1)
+        .applyQuaternion(worldQuat);
+      
+      lights.push({
+        type: 'area',
+        position: worldPos,
+        direction: normal,
+        color: obj.color.clone(),
+        intensity: obj.intensity,
+        areaWidth: obj.width,
+        areaHeight: obj.height,
+        areaRight: right,
+        areaUp: up,
+        visible: obj.visible,
+      });
+    }
+    
+    else if (obj instanceof THREE.HemisphereLight) {
+      lights.push({
+        type: 'hemisphere',
+        position: new THREE.Vector3(0, 0, 0),
+        direction: new THREE.Vector3(0, 1, 0),
+        color: obj.color.clone(),
+        groundColor: obj.groundColor.clone(),
+        intensity: obj.intensity,
+        visible: obj.visible,
+      });
+    }
+  });
+  
+  return lights;
+}
+
+// ─────────────────────────────────────────────
+// EVALUATE LIGHT RADIANCE IN DIRECTION
+// ─────────────────────────────────────────────
+
+function evaluateLightRadiance(
+  light: LightData,
+  dir: THREE.Vector3,
+  capturePoint: THREE.Vector3
+): THREE.Color {
+  
+  const result = new THREE.Color(0, 0, 0);
+  
+  switch (light.type) {
+    
+    case 'point': {
+      // Direction from capture point to light
+      const toLight = new THREE.Vector3()
+        .subVectors(light.position, capturePoint);
+      const dist = toLight.length();
+      const toLightNorm = toLight.normalize();
+      
+      // Angular size of point light source
+      // (treat as small sphere of radius 0.05 units)
+      const sourceRadius = 0.05;
+      const angularRadius = Math.atan2(sourceRadius, dist);
+      
+      // Angle between query direction and direction to light
+      const cosAngle = dir.dot(toLightNorm);
+      const angle = Math.acos(Math.min(1, Math.max(-1, cosAngle)));
+      
+      if (angle < angularRadius) {
+        // Looking directly at the light source
+        // Radiance = intensity / (pi * sourceRadius^2)
+        // Scaled by physical decay
+        const decay = light.decay ?? 2;
+        const distFactor = decay > 0 
+          ? Math.pow(Math.max(dist, 0.01), -decay)
+          : 1.0;
+        
+        const radiance = light.intensity * distFactor * 100;
+        result.copy(light.color).multiplyScalar(radiance);
+      }
+      // Outside the source disk → 0 (darkness between lights)
+      break;
+    }
+    
+    case 'spot': {
+      const toLight = new THREE.Vector3()
+        .subVectors(light.position, capturePoint);
+      const dist = toLight.length();
+      const toLightNorm = toLight.normalize();
+      
+      // Check if direction 'dir' is within spot cone
+      // dir must point TOWARD light AND 
+      // be within cone angle of spot direction
+      const cosAngle = dir.dot(toLightNorm);
+      const angle = Math.acos(
+        Math.min(1, Math.max(-1, cosAngle))
+      );
+      const sourceRadius = 0.05;
+      const angularRadius = Math.atan2(sourceRadius, dist);
+      
+      if (angle < angularRadius) {
+        // Check if capture point is in spot cone
+        const toCaptureNorm = new THREE.Vector3()
+          .subVectors(capturePoint, light.position).normalize();
+        const spotCos = toCaptureNorm.dot(light.direction!);
+        const spotAngle = Math.acos(
+          Math.min(1, Math.max(-1, spotCos))
+        );
+        
+        const halfAngle = (light.angle ?? Math.PI/4);
+        const penumbra = (light.penumbra ?? 0.1);
+        
+        if (spotAngle < halfAngle) {
+          // Inside cone
+          const falloff = 1 - THREE.MathUtils.smoothstep(
+            spotAngle,
+            halfAngle - penumbra,
+            halfAngle
+          );
+          
+          const decay = light.decay ?? 2;
+          const distFactor = Math.pow(Math.max(dist, 0.01), -decay);
+          const radiance = light.intensity * distFactor * 
+                           falloff * 100;
+          result.copy(light.color).multiplyScalar(radiance);
+        }
+      }
+      break;
+    }
+    
+    case 'directional': {
+      // Sun-like: tiny disk at infinity
+      // Angular diameter of sun = 0.53° = 0.00927 radians
+      const sunAngularRadius = 0.00927 / 2;
+      
+      // Direction from scene toward the sun
+      const toSun = light.direction!.clone().negate();
+      const cosAngle = dir.dot(toSun);
+      const angle = Math.acos(Math.min(1, Math.max(-1, cosAngle)));
+      
+      if (angle < sunAngularRadius) {
+        // Sun disk — extremely bright
+        const radiance = light.intensity * 80000;
+        result.copy(light.color).multiplyScalar(radiance);
+      } else {
+        // Sky contribution — gradient
+        const upDot = Math.max(0, dir.y);
+        const skyRadiance = light.intensity * 0.3 * upDot;
+        result.copy(light.color).multiplyScalar(skyRadiance);
+      }
+      break;
+    }
+    
+    case 'area': {
+      // Sample NxN points on the rectangle
+      const N = 16;  // 16x16 = 256 samples
+      let totalR = 0, totalG = 0, totalB = 0;
+      
+      const halfW = (light.areaWidth ?? 1) / 2;
+      const halfH = (light.areaHeight ?? 1) / 2;
+      const right = light.areaRight!;
+      const up = light.areaUp!;
+      const normal = light.direction!;
+      
+      // Only contribute if direction faces the light
+      // (light only emits from its front face)
+      const facingCapture = new THREE.Vector3()
+        .subVectors(capturePoint, light.position)
+        .normalize();
+      if (facingCapture.dot(normal) < 0) break;
+      
+      for (let i = 0; i < N; i++) {
+        for (let j = 0; j < N; j++) {
+          // Stratified sample position on rect
+          const su = (i + Math.random()) / N;
+          const sv = (j + Math.random()) / N;
+          
+          const samplePoint = light.position.clone()
+            .addScaledVector(right, (su - 0.5) * 2 * halfW)
+            .addScaledVector(up, (sv - 0.5) * 2 * halfH);
+          
+          // Direction from capture to this sample
+          const toSample = new THREE.Vector3()
+            .subVectors(samplePoint, capturePoint);
+          const dist = toSample.length();
+          const toSampleNorm = toSample.normalize();
+          
+          // Angular size check
+          const sourceRadius = 
+            Math.min(halfW, halfH) / (N * 2);
+          const angularRadius = 
+            Math.atan2(sourceRadius, dist);
+          
+          const cosAngle = dir.dot(toSampleNorm);
+          const angle = Math.acos(
+            Math.min(1, Math.max(-1, cosAngle))
+          );
+          
+          if (angle < angularRadius) {
+            // Lambertian emission from area light
+            const cosTerm = Math.max(0, 
+              toSampleNorm.clone().negate().dot(normal)
+            );
+            const radiance = light.intensity * 
+                             cosTerm * 50 / 
+                             (dist * dist + 0.01);
+            totalR += light.color.r * radiance;
+            totalG += light.color.g * radiance;
+            totalB += light.color.b * radiance;
+          }
+        }
+      }
+      
+      const invN2 = 1 / (N * N);
+      result.setRGB(
+        totalR * invN2, 
+        totalG * invN2, 
+        totalB * invN2
+      );
+      break;
+    }
+    
+    case 'hemisphere': {
+      // Sky/ground gradient
+      // dir.y > 0 = sky, dir.y < 0 = ground
+      const t = (dir.y + 1) / 2;
+      const skyColor = light.color;
+      const groundColor = light.groundColor ?? 
+                          new THREE.Color(0x333333);
+      
+      result.lerpColors(groundColor, skyColor, t);
+      result.multiplyScalar(light.intensity);
+      break;
+    }
+  }
+  
+  return result;
+}
+
+// ─────────────────────────────────────────────
+// ENVIRONMENT TEXTURE SAMPLER
+// ─────────────────────────────────────────────
+
+interface EnvSampler {
+  sample(dir: THREE.Vector3): THREE.Color;
+}
+
+function createEnvSampler(
+  texture: THREE.Texture,
+  rotationRad: number,
+  intensity: number
+): EnvSampler {
+  // Read env texture into a Float32Array for fast sampling
+  // Use an offscreen canvas to read pixel data
+  
+  let imageData: Float32Array | Uint8ClampedArray | null = null;
+  let imgWidth = 0;
+  let imgHeight = 0;
+  
+  if (texture.image) {
+    const canvas = document.createElement('canvas');
+    imgWidth = texture.image.width ?? 512;
+    imgHeight = texture.image.height ?? 256;
+    canvas.width = imgWidth;
+    canvas.height = imgHeight;
+    const ctx = canvas.getContext('2d')!;
+    ctx.drawImage(texture.image, 0, 0);
+    const data = ctx.getImageData(0, 0, imgWidth, imgHeight);
+    imageData = data.data;
+  }
+  
+  return {
+    sample(dir: THREE.Vector3): THREE.Color {
+      if (!imageData) return new THREE.Color(0, 0, 0);
+      
+      // Apply environment rotation
+      const rotatedDir = dir.clone();
+      const angle = rotationRad;
+      const cosA = Math.cos(angle);
+      const sinA = Math.sin(angle);
+      const rx = rotatedDir.x * cosA - rotatedDir.z * sinA;
+      const rz = rotatedDir.x * sinA + rotatedDir.z * cosA;
+      rotatedDir.x = rx;
+      rotatedDir.z = rz;
+      
+      // Direction to UV
+      const phi = Math.acos(
+        Math.min(1, Math.max(-1, rotatedDir.y))
+      );
+      const theta = Math.atan2(rotatedDir.x, rotatedDir.z);
+      
+      const u = (theta / (2 * Math.PI) + 0.5) % 1.0;
+      const v = phi / Math.PI;
+      
+      // Sample with bilinear interpolation
+      const px = u * (imgWidth - 1);
+      const py = v * (imgHeight - 1);
+      const x0 = Math.floor(px);
+      const y0 = Math.floor(py);
+      const x1 = Math.min(x0 + 1, imgWidth - 1);
+      const y1 = Math.min(y0 + 1, imgHeight - 1);
+      const fx = px - x0;
+      const fy = py - y0;
+      
+      function getPixel(px: number, py: number, ch: number): number {
+        const idx = (py * imgWidth + px) * 4 + ch;
+        return (imageData as Uint8ClampedArray)[idx] / 255.0;
+      }
+      
+      const r = THREE.MathUtils.lerp(
+        THREE.MathUtils.lerp(getPixel(x0,y0,0), getPixel(x1,y0,0), fx),
+        THREE.MathUtils.lerp(getPixel(x0,y1,0), getPixel(x1,y1,0), fx),
+        fy
+      ) * intensity;
+      
+      const g = THREE.MathUtils.lerp(
+        THREE.MathUtils.lerp(getPixel(x0,y0,1), getPixel(x1,y0,1), fx),
+        THREE.MathUtils.lerp(getPixel(x0,y1,1), getPixel(x1,y1,1), fx),
+        fy
+      ) * intensity;
+      
+      const b = THREE.MathUtils.lerp(
+        THREE.MathUtils.lerp(getPixel(x0,y0,2), getPixel(x1,y0,2), fx),
+        THREE.MathUtils.lerp(getPixel(x0,y1,2), getPixel(x1,y1,2), fx),
+        fy
+      ) * intensity;
+      
+      return new THREE.Color(r, g, b);
+    }
+  };
+}
+
+// ─────────────────────────────────────────────
+// HDR ENCODING — RGBE (Radiance format)
+// ─────────────────────────────────────────────
+
+function rgbToRGBE(
+  r: number, g: number, b: number
+): [number, number, number, number] {
+  const maxVal = Math.max(r, g, b);
+  if (maxVal < 1e-32) return [0, 0, 0, 0];
+  
+  // frexp — find exponent where 0.5 <= mantissa < 1.0
+  let exp = Math.floor(Math.log2(maxVal)) + 1;
+  let mantissa = maxVal * Math.pow(2, -exp);
+  
+  // Correction pass
+  if (mantissa < 0.5) { exp--; mantissa *= 2; }
+  else if (mantissa >= 1.0) { exp++; mantissa /= 2; }
+  
+  const scale = Math.pow(2, -exp) * 256.0;
+  
+  return [
+    Math.min(255, Math.max(0, Math.floor(r * scale))),
+    Math.min(255, Math.max(0, Math.floor(g * scale))),
+    Math.min(255, Math.max(0, Math.floor(b * scale))),
+    Math.max(0, Math.min(255, exp + 128)),
+  ];
+}
+
+export function encodeHDR(
+  pixels: Float32Array,
+  width: number,
+  height: number
+): ArrayBuffer {
+  const header = 
+    '#?RADIANCE\n' +
+    'SOFTWARE=LightForge Studio\n' +
+    'FORMAT=32-bit_rle_rgbe\n' +
+    'EXPOSURE=1.0\n' +
+    '\n' +
+    `-Y ${height} +X ${width}\n`;
+  
+  const headerBytes = new TextEncoder().encode(header);
+  const rgbeData = new Uint8Array(width * height * 4);
+  
+  for (let i = 0; i < width * height; i++) {
+    const [R, G, B, E] = rgbToRGBE(
+      pixels[i * 4],
+      pixels[i * 4 + 1],
+      pixels[i * 4 + 2]
+    );
+    rgbeData[i * 4]     = R;
+    rgbeData[i * 4 + 1] = G;
+    rgbeData[i * 4 + 2] = B;
+    rgbeData[i * 4 + 3] = E;
+  }
+  
+  const result = new Uint8Array(
+    headerBytes.length + rgbeData.length
+  );
+  result.set(headerBytes, 0);
+  result.set(rgbeData, headerBytes.length);
+  return result.buffer;
+}
+
+// ─────────────────────────────────────────────
+// EXR ENCODING — OpenEXR FLOAT
+// ─────────────────────────────────────────────
+
+export function encodeEXR(
+  pixels: Float32Array,
+  width: number,
+  height: number
+): ArrayBuffer {
+  // OpenEXR format with FLOAT (32-bit) channels
+  // NO_COMPRESSION for maximum compatibility
+  
+  const MAGIC = 0x762F3101;
+  const VERSION = 2;
+  
+  // Helper to write null-terminated string
+  function writeString(
+    view: DataView, offset: number, str: string
+  ): number {
+    for (let i = 0; i < str.length; i++) {
+      view.setUint8(offset++, str.charCodeAt(i));
+    }
+    view.setUint8(offset++, 0); // null terminator
+    return offset;
+  }
+  
+  function writeAttribute(
+    view: DataView, 
+    offset: number,
+    name: string,
+    type: string, 
+    data: Uint8Array
+  ): number {
+    offset = writeString(view, offset, name);
+    offset = writeString(view, offset, type);
+    view.setUint32(offset, data.length, true); offset += 4;
+    data.forEach((b, i) => view.setUint8(offset + i, b));
+    offset += data.length;
+    return offset;
+  }
+  
+  // Pre-calculate sizes
+  // Each scanline: 8 bytes header + W * 3 * 4 bytes (RGB float)
+  const scanlineSize = width * 3 * 4;
+  const dataSize = height * (8 + scanlineSize);
+  
+  // Allocate max possible buffer
+  const buffer = new ArrayBuffer(1024 + dataSize);
+  const view = new DataView(buffer);
+  let offset = 0;
+  
+  // Magic + version
+  view.setUint32(offset, MAGIC, true); offset += 4;
+  view.setUint32(offset, VERSION, true); offset += 4;
+  
+  // Attribute: channels
+  const channelData = new Uint8Array([
+    // B channel: FLOAT, linear, 1 x 1 sampling
+    ...Array.from('B').map(c => c.charCodeAt(0)), 0,
+    1,0,0,0, // FLOAT = 1
+    0,0,0,0, // pLinear = 0
+    0,0,0,0, // reserved
+    1,0,0,0, // xSampling = 1
+    1,0,0,0, // ySampling = 1
+    // G channel
+    ...Array.from('G').map(c => c.charCodeAt(0)), 0,
+    1,0,0,0,0,0,0,0,0,0,0,0,1,0,0,0,1,0,0,0,
+    // R channel
+    ...Array.from('R').map(c => c.charCodeAt(0)), 0,
+    1,0,0,0,0,0,0,0,0,0,0,0,1,0,0,0,1,0,0,0,
+    0 // end of channel list
+  ]);
+  
+  // Write minimal required attributes
+  const compBuf = new Uint8Array([0,0,0,0]); // NO_COMPRESSION
+  offset = writeAttribute(
+    view, offset, 'compression', 'compression', compBuf
+  );
+  
+  // dataWindow
+  const dwBuf = new Uint8Array(16);
+  const dwView = new DataView(dwBuf.buffer);
+  dwView.setInt32(0, 0, true);
+  dwView.setInt32(4, 0, true);
+  dwView.setInt32(8, width - 1, true);
+  dwView.setInt32(12, height - 1, true);
+  offset = writeAttribute(
+    view, offset, 'dataWindow', 'box2i', dwBuf
+  );
+  
+  // displayWindow (same as dataWindow)
+  offset = writeAttribute(
+    view, offset, 'displayWindow', 'box2i', dwBuf
+  );
+  
+  // lineOrder: INCREASING_Y = 0
+  offset = writeAttribute(
+    view, offset, 'lineOrder', 'lineOrder', 
+    new Uint8Array([0])
+  );
+  
+  // pixelAspectRatio: 1.0
+  const parBuf = new Uint8Array(4);
+  new DataView(parBuf.buffer).setFloat32(0, 1.0, true);
+  offset = writeAttribute(
+    view, offset, 'pixelAspectRatio', 'float', parBuf
+  );
+  
+  // screenWindowCenter: (0, 0)
+  const swcBuf = new Uint8Array(8);
+  offset = writeAttribute(
+    view, offset, 'screenWindowCenter', 'v2f', swcBuf
+  );
+  
+  // screenWindowWidth: 1.0
+  const swwBuf = new Uint8Array(4);
+  new DataView(swwBuf.buffer).setFloat32(0, 1.0, true);
+  offset = writeAttribute(
+    view, offset, 'screenWindowWidth', 'float', swwBuf
+  );
+  
+  // End of header marker
+  view.setUint8(offset++, 0);
+  
+  // Offset table (one entry per scanline)
+  const offsetTableStart = offset;
+  offset += height * 8; // placeholder
+  
+  // Write scanline data
+  const scanlineOffsets = new BigUint64Array(height);
+  
+  for (let y = 0; y < height; y++) {
+    scanlineOffsets[y] = BigInt(offset);
+    
+    // Scanline header: y coordinate + data size
+    view.setInt32(offset, y, true); offset += 4;
+    view.setUint32(offset, scanlineSize, true); offset += 4;
+    
+    // Pixel data: B, G, R channels (EXR channel order)
+    // Each channel written separately (planar format)
+    for (let ch = 2; ch >= 0; ch--) { // B=2, G=1, R=0
+      for (let x = 0; x < width; x++) {
+        const pixIdx = (y * width + x) * 4 + ch;
+        view.setFloat32(offset, pixels[pixIdx], true);
+        offset += 4;
+      }
+    }
+  }
+  
+  // Write offset table
+  const offsetView = new DataView(buffer, offsetTableStart);
+  for (let i = 0; i < height; i++) {
+    // Write as two uint32 (little-endian uint64)
+    const lo = Number(scanlineOffsets[i] & 0xFFFFFFFFn);
+    const hi = Number(scanlineOffsets[i] >> 32n);
+    offsetView.setUint32(i * 8, lo, true);
+    offsetView.setUint32(i * 8 + 4, hi, true);
+  }
+  
+  return buffer.slice(0, offset);
+}
+
+// ─────────────────────────────────────────────
+// DOWNLOAD
+// ─────────────────────────────────────────────
+
+export async function downloadHDRI(
+  scene: THREE.Scene,
+  options: HDRIExportOptions,
+  format: 'hdr' | 'exr',
+  filename?: string
+): Promise<void> {
+  console.log('[LightForge] Starting analytical HDRI export...');
+  
+  const pixels = await generateAnalyticalHDRI(scene, options);
+  
+  const buffer = format === 'hdr'
+    ? encodeHDR(pixels, options.width, options.height)
+    : encodeEXR(pixels, options.width, options.height);
+  
+  const mimeType = format === 'hdr' 
+    ? 'image/vnd.radiance' 
+    : 'image/x-exr';
+  
+  const name = filename ?? 
+    `lightforge_hdri_${Date.now()}.${format}`;
+  
+  const blob = new Blob([buffer], { type: mimeType });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = name;
+  a.click();
+  URL.revokeObjectURL(url);
+  
+  console.log(`[LightForge] HDRI exported: ${name}`);
+  console.log(`[LightForge] Size: ${
+    (buffer.byteLength / 1024 / 1024).toFixed(2)
+  } MB`);
+}
+```
+
+═══════════════════════════════════════════════════════════════
+HOW TO CALL FROM UI:
+═══════════════════════════════════════════════════════════════
+
+```typescript
+// In TopMenubar.tsx or ExportDialog.tsx:
+
+import { downloadHDRI } from '../three/HDRIExporter';
+
+async function handleHDRIExport(format: 'hdr' | 'exr') {
+  const sceneManager = SceneManager.getInstance();
+  const scene = sceneManager.getScene();
+  const sceneState = sceneStore.getState();
+  
+  await downloadHDRI(scene, {
+    width: 4096,
+    height: 2048,
+    capturePoint: new THREE.Vector3(0, 0, 0),
+    includeEnvironment: true,
+    environmentTexture: sceneManager.getEnvTexture(),
+    environmentIntensity: sceneState.environment.intensity,
+    environmentRotation: THREE.MathUtils.degToRad(
+      sceneState.environment.rotation
+    ),
+  }, format);
+}
+```
+
+═══════════════════════════════════════════════════════════════
+EXPECTED RESULTS AFTER FIX:
+═══════════════════════════════════════════════════════════════
+
+Console output should show:
+  [LightForge HDRI] Max radiance: 5234.7
+  [LightForge HDRI] True HDR: true
+
+When imported in Blender:
+  ✅ Point lights = bright spots at correct positions
+  ✅ Colored lights = correct color in HDRI
+  ✅ Exposure +3 in Blender = ONLY light spots get brighter
+  ✅ Dark areas stay dark when exposure increases  
+  ✅ Can be used as World HDRI to light other scenes
+
+═══════════════════════════════════════════════════════════════
+CONSTRAINTS:
+═══════════════════════════════════════════════════════════════
+- Generate ONLY: src/three/HDRIExporter.ts
+- TypeScript strict — ZERO errors
+- No external libraries
+- No TODOs, no placeholders
+- Every function fully implemented
+- tsc --strict --noEmit = 0 errors
+- Must work for 4096x2048 resolution
+- Progress logging every 50 rows
