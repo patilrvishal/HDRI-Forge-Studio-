@@ -156,7 +156,7 @@ export class ImageExporter {
 
         // ── Download ──────────────────────────────────────────────────────
         const ext = options.format === 'jpeg' ? 'jpg' : 'png';
-        const name = filename ?? `lightstudio_export_${targetW}x${targetH}.${ext}`;
+        const name = filename ?? `lightforge_export_${targetW}x${targetH}.${ext}`;
         this.downloadDataURL(finalDataURL, name);
 
         resolve();

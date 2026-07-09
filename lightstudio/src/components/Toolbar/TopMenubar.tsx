@@ -23,10 +23,12 @@ interface MenuDefinition {
 interface TopMenubarProps {
   sceneManagerRef?: React.MutableRefObject<SceneManager | null>;
   onExportImage?: () => void;
+  onFinalRender?: () => void;
 }
 
 const MENU_DEFINITIONS = (
   onExportImage: (() => void) | undefined,
+  onFinalRender: (() => void) | undefined,
   sceneManagerRef: React.MutableRefObject<SceneManager | null> | undefined,
   undoLabel: string | null,
   redoLabel: string | null,
@@ -85,7 +87,7 @@ const MENU_DEFINITIONS = (
       label: 'Save Scene As...',
       action: () => {
         const data = SceneExporter.exportScene();
-        const name = prompt('Enter filename:', `lightstudio_scene_${Date.now()}.lightscene`);
+        const name = prompt('Enter filename:', `lightforge_scene_${Date.now()}.lightscene`);
         if (name) {
           SceneExporter.downloadSceneFile(data, name);
         }
@@ -98,6 +100,11 @@ const MENU_DEFINITIONS = (
       action: () => onExportImage?.(),
     },
     sep2b: { label: '', separator: true },
+    finalRender: {
+      label: 'Final Render...',
+      shortcut: 'Ctrl+Shift+E',
+      action: () => onFinalRender?.(),
+    },
     exportHDR: {
       label: 'Export HDRI (.hdr)...',
       action: () => {
@@ -198,7 +205,7 @@ const MENU_DEFINITIONS = (
     fullPreview: { label: 'Full Preview', action: () => useUIStore.getState().setPanelLayout('fullPreview') },
   },
   Help: {
-    docs: { label: 'Documentation', action: () => window.open('https://docs.lightstudio.dev', '_blank') },
+    docs: { label: 'Documentation', action: () => window.open('https://docs.lightforgestudio.dev', '_blank') },
     shortcuts: { label: 'Keyboard Shortcuts', action: () => {} },
     sep1: { label: '', separator: true },
     about: { label: 'About', action: () => useUIStore.getState().setAboutModal(true) },
@@ -207,7 +214,7 @@ const MENU_DEFINITIONS = (
 
 const MENU_KEYS = ['Project', 'Edit', 'Create', 'Canvas', 'Window', 'Help'];
 
-export const TopMenubar: React.FC<TopMenubarProps> = ({ sceneManagerRef, onExportImage }) => {
+export const TopMenubar: React.FC<TopMenubarProps> = ({ sceneManagerRef, onExportImage, onFinalRender }) => {
   const openMenu = useUIStore((s) => s.openMenu);
   const setOpenMenu = useUIStore((s) => s.setOpenMenu);
   const [hoveredMenu, setHoveredMenu] = useState<string | null>(null);
@@ -224,9 +231,9 @@ export const TopMenubar: React.FC<TopMenubarProps> = ({ sceneManagerRef, onExpor
 
   // Build menu definitions with current callbacks and history state
   const menuDefinitions = useMemo(
-    () => MENU_DEFINITIONS(onExportImage, sceneManagerRef, undoLabel, redoLabel, canUndo, canRedo),
+    () => MENU_DEFINITIONS(onExportImage, onFinalRender, sceneManagerRef, undoLabel, redoLabel, canUndo, canRedo),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [onExportImage, sceneManagerRef, undoLabel, redoLabel, canUndo, canRedo],
+    [onExportImage, onFinalRender, sceneManagerRef, undoLabel, redoLabel, canUndo, canRedo],
   );
 
   // Close menu on outside click

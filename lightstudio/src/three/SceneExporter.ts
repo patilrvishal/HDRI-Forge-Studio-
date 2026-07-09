@@ -87,7 +87,7 @@ export interface SceneFile {
 
 export class SceneExporter {
   private static readonly FILE_VERSION = '1.0';
-  private static readonly APP_NAME = 'LightStudio';
+  private static readonly APP_NAME = 'LightForge Studio';
   private static readonly APP_VERSION = '1.0.0';
   private static readonly FILE_EXTENSION = '.lightscene';
   private static readonly MIME_TYPE = 'application/json';
@@ -292,7 +292,7 @@ export class SceneExporter {
     const blob = new Blob([json], { type: this.MIME_TYPE });
     const url = URL.createObjectURL(blob);
 
-    const name = filename ?? `lightstudio_${this.sanitizeFilename(data.scene.modelName)}_${Date.now()}${this.FILE_EXTENSION}`;
+    const name = filename ?? `lightforge_${this.sanitizeFilename(data.scene.modelName)}_${Date.now()}${this.FILE_EXTENSION}`;
 
     const link = document.createElement('a');
     link.href = url;

@@ -483,11 +483,11 @@ export const Viewport: React.FC<ViewportProps> = ({ sceneManagerRef, onScreensho
         falloff: l.falloff,
         gearVisible: l.gearVisible,
         transform: l.transform,
-        spotAngle: l.type === 'spot' ? 45 : l.type === 'rim' ? 30 : undefined,
-        spotPenumbra: l.type === 'spot' ? 0.5 : l.type === 'rim' ? 0.3 : undefined,
+        spotAngle: l.spotAngle,
+        spotPenumbra: l.spotPenumbra,
         spotDecay: 2,
-        areaWidth: l.type === 'overhead' ? 4 : l.type === 'area' ? 2 : undefined,
-        areaHeight: l.type === 'overhead' ? 4 : l.type === 'area' ? 2 : undefined,
+        areaWidth: l.areaWidth,
+        areaHeight: l.areaHeight,
       }))
     );
   }, [lights, lightManagerRef]);

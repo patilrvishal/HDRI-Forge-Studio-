@@ -242,20 +242,20 @@ export const LightProperties: React.FC = () => {
           <div className="section-header">Spotlight</div>
           <Slider
             label="Angle"
-            value={45}
+            value={light.spotAngle}
             min={1}
             max={90}
             step={1}
-            onChange={() => {}}
+            onChange={(v) => handleUpdate({ spotAngle: v })}
             unit="deg"
           />
           <Slider
             label="Penumbra"
-            value={50}
+            value={Math.round(light.spotPenumbra * 100)}
             min={0}
             max={100}
             step={1}
-            onChange={() => {}}
+            onChange={(v) => handleUpdate({ spotPenumbra: v / 100 })}
             unit="%"
           />
         </div>
@@ -265,8 +265,8 @@ export const LightProperties: React.FC = () => {
       {isAreaLike && (
         <div className="props-section">
           <div className="section-header">Area Dimensions</div>
-          <NumericInput label="Width" value={light.type === 'overhead' ? 4 : 2} min={0.1} max={20} step={0.1} onChange={() => {}} />
-          <NumericInput label="Height" value={light.type === 'overhead' ? 4 : 2} min={0.1} max={20} step={0.1} onChange={() => {}} />
+          <NumericInput label="Width" value={light.areaWidth} min={0.1} max={20} step={0.1} onChange={(v) => handleUpdate({ areaWidth: v })} />
+          <NumericInput label="Height" value={light.areaHeight} min={0.1} max={20} step={0.1} onChange={(v) => handleUpdate({ areaHeight: v })} />
         </div>
       )}
 

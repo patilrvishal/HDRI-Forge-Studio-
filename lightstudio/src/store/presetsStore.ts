@@ -457,7 +457,7 @@ export const usePresetsStore = create<PresetsState>((set, get) => ({
     const blob = new Blob([json], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
-    link.download = 'lightstudio_presets.json';
+    link.download = 'lightforge_presets.json';
     link.href = url;
     link.click();
     URL.revokeObjectURL(url);

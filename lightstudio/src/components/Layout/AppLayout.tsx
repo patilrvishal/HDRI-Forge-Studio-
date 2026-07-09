@@ -18,6 +18,7 @@ import { useHistoryStore } from '../../store/historyStore';
 import { useKeyboardShortcuts } from '../../hooks/useKeyboardShortcuts';
 import { TimelinePanel } from '../Timeline/TimelinePanel';
 import { ExportDialog } from '../Export/ExportDialog';
+import { FinalRenderPanel } from '../Export/FinalRenderPanel';
 import { EnvironmentBrowser } from '../Environment/EnvironmentBrowser';
 import { SceneManager, RenderPipeline } from '../../three/engine';
 import { SceneExporter } from '../../three/SceneExporter';
@@ -59,6 +60,7 @@ export const AppLayout: React.FC = () => {
   const [rightTab, setRightTab] = useState<'properties' | 'preview' | 'material' | 'matEdit'>('properties');
   const [, setScreenshotUrl] = useState<string | null>(null);
   const [exportDialogOpen, setExportDialogOpen] = useState(false);
+  const [finalRenderOpen, setFinalRenderOpen] = useState(false);
   const renderPipelineRef = useRef<RenderPipeline | null>(null);
   const materialManagerRef = useRef<MaterialManager | null>(null);
 
@@ -79,7 +81,7 @@ export const AppLayout: React.FC = () => {
   const handleScreenshot = useCallback((dataUrl: string) => {
     setScreenshotUrl(dataUrl);
     const link = document.createElement('a');
-    link.download = `lightstudio-${Date.now()}.png`;
+    link.download = `lightforge-${Date.now()}.png`;
     link.href = dataUrl;
     link.click();
   }, []);
@@ -87,6 +89,11 @@ export const AppLayout: React.FC = () => {
   // Export image handler
   const handleExportImage = useCallback(() => {
     setExportDialogOpen(true);
+  }, []);
+
+  // Final render handler
+  const handleFinalRender = useCallback(() => {
+    setFinalRenderOpen(true);
   }, []);
 
   // Pass renderPipeline ref from Viewport to ExportDialog
@@ -168,7 +175,7 @@ export const AppLayout: React.FC = () => {
       }}
     >
       {/* Top Menu Bar */}
-      <TopMenubar sceneManagerRef={sceneManagerRef} onExportImage={handleExportImage} />
+      <TopMenubar sceneManagerRef={sceneManagerRef} onExportImage={handleExportImage} onFinalRender={handleFinalRender} />
 
       {/* Main body */}
       <div
@@ -405,7 +412,7 @@ export const AppLayout: React.FC = () => {
           </span>
         </div>
         <div style={{ display: 'flex', gap: 12 }}>
-          <span>LightStudio v1.0.0</span>
+          <span>LightForge Studio v1.0.0</span>
           <span>Phase 11</span>
         </div>
       </div>
@@ -415,6 +422,15 @@ export const AppLayout: React.FC = () => {
         <ExportDialog
           renderPipeline={renderPipelineRef.current}
           onClose={() => setExportDialogOpen(false)}
+        />
+      )}
+
+      {/* Final Render Panel (Phase 12) */}
+      {finalRenderOpen && (
+        <FinalRenderPanel
+          renderPipeline={renderPipelineRef.current}
+          sceneManagerRef={sceneManagerRef}
+          onClose={() => setFinalRenderOpen(false)}
         />
       )}
 
@@ -448,7 +464,7 @@ export const AppLayout: React.FC = () => {
             onClick={(e) => e.stopPropagation()}
           >
             <div style={{ fontSize: 16, fontWeight: 700, color: 'var(--accent)', marginBottom: 4 }}>
-              LightStudio
+              LightForge Studio
             </div>
             <div style={{ fontSize: 11, color: 'var(--text-sec)', marginBottom: 8 }}>
               3D Car Lighting Studio

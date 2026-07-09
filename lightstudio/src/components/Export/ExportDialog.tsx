@@ -73,7 +73,7 @@ export const ExportDialog: React.FC<ExportDialogProps> = ({ renderPipeline, onCl
   const handleQuickScreenshot = useCallback(() => {
     if (!renderPipeline) return;
     const dataURL = ImageExporter.quickCapture(renderPipeline);
-    ImageExporter.downloadDataURL(dataURL, `lightstudio_screenshot_${Date.now()}.png`);
+    ImageExporter.downloadDataURL(dataURL, `lightforge_screenshot_${Date.now()}.png`);
     onClose();
   }, [renderPipeline, onClose]);
 
