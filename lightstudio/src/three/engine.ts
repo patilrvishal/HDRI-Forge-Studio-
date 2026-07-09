@@ -157,41 +157,53 @@ export class SceneManager {
    * - reflections=true  → Three.js Reflector (mirror) + fade overlay
    * - reflections=false → MeshStandardMaterial with configurable PBR properties
    */
-  updateGround(settings: GroundSettings): void {
-    this._groundSettings = settings;
+  updateGround(settings?: GroundSettings | null): void {
+    if (!settings) return;
+    // Merge with defaults so old scene files missing new fields don't crash
+    const merged: GroundSettings = {
+      visible: true,
+      reflections: true,
+      reflectionSharpness: 0.85,
+      color: '#111118',
+      roughness: 0.15,
+      metalness: 0.95,
+      fadeRadius: 8.0,
+      ...settings,
+    };
+    this._groundSettings = merged;
     this._disposeGround();
 
-    if (!settings.visible) return;
+    if (!merged.visible) return;
 
     const GROUND_SIZE = 40;
     const groundGeo = new THREE.PlaneGeometry(GROUND_SIZE, GROUND_SIZE);
-    const color = new THREE.Color(settings.color);
+    const color = new THREE.Color(merged.color);
 
-    if (settings.reflections) {
+    if (merged.reflections) {
       // ── Reflective ground (mirror floor) ──
       const dpr = Math.min(window.devicePixelRatio, 2);
       // Lower resolution = blurrier reflection. Sharpness 1 → full res, 0 → 1/4 res.
-      const resScale = 0.25 + 0.75 * settings.reflectionSharpness;
+      const resScale = 0.25 + 0.75 * merged.reflectionSharpness;
 
       this.groundReflector = new Reflector(groundGeo, {
         clipBias: 0.003,
         textureWidth: Math.max(128, Math.round(1920 * resScale * dpr)),
         textureHeight: Math.max(128, Math.round(1080 * resScale * dpr)),
         color: color.getHex(),
-        multisample: settings.reflectionSharpness > 0.5 ? 4 : 0,
+        multisample: merged.reflectionSharpness > 0.5 ? 4 : 0,
       });
       this.groundReflector.rotation.x = -Math.PI / 2;
       this.groundReflector.position.y = -0.005;
       this.scene.add(this.groundReflector);
 
       // ── Fade overlay: fades ground edges into background ──
-      if (settings.fadeRadius > 0) {
+      if (merged.fadeRadius > 0) {
         const overlayGeo = new THREE.PlaneGeometry(GROUND_SIZE, GROUND_SIZE);
         const overlayMat = new THREE.ShaderMaterial({
           transparent: true,
           depthWrite: false,
           uniforms: {
-            uFadeRadius: { value: settings.fadeRadius },
+            uFadeRadius: { value: merged.fadeRadius },
             uGroundSize: { value: GROUND_SIZE / 2 },
           },
           vertexShader: /* glsl */ `
@@ -224,8 +236,8 @@ export class SceneManager {
       // ── Standard PBR ground (no reflections) ──
       const groundMat = new THREE.MeshStandardMaterial({
         color: color.getHex(),
-        metalness: settings.metalness,
-        roughness: settings.roughness,
+        metalness: merged.metalness,
+        roughness: merged.roughness,
         envMapIntensity: 0.5,
       });
       this.ground = new THREE.Mesh(groundGeo, groundMat);
@@ -234,13 +246,13 @@ export class SceneManager {
       this.ground.receiveShadow = true;
 
       // Fade overlay for non-reflective ground too
-      if (settings.fadeRadius > 0) {
+      if (merged.fadeRadius > 0) {
         const overlayGeo = new THREE.PlaneGeometry(GROUND_SIZE, GROUND_SIZE);
         const overlayMat = new THREE.ShaderMaterial({
           transparent: true,
           depthWrite: false,
           uniforms: {
-            uFadeRadius: { value: settings.fadeRadius },
+            uFadeRadius: { value: merged.fadeRadius },
             uGroundSize: { value: GROUND_SIZE / 2 },
             uBgColor: { value: new THREE.Color('#0d0d1a') },
           },

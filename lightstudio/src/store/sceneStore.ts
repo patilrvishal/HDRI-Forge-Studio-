@@ -1,6 +1,6 @@
 import { create } from 'zustand';
-import type { SceneState, CameraBookmark } from '../types/Scene';
-import { DEFAULT_SCENE_STATE, createDefaultCameraBookmark } from '../types/Scene';
+import type { SceneState, CameraBookmark, RenderSettings } from '../types/Scene';
+import { DEFAULT_SCENE_STATE, DEFAULT_RENDER_SETTINGS, createDefaultCameraBookmark } from '../types/Scene';
 import { history } from './historyStore';
 
 interface SceneStore extends SceneState {
@@ -229,7 +229,20 @@ export const useSceneStore = create<SceneStore>((set, get) => ({
 
   loadSceneState: (newState) => {
     // Scene import/restore — do NOT record (called by undo/redo itself, or by file open)
-    set((state) => ({ ...state, ...newState }));
+    // Deep-merge renderSettings so old scene files missing new fields (e.g. ground) get defaults
+    const mergedState = { ...newState };
+    if (newState.renderSettings) {
+      mergedState.renderSettings = {
+        ...DEFAULT_RENDER_SETTINGS,
+        ...newState.renderSettings,
+        bloom: { ...DEFAULT_RENDER_SETTINGS.bloom, ...newState.renderSettings.bloom },
+        ao: { ...DEFAULT_RENDER_SETTINGS.ao, ...newState.renderSettings.ao },
+        ground: { ...DEFAULT_RENDER_SETTINGS.ground, ...(newState.renderSettings as Partial<RenderSettings>).ground },
+        vignette: { ...DEFAULT_RENDER_SETTINGS.vignette, ...newState.renderSettings.vignette },
+        colorGrading: { ...DEFAULT_RENDER_SETTINGS.colorGrading, ...newState.renderSettings.colorGrading },
+      };
+    }
+    set((state) => ({ ...state, ...mergedState }));
   },
 
   resetScene: () => {
