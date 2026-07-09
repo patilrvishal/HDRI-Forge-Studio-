@@ -17,7 +17,9 @@ export interface Preset {
   id: string;
   name: string;
   category: 'sidelights' | 'studio' | 'outdoor' | 'spotlight' | 'custom';
+  description: string;
   thumbnail: string; // base64 data URL
+  tags: string[];
   lights: PresetLight[];
   createdAt: number;
   isDefault: boolean;

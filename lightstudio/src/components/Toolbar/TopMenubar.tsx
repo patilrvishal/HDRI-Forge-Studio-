@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useCallback, useState, useMemo } from 'react';
 import { useUIStore } from '../../store/uiStore';
+import type { PanelKey, PanelVisibilityState } from '../../store/uiStore';
 import { useSceneStore } from '../../store/sceneStore';
 import { useLightsStore } from '../../store/lightsStore';
 import { useHistoryStore } from '../../store/historyStore';
@@ -26,6 +27,10 @@ interface TopMenubarProps {
   onFinalRender?: () => void;
 }
 
+function checkLabel(label: string, checked: boolean): string {
+  return checked ? `✓ ${label}` : label;
+}
+
 const MENU_DEFINITIONS = (
   onExportImage: (() => void) | undefined,
   onFinalRender: (() => void) | undefined,
@@ -34,6 +39,7 @@ const MENU_DEFINITIONS = (
   redoLabel: string | null,
   canUndo: boolean,
   canRedo: boolean,
+  panelVisibility: PanelVisibilityState,
 ): Record<string, MenuDefinition> => ({
   Project: {
     newScene: {
@@ -200,9 +206,53 @@ const MENU_DEFINITIONS = (
     },
   },
   Window: {
-    defaultLayout: { label: 'Default Layout', action: () => useUIStore.getState().setPanelLayout('default') },
-    lightingOnly: { label: 'Lighting Only', action: () => useUIStore.getState().setPanelLayout('lighting') },
-    fullPreview: { label: 'Full Preview', action: () => useUIStore.getState().setPanelLayout('fullPreview') },
+    lightList: {
+      label: checkLabel('Light List', panelVisibility.leftPanel),
+      shortcut: 'Ctrl+1',
+      action: () => useUIStore.getState().togglePanel('leftPanel' as PanelKey),
+    },
+    properties: {
+      label: checkLabel('Properties', panelVisibility.rightPanel),
+      shortcut: 'Ctrl+2',
+      action: () => useUIStore.getState().togglePanel('rightPanel' as PanelKey),
+    },
+    timeline: {
+      label: checkLabel('Timeline', panelVisibility.timelineSection),
+      shortcut: 'Ctrl+3',
+      action: () => useUIStore.getState().togglePanel('timelineSection' as PanelKey),
+    },
+    presets: {
+      label: checkLabel('Presets', panelVisibility.presetsSection),
+      shortcut: 'Ctrl+4',
+      action: () => useUIStore.getState().togglePanel('presetsSection' as PanelKey),
+    },
+    materialEditor: {
+      label: checkLabel('Material Editor', panelVisibility.materialPanel),
+      shortcut: 'Ctrl+5',
+      action: () => useUIStore.getState().togglePanel('materialPanel' as PanelKey),
+    },
+    sep1: { label: '', separator: true },
+    defaultLayout: {
+      label: 'Default Layout',
+      shortcut: 'Ctrl+Shift+D',
+      action: () => useUIStore.getState().setPanelLayout('default'),
+    },
+    lightingOnly: {
+      label: 'Lighting Only',
+      shortcut: 'Ctrl+Shift+L',
+      action: () => useUIStore.getState().setPanelLayout('lighting'),
+    },
+    focusMode: {
+      label: 'Focus Mode',
+      shortcut: 'F',
+      action: () => useUIStore.getState().toggleFocusMode(),
+    },
+    sep2: { label: '', separator: true },
+    resetLayout: {
+      label: 'Reset Layout',
+      shortcut: 'Ctrl+Shift+R',
+      action: () => useUIStore.getState().setPanelLayout('default'),
+    },
   },
   Help: {
     docs: { label: 'Documentation', action: () => window.open('https://docs.lightforgestudio.dev', '_blank') },
@@ -217,6 +267,7 @@ const MENU_KEYS = ['Project', 'Edit', 'Create', 'Canvas', 'Window', 'Help'];
 export const TopMenubar: React.FC<TopMenubarProps> = ({ sceneManagerRef, onExportImage, onFinalRender }) => {
   const openMenu = useUIStore((s) => s.openMenu);
   const setOpenMenu = useUIStore((s) => s.setOpenMenu);
+  const panelVisibility = useUIStore((s) => s.panelVisibility);
   const [hoveredMenu, setHoveredMenu] = useState<string | null>(null);
   const menuBarRef = useRef<HTMLDivElement>(null);
 
@@ -231,9 +282,9 @@ export const TopMenubar: React.FC<TopMenubarProps> = ({ sceneManagerRef, onExpor
 
   // Build menu definitions with current callbacks and history state
   const menuDefinitions = useMemo(
-    () => MENU_DEFINITIONS(onExportImage, onFinalRender, sceneManagerRef, undoLabel, redoLabel, canUndo, canRedo),
+    () => MENU_DEFINITIONS(onExportImage, onFinalRender, sceneManagerRef, undoLabel, redoLabel, canUndo, canRedo, panelVisibility),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [onExportImage, onFinalRender, sceneManagerRef, undoLabel, redoLabel, canUndo, canRedo],
+    [onExportImage, onFinalRender, sceneManagerRef, undoLabel, redoLabel, canUndo, canRedo, panelVisibility],
   );
 
   // Close menu on outside click

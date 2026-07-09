@@ -3,311 +3,65 @@ import type { Preset, PresetLight } from '../types/Preset';
 import type { Light } from '../types/Light';
 import { createDefaultLight } from '../types/Light';
 import { presetDB } from '../services/PresetDB';
+import {
+  STUDIO_PRESETS, STUDIO_META,
+  OUTDOOR_PRESETS, OUTDOOR_META,
+  SPOTLIGHT_PRESETS, SPOTLIGHT_META,
+  SIDELIGHT_PRESETS, SIDELIGHT_META,
+} from '../data/presets';
+import { generatePresetThumbnail } from '../types/Preset';
 
-// Built-in light presets
-const BUILTIN_PRESETS: Preset[] = [
-  {
-    id: 'builtin_3point',
-    name: '3-Point Lighting',
-    category: 'studio',
-    thumbnail: '',
-    createdAt: 0,
-    isDefault: true,
-    lights: [
-      {
-        name: 'Key Light',
-        type: 'spot',
-        color: '#fff5e6',
-        brightness: 300,
-        opacity: 100,
-        colorProfile: 'daylight',
-        areaLight: false,
-        falloff: 'quadratic',
-        transform: {
-          spherical: { lat: 45, lng: 45, radius: 6, height: 4 },
-          position: { x: 4.24, y: 4, z: 4.24 },
-          rotation: { x: -45, y: 0, z: 0, mode: 'euler', enabled: true, repeat: false, advanced: { lR: 0, p1: 0, p2: 0, p3: 0, rR: 0, ro: 0, roat: 0 } },
-          maisleU: 0,
-          mendieV: 0,
-          smartGolly: 0,
-          dailyMultiplier: 1,
-        },
-      },
-      {
-        name: 'Fill Light',
-        type: 'area',
-        color: '#c8d8ff',
-        brightness: 100,
-        opacity: 100,
-        colorProfile: 'daylight',
-        areaLight: true,
-        falloff: 'linear',
-        transform: {
-          spherical: { lat: 30, lng: -90, radius: 5, height: 2 },
-          position: { x: -5, y: 2, z: 0 },
-          rotation: { x: 0, y: 90, z: 0, mode: 'euler', enabled: true, repeat: false, advanced: { lR: 0, p1: 0, p2: 0, p3: 0, rR: 0, ro: 0, roat: 0 } },
-          maisleU: 0,
-          mendieV: 0,
-          smartGolly: 0,
-          dailyMultiplier: 1,
-        },
-      },
-      {
-        name: 'Rim Light',
-        type: 'rim',
-        color: '#4a9eff',
-        brightness: 180,
-        opacity: 100,
-        colorProfile: 'daylight',
-        areaLight: false,
-        falloff: 'quadratic',
-        transform: {
-          spherical: { lat: 10, lng: 180, radius: 6, height: 2 },
-          position: { x: -6, y: 2, z: 0 },
-          rotation: { x: 0, y: 0, z: 0, mode: 'euler', enabled: false, repeat: false, advanced: { lR: 0, p1: 0, p2: 0, p3: 0, rR: 0, ro: 0, roat: 0 } },
-          maisleU: 0,
-          mendieV: 0,
-          smartGolly: 0,
-          dailyMultiplier: 1,
-        },
-      },
-    ] as PresetLight[],
-  },
-  {
-    id: 'builtin_studio',
-    name: 'Studio Classic',
-    category: 'studio',
-    thumbnail: '',
-    createdAt: 0,
-    isDefault: true,
-    lights: [
-      {
-        name: 'Overhead Key',
-        type: 'overhead',
-        color: '#ffffff',
-        brightness: 250,
-        opacity: 100,
-        colorProfile: 'daylight',
-        areaLight: true,
-        falloff: 'linear',
-        transform: {
-          spherical: { lat: 90, lng: 0, radius: 4, height: 5 },
-          position: { x: 0, y: 5, z: 0 },
-          rotation: { x: -90, y: 0, z: 0, mode: 'euler', enabled: true, repeat: false, advanced: { lR: 0, p1: 0, p2: 0, p3: 0, rR: 0, ro: 0, roat: 0 } },
-          maisleU: 0,
-          mendieV: 0,
-          smartGolly: 0,
-          dailyMultiplier: 1,
-        },
-      },
-      {
-        name: 'Left Fill',
-        type: 'area',
-        color: '#ffe4b5',
-        brightness: 120,
-        opacity: 100,
-        colorProfile: 'tungsten',
-        areaLight: true,
-        falloff: 'linear',
-        transform: {
-          spherical: { lat: 20, lng: 210, radius: 5, height: 2 },
-          position: { x: -4.33, y: 2, z: -2.5 },
-          rotation: { x: 0, y: 30, z: 0, mode: 'euler', enabled: true, repeat: false, advanced: { lR: 0, p1: 0, p2: 0, p3: 0, rR: 0, ro: 0, roat: 0 } },
-          maisleU: 0,
-          mendieV: 0,
-          smartGolly: 0,
-          dailyMultiplier: 1,
-        },
-      },
-      {
-        name: 'Right Fill',
-        type: 'area',
-        color: '#b5d0ff',
-        brightness: 80,
-        opacity: 100,
-        colorProfile: 'daylight',
-        areaLight: true,
-        falloff: 'linear',
-        transform: {
-          spherical: { lat: 20, lng: 330, radius: 5, height: 2 },
-          position: { x: 4.33, y: 2, z: -2.5 },
-          rotation: { x: 0, y: -30, z: 0, mode: 'euler', enabled: true, repeat: false, advanced: { lR: 0, p1: 0, p2: 0, p3: 0, rR: 0, ro: 0, roat: 0 } },
-          maisleU: 0,
-          mendieV: 0,
-          smartGolly: 0,
-          dailyMultiplier: 1,
-        },
-      },
-      {
-        name: 'Back Rim',
-        type: 'rim',
-        color: '#aaccff',
-        brightness: 150,
-        opacity: 100,
-        colorProfile: 'daylight',
-        areaLight: false,
-        falloff: 'quadratic',
-        transform: {
-          spherical: { lat: 15, lng: 180, radius: 7, height: 3 },
-          position: { x: -7, y: 3, z: 0 },
-          rotation: { x: 0, y: 0, z: 0, mode: 'euler', enabled: false, repeat: false, advanced: { lR: 0, p1: 0, p2: 0, p3: 0, rR: 0, ro: 0, roat: 0 } },
-          maisleU: 0,
-          mendieV: 0,
-          smartGolly: 0,
-          dailyMultiplier: 1,
-        },
-      },
-      {
-        name: 'Under Glow',
-        type: 'underlight',
-        color: '#4a9eff',
-        brightness: 60,
-        opacity: 100,
-        colorProfile: 'custom',
-        areaLight: false,
-        falloff: 'quadratic',
-        transform: {
-          spherical: { lat: -90, lng: 0, radius: 3, height: -0.5 },
-          position: { x: 0, y: -0.5, z: 0 },
-          rotation: { x: 90, y: 0, z: 0, mode: 'euler', enabled: true, repeat: false, advanced: { lR: 0, p1: 0, p2: 0, p3: 0, rR: 0, ro: 0, roat: 0 } },
-          maisleU: 0,
-          mendieV: 0,
-          smartGolly: 0,
-          dailyMultiplier: 1,
-        },
-      },
-    ] as PresetLight[],
-  },
-  {
-    id: 'builtin_outdoor',
-    name: 'Outdoor Sun',
-    category: 'outdoor',
-    thumbnail: '',
-    createdAt: 0,
-    isDefault: true,
-    lights: [
-      {
-        name: 'Sun',
-        type: 'directional',
-        color: '#fff8e7',
-        brightness: 400,
-        opacity: 100,
-        colorProfile: 'daylight',
-        areaLight: false,
-        falloff: 'none',
-        transform: {
-          spherical: { lat: 65, lng: 135, radius: 20, height: 10 },
-          position: { x: -11.5, y: 10, z: 11.5 },
-          rotation: { x: -25, y: 0, z: 0, mode: 'euler', enabled: true, repeat: false, advanced: { lR: 0, p1: 0, p2: 0, p3: 0, rR: 0, ro: 0, roat: 0 } },
-          maisleU: 0,
-          mendieV: 0,
-          smartGolly: 0,
-          dailyMultiplier: 1,
-        },
-      },
-      {
-        name: 'Sky Fill',
-        type: 'area',
-        color: '#b8d4ff',
-        brightness: 80,
-        opacity: 100,
-        colorProfile: 'daylight',
-        areaLight: true,
-        falloff: 'linear',
-        transform: {
-          spherical: { lat: 40, lng: 270, radius: 10, height: 6 },
-          position: { x: -10, y: 6, z: 0 },
-          rotation: { x: 0, y: 90, z: 0, mode: 'euler', enabled: true, repeat: false, advanced: { lR: 0, p1: 0, p2: 0, p3: 0, rR: 0, ro: 0, roat: 0 } },
-          maisleU: 0,
-          mendieV: 0,
-          smartGolly: 0,
-          dailyMultiplier: 1,
-        },
-      },
-      {
-        name: 'Ground Bounce',
-        type: 'point',
-        color: '#c8b898',
-        brightness: 50,
-        opacity: 100,
-        colorProfile: 'custom',
-        areaLight: false,
-        falloff: 'quadratic',
-        transform: {
-          spherical: { lat: -30, lng: 0, radius: 5, height: -1 },
-          position: { x: 0, y: -1, z: 0 },
-          rotation: { x: 0, y: 0, z: 0, mode: 'euler', enabled: false, repeat: false, advanced: { lR: 0, p1: 0, p2: 0, p3: 0, rR: 0, ro: 0, roat: 0 } },
-          maisleU: 0,
-          mendieV: 0,
-          smartGolly: 0,
-          dailyMultiplier: 1,
-        },
-      },
-    ] as PresetLight[],
-  },
-  {
-    id: 'builtin_sidelight',
-    name: 'Dramatic Sidelight',
-    category: 'sidelights',
-    thumbnail: '',
-    createdAt: 0,
-    isDefault: true,
-    lights: [
-      {
-        name: 'Key Sidelight',
-        type: 'spot',
-        color: '#ffe0b0',
-        brightness: 350,
-        opacity: 100,
-        colorProfile: 'tungsten',
-        areaLight: false,
-        falloff: 'quadratic',
-        transform: {
-          spherical: { lat: 35, lng: 90, radius: 5, height: 3 },
-          position: { x: 0, y: 3, z: 5 },
-          rotation: { x: -35, y: 0, z: 0, mode: 'euler', enabled: true, repeat: false, advanced: { lR: 0, p1: 0, p2: 0, p3: 0, rR: 0, ro: 0, roat: 0 } },
-          maisleU: 0,
-          mendieV: 0,
-          smartGolly: 0,
-          dailyMultiplier: 1,
-        },
-      },
-      {
-        name: 'Cool Fill',
-        type: 'point',
-        color: '#a0b8e0',
-        brightness: 40,
-        opacity: 100,
-        colorProfile: 'daylight',
-        areaLight: false,
-        falloff: 'quadratic',
-        transform: {
-          spherical: { lat: 20, lng: 270, radius: 6, height: 2 },
-          position: { x: -6, y: 2, z: 0 },
-          rotation: { x: 0, y: 0, z: 0, mode: 'euler', enabled: false, repeat: false, advanced: { lR: 0, p1: 0, p2: 0, p3: 0, rR: 0, ro: 0, roat: 0 } },
-          maisleU: 0,
-          mendieV: 0,
-          smartGolly: 0,
-          dailyMultiplier: 1,
-        },
-      },
-    ] as PresetLight[],
-  },
-];
+// ── Build built-in presets from data ────────────────────────────────
+
+function buildBuiltins(): Preset[] {
+  const out: Preset[] = [];
+
+  const push = (
+    id: string, name: string, category: Preset['category'],
+    description: string, tags: string[], lights: PresetLight[],
+  ) => {
+    out.push({
+      id,
+      name,
+      category,
+      description,
+      thumbnail: generatePresetThumbnail(lights),
+      tags,
+      lights,
+      createdAt: 0,
+      isDefault: true,
+    });
+  };
+
+  // Studio (6)
+  STUDIO_META.forEach((m, i) => push(m.id, m.name, 'studio', m.description, m.tags, STUDIO_PRESETS[i]));
+  // Outdoor (5)
+  OUTDOOR_META.forEach((m, i) => push(m.id, m.name, 'outdoor', m.description, m.tags, OUTDOOR_PRESETS[i]));
+  // Spotlight (6)
+  SPOTLIGHT_META.forEach((m, i) => push(m.id, m.name, 'spotlight', m.description, m.tags, SPOTLIGHT_PRESETS[i]));
+  // Sidelights (1 legacy)
+  SIDELIGHT_META.forEach((m, i) => push(m.id, m.name, 'sidelights', m.description, m.tags, SIDELIGHT_PRESETS[i]));
+
+  return out;
+}
+
+const BUILTIN_PRESETS: Preset[] = buildBuiltins();
 
 function generateId(): string {
   return `${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
 }
 
+type PresetCategory = 'sidelights' | 'studio' | 'outdoor' | 'spotlight' | 'custom';
+
 interface PresetsState {
   presets: Preset[];
-  activeCategory: 'sidelights' | 'studio' | 'outdoor' | 'custom';
+  activeCategory: PresetCategory;
   searchQuery: string;
   previewingId: string | null;
   dbLoaded: boolean;
 
   // Navigation
-  setActiveCategory: (cat: PresetsState['activeCategory']) => void;
+  setActiveCategory: (cat: PresetCategory) => void;
   setSearchQuery: (q: string) => void;
   setPreviewPreset: (id: string | null) => void;
 
@@ -423,7 +177,9 @@ export const usePresetsStore = create<PresetsState>((set, get) => ({
       id: `custom_${generateId()}`,
       name: `Custom ${customCount + 1}`,
       category: 'custom',
+      description: '',
       thumbnail,
+      tags: [],
       lights: presetLights,
       createdAt: Date.now(),
       isDefault: false,
@@ -444,11 +200,13 @@ export const usePresetsStore = create<PresetsState>((set, get) => ({
     const data = {
       version: '1.0',
       exportedAt: new Date().toISOString(),
-      presets: exportable.map(({ id, name, category, thumbnail, lights }) => ({
+      presets: exportable.map(({ id, name, category, description, thumbnail, tags, lights }) => ({
         id,
         name,
         category,
+        description,
         thumbnail,
+        tags,
         lights,
       })),
     };
@@ -478,7 +236,9 @@ export const usePresetsStore = create<PresetsState>((set, get) => ({
         id: (p.id as string) || `imp_${generateId()}`,
         name: p.name as string,
         category: (p.category as Preset['category']) || 'custom',
+        description: (p.description as string) || '',
         thumbnail: (p.thumbnail as string) || '',
+        tags: (p.tags as string[]) || [],
         lights: p.lights as PresetLight[],
         createdAt: (p.createdAt as number) || Date.now(),
         isDefault: false,

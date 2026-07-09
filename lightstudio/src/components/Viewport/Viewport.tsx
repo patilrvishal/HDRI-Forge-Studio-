@@ -15,6 +15,7 @@ import { CameraBookmarks } from './CameraBookmarks';
 import type { AnimatedProperty } from '../../types/Animation';
 import { MaterialManager } from '../../three/MaterialManager';
 import { useMaterialEditorStore } from '../../store/materialEditorStore';
+import { useUIStore } from '../../store/uiStore';
 
 interface ViewportProps {
   sceneManagerRef: React.MutableRefObject<SceneManager | null>;
@@ -32,6 +33,7 @@ export const Viewport: React.FC<ViewportProps> = ({ sceneManagerRef, onScreensho
   const materialManagerRef = useRef<MaterialManager | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const animAccumulatorRef = useRef(0);
+  const mouseDownPos = useRef<{ x: number; y: number } | null>(null);
 
   const [isDragging, setIsDragging] = useState(false);
   const [loadProgress, setLoadProgress] = useState(0);
@@ -500,6 +502,65 @@ export const Viewport: React.FC<ViewportProps> = ({ sceneManagerRef, onScreensho
     sm._turntableSpeed = turntable.speed;
   }, [turntable.active, turntable.speed, sceneManagerRef]);
 
+  // Click-to-select material from viewport
+  const handleViewportClick = useCallback((event: React.MouseEvent) => {
+    // Only work with select tool
+    if (useUIStore.getState().activeTool !== 'select') return;
+
+    const container = containerRef.current;
+    const sm = sceneManagerRef.current;
+    if (!container || !sm) return;
+
+    const rect = container.getBoundingClientRect();
+    const mouse = new THREE.Vector2(
+      ((event.clientX - rect.left) / rect.width) * 2 - 1,
+      -((event.clientY - rect.top) / rect.height) * 2 + 1
+    );
+
+    const raycaster = new THREE.Raycaster();
+    raycaster.setFromCamera(mouse, sm.camera);
+
+    const meshes: THREE.Mesh[] = [];
+    sm.scene.traverse((obj) => {
+      if (obj instanceof THREE.Mesh && !(obj as any).userData?.isHelper) {
+        meshes.push(obj);
+      }
+    });
+
+    const hits = raycaster.intersectObjects(meshes, false);
+    if (hits.length > 0) {
+      const mesh = hits[0].object as THREE.Mesh;
+      // Get material name from Three.js material
+      const material = Array.isArray(mesh.material) ? mesh.material[0] : mesh.material;
+      const matName = material.name || mesh.name;
+
+      // Find matching material in store by name or mesh name
+      const matState = useMaterialEditorStore.getState().materials;
+      const match = matState.find((m) =>
+        m.name === matName || m.meshNames.includes(mesh.name)
+      );
+
+      if (match) {
+        useMaterialEditorStore.getState().selectMaterial(match.id);
+
+        // Open right panel and switch to matEdit tab if needed
+        const ui = useUIStore.getState();
+        if (!ui.rightPanelOpen) ui.showPanel('rightPanel');
+
+        // Visual feedback: brief emissive flash on the mesh
+        if (material && 'emissive' in material) {
+          const mat = material as THREE.MeshStandardMaterial;
+          const origEmissive = mat.emissive.clone();
+          mat.emissive.set(0x444466);
+          setTimeout(() => {
+            mat.emissive.copy(origEmissive);
+            mat.needsUpdate = true;
+          }, 200);
+        }
+      }
+    }
+  }, [sceneManagerRef]);
+
   // Drag and drop handlers
   const handleDragEnter = useCallback((e: React.DragEvent) => {
     e.preventDefault();
@@ -589,6 +650,17 @@ export const Viewport: React.FC<ViewportProps> = ({ sceneManagerRef, onScreensho
             flex: 1,
             overflow: 'hidden',
             background: 'var(--bg-deep)',
+          }}
+          onMouseDown={(e) => { mouseDownPos.current = { x: e.clientX, y: e.clientY }; }}
+          onClick={(e) => {
+            if (mouseDownPos.current) {
+              const dx = e.clientX - mouseDownPos.current.x;
+              const dy = e.clientY - mouseDownPos.current.y;
+              if (Math.sqrt(dx*dx + dy*dy) < 3) {
+                handleViewportClick(e);
+              }
+            }
+            mouseDownPos.current = null;
           }}
           onDragEnter={handleDragEnter}
           onDragLeave={handleDragLeave}

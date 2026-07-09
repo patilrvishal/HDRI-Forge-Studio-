@@ -3,16 +3,20 @@ import { usePresetsStore } from '../../store/presetsStore';
 import { useLightsStore } from '../../store/lightsStore';
 import { presetToLights } from '../../types/Preset';
 import type { Preset } from '../../types/Preset';
+import { renderPresetThumbnail } from '../../three/PresetThumbnailRenderer';
 
 interface PresetBrowserProps {
   /** Optional ref to a MaterialPreview's renderThumbnail function for generating thumbnails */
   onGenerateThumbnail?: (lights: Preset['lights']) => string;
 }
 
-const CATEGORY_TABS: Array<{ key: Preset['category']; label: string }> = [
-  { key: 'sidelights', label: 'Sidelights' },
+type PresetCategory = Preset['category'];
+
+const CATEGORY_TABS: Array<{ key: PresetCategory; label: string }> = [
   { key: 'studio', label: 'Studio' },
   { key: 'outdoor', label: 'Outdoor' },
+  { key: 'spotlight', label: 'Spotlight' },
+  { key: 'sidelights', label: 'Sidelights' },
   { key: 'custom', label: 'Custom' },
 ];
 
@@ -31,6 +35,7 @@ export const PresetBrowser: React.FC<PresetBrowserProps> = ({ onGenerateThumbnai
   const exportPresets = usePresetsStore((s) => s.exportPresets);
   const importPresetsFromFile = usePresetsStore((s) => s.importPresetsFromFile);
   const loadFromDB = usePresetsStore((s) => s.loadFromDB);
+  const updatePreset = usePresetsStore((s) => s.updatePreset);
 
   const lights = useLightsStore((s) => s.lights);
   const setLightsFromPreset = useLightsStore((s) => s.setLightsFromPreset);
@@ -39,6 +44,8 @@ export const PresetBrowser: React.FC<PresetBrowserProps> = ({ onGenerateThumbnai
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [toast, setToast] = useState<string | null>(null);
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [renderingIds, setRenderingIds] = useState<Set<string>>(new Set());
+  const hasStartedRendering = useRef(false);
 
   const showToast = useCallback((msg: string, duration = 2000) => {
     if (toastTimer.current) clearTimeout(toastTimer.current);
@@ -53,23 +60,62 @@ export const PresetBrowser: React.FC<PresetBrowserProps> = ({ onGenerateThumbnai
     }
   }, [dbLoaded, loadFromDB]);
 
+  // Async thumbnail rendering for presets without 3D thumbnails
+  useEffect(() => {
+    if (hasStartedRendering.current) return;
+    hasStartedRendering.current = true;
+
+    const needsRendering = presets.filter(
+      (p) => p.isDefault && p.thumbnail && !p.thumbnail.startsWith('data:image/png'),
+    );
+
+    if (needsRendering.length === 0) return;
+
+    const renderQueue = needsRendering.map((p) => ({ id: p.id, lights: p.lights }));
+
+    setRenderingIds(new Set(renderQueue.map((r) => r.id)));
+
+    renderQueue.reduce<Promise<void>>(
+      async (prev, item) => {
+        await prev;
+        try {
+          const thumb = await renderPresetThumbnail(item.id, item.lights);
+          updatePreset(item.id, { thumbnail: thumb });
+        } catch {
+          // Silently skip failed renders
+        }
+        setRenderingIds((prev) => {
+          const next = new Set(prev);
+          next.delete(item.id);
+          return next;
+        });
+        // Yield
+        await new Promise((r) => setTimeout(r, 5));
+      },
+      Promise.resolve(),
+    );
+  }, [presets, updatePreset]);
+
   // Filter presets by category and search query
   const filteredPresets = useMemo(() => {
     let list = presets.filter((p) => p.category === activeCategory);
     if (searchQuery) {
       const q = searchQuery.toLowerCase();
-      list = list.filter((p) => p.name.toLowerCase().includes(q));
+      list = list.filter(
+        (p) =>
+          p.name.toLowerCase().includes(q) ||
+          (p.description ?? '').toLowerCase().includes(q) ||
+          (p.tags ?? []).some((t) => t.toLowerCase().includes(q)),
+      );
     }
     return list;
   }, [presets, activeCategory, searchQuery]);
 
-  // Preview preset: temporarily override lights (without committing)
+  // Preview preset: temporarily override lights
   const previewPreset = useCallback(
     (id: string) => {
       const preset = presets.find((p) => p.id === id);
       if (!preset) return;
-
-      // Create preview lights with temporary IDs
       const previewLights = presetToLights(preset);
       setLightsFromPreset(previewLights);
       setPreviewPreset(id);
@@ -78,34 +124,29 @@ export const PresetBrowser: React.FC<PresetBrowserProps> = ({ onGenerateThumbnai
     [presets, setLightsFromPreset, setPreviewPreset, showToast],
   );
 
-  // Apply preset: commit the preset lights permanently
+  // Apply preset permanently
   const applyPreset = useCallback(
     (id: string) => {
       const preset = presets.find((p) => p.id === id);
       if (!preset) return;
-
       const newLights = presetToLights(preset);
       setLightsFromPreset(newLights);
       setPreviewPreset(null);
-      if (newLights.length > 0) {
-        selectLight(newLights[0].id);
-      }
+      if (newLights.length > 0) selectLight(newLights[0].id);
       showToast(`Applied "${preset.name}"`);
     },
     [presets, setLightsFromPreset, setPreviewPreset, selectLight, showToast],
   );
 
-  // Save current lights as a custom preset
+  // Save current lights as custom preset
   const handleSavePreset = useCallback(async () => {
     if (lights.length === 0) {
       showToast('Add some lights first');
       return;
     }
-
     const thumbnail = onGenerateThumbnail
       ? onGenerateThumbnail(usePresetsStore.getState().lightsToPresetLights(lights))
       : '';
-
     const preset = await saveCurrentAsPreset(lights, thumbnail);
     showToast(`"${preset.name}" saved`);
   }, [lights, saveCurrentAsPreset, onGenerateThumbnail, showToast]);
@@ -130,7 +171,6 @@ export const PresetBrowser: React.FC<PresetBrowserProps> = ({ onGenerateThumbnai
     } catch {
       showToast('Invalid preset file');
     }
-    // Reset input so the same file can be re-imported
     if (fileInputRef.current) fileInputRef.current.value = '';
   }, [importPresetsFromFile, showToast]);
 
@@ -139,14 +179,11 @@ export const PresetBrowser: React.FC<PresetBrowserProps> = ({ onGenerateThumbnai
   const handleCardClick = useCallback(
     (e: React.MouseEvent, presetId: string) => {
       if ((e.target as HTMLElement).closest('.pc-del')) return;
-
       if (clickTimer.current) {
-        // Second click within 300ms = double-click => apply
         clearTimeout(clickTimer.current);
         clickTimer.current = null;
         applyPreset(presetId);
       } else {
-        // First click => preview (with delay to detect potential double-click)
         clickTimer.current = setTimeout(() => {
           clickTimer.current = null;
           previewPreset(presetId);
@@ -156,7 +193,7 @@ export const PresetBrowser: React.FC<PresetBrowserProps> = ({ onGenerateThumbnai
     [applyPreset, previewPreset],
   );
 
-  // Drag start: allow dragging a preset's first light into the light list
+  // Drag start
   const handleDragStart = useCallback(
     (e: React.DragEvent, presetId: string) => {
       const preset = presets.find((p) => p.id === presetId);
@@ -169,7 +206,7 @@ export const PresetBrowser: React.FC<PresetBrowserProps> = ({ onGenerateThumbnai
   );
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', position: 'relative' }}>
       {/* Category tabs */}
       <div className="preset-tabs">
         {CATEGORY_TABS.map((tab) => (
@@ -211,18 +248,23 @@ export const PresetBrowser: React.FC<PresetBrowserProps> = ({ onGenerateThumbnai
                 className={`preset-card ${previewingId === preset.id ? 'previewing' : ''}`}
                 onClick={(e) => handleCardClick(e, preset.id)}
                 onDoubleClick={(e) => {
-                  if (clickTimer.current) {
-                    clearTimeout(clickTimer.current);
-                    clickTimer.current = null;
-                  }
+                  if (clickTimer.current) { clearTimeout(clickTimer.current); clickTimer.current = null; }
                   applyPreset(preset.id);
                 }}
                 onDragStart={(e) => handleDragStart(e, preset.id)}
                 draggable
                 title="Click: preview, Double-click: apply"
+                style={{ position: 'relative' }}
               >
+                {/* Description tooltip */}
+                {preset.description && (
+                  <div className="preset-card-tooltip">{preset.description}</div>
+                )}
+
                 <div className="pc-inner">
-                  {preset.thumbnail ? (
+                  {renderingIds.has(preset.id) ? (
+                    <div className="thumbnail-skeleton" />
+                  ) : preset.thumbnail ? (
                     <img
                       src={preset.thumbnail}
                       alt={preset.name}
@@ -252,6 +294,9 @@ export const PresetBrowser: React.FC<PresetBrowserProps> = ({ onGenerateThumbnai
                   )}
                 </div>
                 <div className="pc-name">{preset.name}</div>
+                <div style={{ fontSize: 8, color: 'var(--text-dim)', padding: '0 4px 3px', textAlign: 'center' }}>
+                  {preset.lights.length} light{preset.lights.length !== 1 ? 's' : ''}
+                </div>
               </div>
             ))}
           </div>
@@ -269,21 +314,21 @@ export const PresetBrowser: React.FC<PresetBrowserProps> = ({ onGenerateThumbnai
           flexShrink: 0,
         }}
       >
-        <button className="btn-sm" onClick={handleSavePreset} title="Save current lights as preset">
+        <button className="btn-sm btn-glow" onClick={handleSavePreset} title="Save current lights as preset">
           <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.5">
             <path d="M1 9V3l2-2h4l2 2v6H1z" />
             <rect x="3.5" y="5" width="3" height="4" />
           </svg>
           Save
         </button>
-        <button className="btn-sm" onClick={exportPresets} title="Export presets to JSON">
+        <button className="btn-sm btn-glow" onClick={exportPresets} title="Export presets to JSON">
           <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.5">
             <path d="M5 1v6M2 4l3 3 3-3" />
             <path d="M1 8h8" />
           </svg>
           Export
         </button>
-        <button className="btn-sm" onClick={() => fileInputRef.current?.click()} title="Import presets from JSON">
+        <button className="btn-sm btn-glow" onClick={() => fileInputRef.current?.click()} title="Import presets from JSON">
           <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.5">
             <path d="M5 9V3M2 6l3-3 3 3" />
             <path d="M1 2h8" />
@@ -300,9 +345,7 @@ export const PresetBrowser: React.FC<PresetBrowserProps> = ({ onGenerateThumbnai
       </div>
 
       {/* Toast notification */}
-      {toast && (
-        <div className="preset-toast">{toast}</div>
-      )}
+      {toast && <div className="preset-toast">{toast}</div>}
     </div>
   );
 };
