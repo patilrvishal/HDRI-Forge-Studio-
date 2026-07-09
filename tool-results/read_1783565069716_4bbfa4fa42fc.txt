@@ -1,0 +1,1698 @@
+     1→@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+     2→
+     3→@tailwind base;
+     4→@tailwind components;
+     5→@tailwind utilities;
+     6→
+     7→:root {
+     8→  /* ── Core backgrounds ─────────────────────────────────────── */
+     9→  --bg-deep: #0a0a14;
+    10→  --bg-panel: #0f0f1a;
+    11→  --bg-card: #161625;
+    12→  --bg-input: #12121f;
+    13→  /* ── Neon purple/pink accent system ───────────────────────── */
+    14→  --accent: #a78bfa;
+    15→  --accent-bright: #c084fc;
+    16→  --accent-dim: rgba(167, 139, 250, 0.25);
+    17→  --accent-bg: rgba(167, 139, 250, 0.08);
+    18→  --purple: #a78bfa;
+    19→  --purple-glow: rgba(167, 139, 250, 0.5);
+    20→  --pink: #f472b6;
+    21→  --pink-glow: rgba(244, 114, 182, 0.4);
+    22→  --neon-gradient: linear-gradient(135deg, #a78bfa 0%, #f472b6 100%);
+    23→  /* ── Track / thumb ────────────────────────────────────────── */
+    24→  --track: #1e1e32;
+    25→  --thumb: #a78bfa;
+    26→  /* ── Text hierarchy ──────────────────────────────────────── */
+    27→  --text: #ececf4;
+    28→  --text-sec: #9898b4;
+    29→  --text-dim: #5c5c78;
+    30→  /* ── Borders ──────────────────────────────────────────────── */
+    31→  --border: #1e1e34;
+    32→  --border-light: #2e2e48;
+    33→  --border-glow: rgba(167, 139, 250, 0.18);
+    34→  /* ── Semantic ─────────────────────────────────────────────── */
+    35→  --danger: #f87171;
+    36→  --success: #4ade80;
+    37→  --warning: #fbbf24;
+    38→  /* ── Typography ───────────────────────────────────────────── */
+    39→  --font-ui: 'Inter', system-ui, -apple-system, sans-serif;
+    40→  --font-mono: 'JetBrains Mono', 'SF Mono', monospace;
+    41→  --radius: 8px;
+    42→  --radius-sm: 5px;
+    43→  /* ── Glow utilities ───────────────────────────────────────── */
+    44→  --glow-sm: 0 0 8px rgba(167, 139, 250, 0.25);
+    45→  --glow-md: 0 0 16px rgba(167, 139, 250, 0.3);
+    46→  --glow-lg: 0 0 24px rgba(167, 139, 250, 0.35);
+    47→  --panel-glow: 0 0 1px var(--border-glow), inset 0 0 0 1px rgba(255,255,255,0.02);
+    48→}
+    49→
+    50→*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    51→html, body, #root { height: 100%; overflow: hidden; }
+    52→
+    53→body {
+    54→  font-family: var(--font-ui);
+    55→  font-size: 12px;
+    56→  color: var(--text);
+    57→  background: var(--bg-deep);
+    58→  -webkit-font-smoothing: antialiased;
+    59→  user-select: none;
+    60→}
+    61→
+    62→::-webkit-scrollbar { width: 5px; height: 5px; }
+    63→::-webkit-scrollbar-track { background: transparent; }
+    64→::-webkit-scrollbar-thumb { background: var(--border-light); border-radius: 10px; transition: background 0.2s; }
+    65→::-webkit-scrollbar-thumb:hover { background: var(--accent-dim); }
+    66→
+    67→input, select, button, textarea { font-family: inherit; font-size: inherit; color: inherit; outline: none; border: none; background: none; }
+    68→button { cursor: pointer; }
+    69→
+    70→input[type="number"], .numeric-input { font-family: var(--font-mono); font-size: 12px; }
+    71→
+    72→input[type="range"] {
+    73→  -webkit-appearance: none; appearance: none;
+    74→  width: 100%; height: 4px; background: var(--track);
+    75→  border-radius: 2px; outline: none; cursor: pointer;
+    76→}
+    77→input[type="range"]::-webkit-slider-thumb {
+    78→  -webkit-appearance: none; appearance: none;
+    79→  width: 12px; height: 12px; border-radius: 50%;
+    80→  background: var(--thumb); cursor: pointer; transition: transform 0.1s;
+    81→}
+    82→input[type="range"]::-webkit-slider-thumb:hover { transform: scale(1.2); }
+    83→input[type="range"]::-moz-range-thumb {
+    84→  width: 12px; height: 12px; border-radius: 50%;
+    85→  background: var(--thumb); cursor: pointer; border: none;
+    86→}
+    87→
+    88→select {
+    89→  -webkit-appearance: none; appearance: none;
+    90→  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='5' viewBox='0 0 8 5'%3E%3Cpath fill='%239090a8' d='M4 5L0 0h8z'/%3E%3C/svg%3E");
+    91→  background-repeat: no-repeat; background-position: right 6px center; padding-right: 18px;
+    92→}
+    93→
+    94→.panel {
+    95→  background: var(--bg-panel);
+    96→  border-color: var(--border);
+    97→  display: flex;
+    98→  flex-direction: column;
+    99→  box-shadow: var(--panel-glow);
+   100→  transition: box-shadow 0.3s ease;
+   101→}
+   102→.panel-header {
+   103→  display: flex; align-items: center; justify-content: space-between;
+   104→  padding: 8px 12px; border-bottom: 1px solid var(--border);
+   105→  min-height: 32px; flex-shrink: 0;
+   106→  background: linear-gradient(180deg, rgba(167,139,250,0.03) 0%, transparent 100%);
+   107→}
+   108→.panel-header h3 {
+   109→  font-size: 10px; font-weight: 600; text-transform: uppercase;
+   110→  letter-spacing: 1px; color: var(--accent);
+   111→  display: flex; align-items: center; gap: 6px;
+   112→}
+   113→.panel-body { flex: 1; overflow-y: auto; padding: 6px; }
+   114→
+   115→.section-header {
+   116→  font-size: 10px; font-weight: 600; text-transform: uppercase;
+   117→  letter-spacing: 0.8px; color: var(--text-dim);
+   118→  padding: 6px 0 4px; border-bottom: 1px solid var(--border); margin-bottom: 6px;
+   119→}
+   120→
+   121→.btn-icon {
+   122→  display: inline-flex; align-items: center; justify-content: center;
+   123→  width: 28px; height: 28px; border-radius: var(--radius-sm);
+   124→  color: var(--text-sec); transition: all 0.2s ease; flex-shrink: 0;
+   125→}
+   126→.btn-icon:hover { background: var(--accent-bg); color: var(--accent-bright); }
+   127→.btn-icon.active {
+   128→  background: var(--accent-bg); color: var(--accent-bright);
+   129→  box-shadow: var(--glow-sm);
+   130→}
+   131→
+   132→.btn-sm {
+   133→  display: inline-flex; align-items: center; gap: 4px;
+   134→  padding: 4px 10px; border-radius: var(--radius-sm); font-size: 11px;
+   135→  color: var(--text-sec); background: var(--bg-card);
+   136→  border: 1px solid var(--border); transition: all 0.2s ease;
+   137→}
+   138→.btn-sm:hover {
+   139→  border-color: var(--accent);
+   140→  color: var(--accent-bright);
+   141→  box-shadow: var(--glow-sm);
+   142→}
+   143→
+   144→.btn-primary {
+   145→  display: inline-flex; align-items: center; justify-content: center; gap: 4px;
+   146→  padding: 5px 12px; border-radius: var(--radius-sm); font-size: 11px;
+   147→  font-weight: 500; color: white; background: var(--neon-gradient);
+   148→  transition: all 0.2s ease; box-shadow: var(--glow-sm);
+   149→}
+   150→.btn-primary:hover {
+   151→  box-shadow: var(--glow-md);
+   152→  transform: translateY(-1px);
+   153→}
+   154→
+   155→.field-row { display: flex; align-items: center; gap: 6px; margin-bottom: 4px; }
+   156→.field-label { font-size: 11px; color: var(--text-sec); min-width: 58px; flex-shrink: 0; }
+   157→.field-input {
+   158→  flex: 1; height: 24px; padding: 0 6px;
+   159→  background: var(--bg-input); border: 1px solid var(--border);
+   160→  border-radius: var(--radius-sm); color: var(--text);
+   161→  font-family: var(--font-mono); font-size: 12px; transition: all 0.2s ease;
+   162→}
+   163→.field-input:focus {
+   164→  border-color: var(--accent);
+   165→  box-shadow: 0 0 0 2px var(--accent-dim);
+   166→}
+   167→.field-select {
+   168→  flex: 1; height: 24px; padding: 0 6px;
+   169→  background: var(--bg-input); border: 1px solid var(--border);
+   170→  border-radius: var(--radius-sm); color: var(--text); font-size: 11px; cursor: pointer;
+   171→  transition: all 0.2s ease;
+   172→}
+   173→.field-select:focus {
+   174→  border-color: var(--accent);
+   175→  box-shadow: 0 0 0 2px var(--accent-dim);
+   176→}
+   177→
+   178→.toggle-track {
+   179→  position: relative; width: 32px; height: 16px;
+   180→  background: var(--track); border-radius: 8px;
+   181→  cursor: pointer; transition: all 0.25s ease; flex-shrink: 0;
+   182→}
+   183→.toggle-track.on {
+   184→  background: var(--accent);
+   185→  box-shadow: 0 0 8px var(--purple-glow);
+   186→}
+   187→.toggle-track::after {
+   188→  content: ''; position: absolute; top: 2px; left: 2px;
+   189→  width: 12px; height: 12px; background: var(--text);
+   190→  border-radius: 50%; transition: transform 0.25s cubic-bezier(0.34, 1.56, 0.64, 1);
+   191→}
+   192→.toggle-track.on::after { transform: translateX(16px); }
+   193→
+   194→.tooltip { position: relative; }
+   195→.tooltip::after {
+   196→  content: attr(data-tip); position: absolute; bottom: 100%; left: 50%;
+   197→  transform: translateX(-50%); padding: 3px 8px; background: #000;
+   198→  color: var(--text); font-size: 10px; border-radius: 3px;
+   199→  white-space: nowrap; pointer-events: none; opacity: 0;
+   200→  transition: opacity 0.1s; margin-bottom: 4px;
+   201→}
+   202→.tooltip:hover::after { opacity: 1; }
+   203→
+   204→.slider-row { display: flex; align-items: center; gap: 6px; margin-bottom: 4px; }
+   205→.slider-row label { font-size: 11px; color: var(--text-sec); min-width: 58px; flex-shrink: 0; }
+   206→.slider-row input[type="range"] { flex: 1; height: 4px; }
+   207→.slider-row .slider-value {
+   208→  font-family: var(--font-mono); font-size: 11px; color: var(--text);
+   209→  min-width: 36px; text-align: right; flex-shrink: 0;
+   210→}
+   211→
+   212→.tab-bar { display: flex; gap: 2px; padding: 4px 4px 0; }
+   213→.tab-item {
+   214→  padding: 4px 8px; font-size: 10px; font-weight: 500;
+   215→  text-transform: uppercase; letter-spacing: 0.5px;
+   216→  color: var(--text-dim); border-bottom: 2px solid transparent;
+   217→  cursor: pointer; transition: all 0.15s;
+   218→}
+   219→.tab-item:hover { color: var(--text-sec); }
+   220→.tab-item.active { color: var(--accent-bright); border-bottom-color: var(--accent-bright); }
+   221→
+   222→.drop-overlay {
+   223→  position: absolute; inset: 0; background: rgba(167, 139, 250, 0.06);
+   224→  border: 2px dashed var(--accent-bright); border-radius: var(--radius);
+   225→  display: flex; align-items: center; justify-content: center; z-index: 50;
+   226→  pointer-events: none;
+   227→}
+   228→.drop-overlay span { font-size: 14px; font-weight: 500; color: var(--accent-bright); }
+   229→
+   230→.context-menu {
+   231→  position: fixed; min-width: 160px; background: var(--bg-card);
+   232→  border: 1px solid var(--border-light); border-radius: var(--radius);
+   233→  padding: 4px; z-index: 9999;
+   234→  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.6), var(--panel-glow);
+   235→  backdrop-filter: blur(8px);
+   236→}
+   237→.context-menu-item {
+   238→  display: flex; align-items: center; gap: 8px;
+   239→  padding: 5px 10px; border-radius: var(--radius-sm); font-size: 11px;
+   240→  color: var(--text); cursor: pointer; transition: all 0.15s ease;
+   241→}
+   242→.context-menu-item:hover {
+   243→  background: var(--accent-bg); color: var(--accent-bright);
+   244→}
+   245→.context-menu-sep { height: 1px; background: var(--border); margin: 4px 0; }
+   246→
+   247→@keyframes spin { 100% { transform: rotate(360deg); } }
+   248→@keyframes glow-pulse {
+   249→  0%, 100% { box-shadow: var(--glow-sm); }
+   250→  50% { box-shadow: var(--glow-md); }
+   251→}
+   252→.spinner {
+   253→  width: 24px; height: 24px; border: 2px solid var(--track);
+   254→  border-top-color: var(--accent-bright); border-radius: 50%;
+   255→  animation: spin 0.75s linear infinite;
+   256→}
+   257→
+   258→.progress-bar { height: 3px; background: var(--track); border-radius: 2px; overflow: hidden; }
+   259→.progress-bar-fill {
+   260→  height: 100%; background: var(--neon-gradient); border-radius: 2px;
+   261→  transition: width 0.3s ease;
+   262→}
+   263→
+   264→.placeholder-panel {
+   265→  display: flex; flex-direction: column; align-items: center;
+   266→  justify-content: center; height: 100%; color: var(--text-dim);
+   267→  font-size: 11px; gap: 6px;
+   268→}
+   269→.placeholder-panel i { font-size: 20px; opacity: 0.5; }
+   270→
+   271→/* ========== Phase 2: Light List ========== */
+   272→.light-list {
+   273→  display: flex;
+   274→  flex-direction: column;
+   275→  gap: 1px;
+   276→}
+   277→
+   278→.light-list-item {
+   279→  display: flex;
+   280→  align-items: center;
+   281→  gap: 6px;
+   282→  padding: 5px 6px;
+   283→  border-radius: var(--radius-sm);
+   284→  cursor: pointer;
+   285→  transition: background 0.1s;
+   286→  user-select: none;
+   287→  min-height: 28px;
+   288→}
+   289→
+   290→.light-list-item:hover {
+   291→  background: var(--bg-card);
+   292→}
+   293→
+   294→.light-list-item.selected {
+   295→  background: var(--accent-bg);
+   296→  border: 1px solid var(--accent-dim);
+   297→  margin: -1px;
+   298→  padding: 4px 5px;
+   299→  box-shadow: var(--glow-sm);
+   300→}
+   301→
+   302→.light-list-item.dragging {
+   303→  opacity: 0.4;
+   304→}
+   305→
+   306→.light-list-item.drag-over {
+   307→  border-top: 2px solid var(--accent);
+   308→  padding-top: 3px;
+   309→}
+   310→
+   311→.light-list-item.dimmed {
+   312→  opacity: 0.4;
+   313→}
+   314→
+   315→.light-drag-handle {
+   316→  cursor: grab;
+   317→  padding: 2px;
+   318→  flex-shrink: 0;
+   319→  opacity: 0.3;
+   320→  transition: opacity 0.15s;
+   321→}
+   322→
+   323→.light-drag-handle:active {
+   324→  cursor: grabbing;
+   325→}
+   326→
+   327→.light-list-item:hover .light-drag-handle {
+   328→  opacity: 0.7;
+   329→}
+   330→
+   331→.light-type-icon {
+   332→  width: 16px;
+   333→  height: 16px;
+   334→  display: flex;
+   335→  align-items: center;
+   336→  justify-content: center;
+   337→  flex-shrink: 0;
+   338→}
+   339→
+   340→.light-item-name {
+   341→  flex: 1;
+   342→  min-width: 0;
+   343→  display: flex;
+   344→  flex-direction: column;
+   345→  gap: 0;
+   346→  overflow: hidden;
+   347→}
+   348→
+   349→.light-name-text {
+   350→  font-size: 11px;
+   351→  font-weight: 500;
+   352→  color: var(--text);
+   353→  white-space: nowrap;
+   354→  overflow: hidden;
+   355→  text-overflow: ellipsis;
+   356→  line-height: 1.3;
+   357→}
+   358→
+   359→.light-type-label {
+   360→  font-size: 9px;
+   361→  color: var(--text-dim);
+   362→  text-transform: uppercase;
+   363→  letter-spacing: 0.5px;
+   364→  line-height: 1.2;
+   365→}
+   366→
+   367→.light-item-actions {
+   368→  display: flex;
+   369→  align-items: center;
+   370→  gap: 1px;
+   371→  flex-shrink: 0;
+   372→  opacity: 0;
+   373→  transition: opacity 0.15s;
+   374→}
+   375→
+   376→.light-list-item:hover .light-item-actions,
+   377→.light-list-item.selected .light-item-actions {
+   378→  opacity: 1;
+   379→}
+   380→
+   381→.solo-active {
+   382→  background: var(--neon-gradient) !important;
+   383→  color: #fff !important;
+   384→  border-radius: 3px;
+   385→  box-shadow: var(--glow-sm);
+   386→}
+   387→
+   388→.light-rename-input {
+   389→  height: 20px !important;
+   390→  font-size: 11px !important;
+   391→  padding: 0 4px !important;
+   392→}
+   393→
+   394→/* ========== Phase 2: Light Properties ========== */
+   395→.light-properties {
+   396→  padding: 6px;
+   397→}
+   398→
+   399→.props-section {
+   400→  margin-bottom: 8px;
+   401→  padding-bottom: 4px;
+   402→}
+   403→
+   404→.props-section .section-header {
+   405→  display: flex;
+   406→  align-items: center;
+   407→  justify-content: space-between;
+   408→  margin-bottom: 6px;
+   409→}
+   410→
+   411→/* ========== Phase 3: Preset Browser ========== */
+   412→.preset-tabs {
+   413→  display: flex;
+   414→  gap: 0;
+   415→  padding: 4px 6px 0;
+   416→  border-bottom: 1px solid var(--border);
+   417→  flex-shrink: 0;
+   418→}
+   419→
+   420→.preset-tab {
+   421→  padding: 4px 8px;
+   422→  font-size: 10px;
+   423→  font-weight: 500;
+   424→  text-transform: uppercase;
+   425→  letter-spacing: 0.4px;
+   426→  color: var(--text-dim);
+   427→  border-bottom: 2px solid transparent;
+   428→  cursor: pointer;
+   429→  transition: all 0.15s;
+   430→}
+   431→
+   432→.preset-tab:hover {
+   433→  color: var(--text-sec);
+   434→}
+   435→
+   436→.preset-tab.active {
+   437→  color: var(--accent);
+   438→  border-bottom-color: var(--accent);
+   439→}
+   440→
+   441→.preset-search {
+   442→  font-size: 11px;
+   443→  height: 22px;
+   444→}
+   445→
+   446→.preset-grid {
+   447→  display: grid;
+   448→  grid-template-columns: repeat(3, 1fr);
+   449→  gap: 6px;
+   450→  padding: 2px 0;
+   451→}
+   452→
+   453→.preset-card {
+   454→  position: relative;
+   455→  border-radius: var(--radius-sm);
+   456→  overflow: hidden;
+   457→  cursor: pointer;
+   458→  border: 1px solid transparent;
+   459→  transition: all 0.15s;
+   460→  background: var(--bg-card);
+   461→}
+   462→
+   463→.preset-card:hover {
+   464→  border-color: var(--border-light);
+   465→  transform: translateY(-1px);
+   466→  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+   467→}
+   468→
+   469→.preset-card.previewing {
+   470→  border-color: var(--accent-bright);
+   471→  box-shadow: 0 0 0 1px var(--accent-dim), var(--glow-md), 0 4px 16px rgba(167, 139, 250, 0.15);
+   472→}
+   473→
+   474→.preset-card:active {
+   475→  transform: translateY(0);
+   476→}
+   477→
+   478→.pc-inner {
+   479→  position: relative;
+   480→  width: 100%;
+   481→  aspect-ratio: 4 / 3;
+   482→  overflow: hidden;
+   483→  background: var(--bg-input);
+   484→}
+   485→
+   486→.pc-inner img {
+   487→  width: 100%;
+   488→  height: 100%;
+   489→  object-fit: cover;
+   490→  display: block;
+   491→}
+   492→
+   493→.pc-placeholder {
+   494→  width: 100%;
+   495→  height: 100%;
+   496→  display: flex;
+   497→  align-items: center;
+   498→  justify-content: center;
+   499→  color: var(--text-dim);
+   500→}
+   501→
+   502→.pc-del {
+   503→  position: absolute;
+   504→  top: 3px;
+   505→  right: 3px;
+   506→  width: 16px;
+   507→  height: 16px;
+   508→  display: flex;
+   509→  align-items: center;
+   510→  justify-content: center;
+   511→  border-radius: 3px;
+   512→  background: rgba(0, 0, 0, 0.6);
+   513→  color: var(--text-sec);
+   514→  font-size: 8px;
+   515→  opacity: 0;
+   516→  transition: opacity 0.15s;
+   517→  cursor: pointer;
+   518→  border: none;
+   519→}
+   520→
+   521→.preset-card:hover .pc-del {
+   522→  opacity: 1;
+   523→}
+   524→
+   525→.pc-del:hover {
+   526→  background: var(--danger);
+   527→  color: white;
+   528→}
+   529→
+   530→.pc-name {
+   531→  font-size: 9px;
+   532→  font-weight: 500;
+   533→  color: var(--text-sec);
+   534→  padding: 3px 4px;
+   535→  white-space: nowrap;
+   536→  overflow: hidden;
+   537→  text-overflow: ellipsis;
+   538→  text-align: center;
+   539→  background: var(--bg-card);
+   540→}
+   541→
+   542→.preset-empty {
+   543→  display: flex;
+   544→  align-items: center;
+   545→  justify-content: center;
+   546→  height: 80px;
+   547→  color: var(--text-dim);
+   548→  font-size: 11px;
+   549→}
+   550→
+   551→.preset-toast {
+   552→  position: absolute;
+   553→  bottom: 8px;
+   554→  left: 50%;
+   555→  transform: translateX(-50%);
+   556→  background: var(--bg-card);
+   557→  border: 1px solid var(--border-light);
+   558→  color: var(--text);
+   559→  font-size: 10px;
+   560→  padding: 4px 10px;
+   561→  border-radius: var(--radius-sm);
+   562→  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+   563→  z-index: 10;
+   564→  white-space: nowrap;
+   565→  animation: toastIn 0.2s ease-out;
+   566→}
+   567→
+   568→@keyframes toastIn {
+   569→  from {
+   570→    opacity: 0;
+   571→    transform: translateX(-50%) translateY(4px);
+   572→  }
+   573→  to {
+   574→    opacity: 1;
+   575→    transform: translateX(-50%) translateY(0);
+   576→  }
+   577→}
+   578→
+   579→/* ========== Phase 3: Light Preview Canvas ========== */
+   580→.light-preview-canvas {
+   581→  display: block;
+   582→  width: 100%;
+   583→  height: 100%;
+   584→  border-radius: var(--radius-sm);
+   585→}
+   586→
+   587→/* ========== Phase 3: Material Preview ========== */
+   588→.material-preview-container {
+   589→  position: relative;
+   590→  width: 100%;
+   591→  height: 100%;
+   592→}
+   593→
+   594→.material-preview-container canvas {
+   595→  display: block;
+   596→  width: 100%;
+   597→  height: 100%;
+   598→  border-radius: var(--radius-sm);
+   599→}
+   600→
+   601→/* ========== Phase 4: Render Settings Modal ========== */
+   602→.render-settings-modal {
+   603→  width: 420px;
+   604→  max-height: 80vh;
+   605→  background: var(--bg-panel);
+   606→  border: 1px solid var(--border-light);
+   607→  border-radius: var(--radius);
+   608→  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.6);
+   609→  display: flex;
+   610→  flex-direction: column;
+   611→  overflow: hidden;
+   612→}
+   613→
+   614→.rs-header {
+   615→  display: flex;
+   616→  align-items: center;
+   617→  justify-content: space-between;
+   618→  padding: 10px 14px;
+   619→  border-bottom: 1px solid var(--border);
+   620→  flex-shrink: 0;
+   621→}
+   622→
+   623→.rs-title {
+   624→  font-size: 13px;
+   625→  font-weight: 600;
+   626→  color: var(--text);
+   627→  letter-spacing: 0.3px;
+   628→}
+   629→
+   630→.rs-body {
+   631→  flex: 1;
+   632→  overflow-y: auto;
+   633→  padding: 8px 14px;
+   634→  display: flex;
+   635→  flex-direction: column;
+   636→  gap: 2px;
+   637→}
+   638→
+   639→.rs-section {
+   640→  margin-bottom: 4px;
+   641→}
+   642→
+   643→.rs-section-body {
+   644→  display: flex;
+   645→  flex-direction: column;
+   646→  gap: 3px;
+   647→  padding: 4px 0;
+   648→}
+   649→
+   650→.rs-section-body .field-row {
+   651→  margin-bottom: 0;
+   652→}
+   653→
+   654→.rs-section-body .slider-row {
+   655→  margin-bottom: 0;
+   656→}
+   657→
+   658→.rs-section-body .toggle-track {
+   659→  margin-left: auto;
+   660→}
+   661→
+   662→.rs-note {
+   663→  font-size: 10px;
+   664→  color: var(--text-dim);
+   665→  padding: 2px 0 4px;
+   666→  border-bottom: 1px solid var(--border);
+   667→  margin-bottom: 4px;
+   668→}
+   669→
+   670→.rs-footer {
+   671→  display: flex;
+   672→  align-items: center;
+   673→  justify-content: space-between;
+   674→  padding: 8px 14px;
+   675→  border-top: 1px solid var(--border);
+   676→  flex-shrink: 0;
+   677→  background: var(--bg-deep);
+   678→}
+   679→
+   680→/* ========== Phase 5: Timeline Panel ========== */
+   681→.timeline-panel {
+   682→  display: flex;
+   683→  flex-direction: column;
+   684→  height: 100%;
+   685→  overflow: hidden;
+   686→  background: var(--bg-panel);
+   687→}
+   688→
+   689→/* Transport bar */
+   690→.tl-transport {
+   691→  display: flex;
+   692→  align-items: center;
+   693→  justify-content: space-between;
+   694→  padding: 4px 8px;
+   695→  border-bottom: 1px solid var(--border);
+   696→  background: var(--bg-deep);
+   697→  flex-shrink: 0;
+   698→  min-height: 34px;
+   699→  gap: 4px;
+   700→}
+   701→
+   702→.tl-transport-left {
+   703→  display: flex;
+   704→  align-items: center;
+   705→  gap: 2px;
+   706→  flex-shrink: 0;
+   707→}
+   708→
+   709→.tl-transport-center {
+   710→  display: flex;
+   711→  align-items: center;
+   712→  gap: 4px;
+   713→  flex-shrink: 0;
+   714→}
+   715→
+   716→.tl-transport-right {
+   717→  display: flex;
+   718→  align-items: center;
+   719→  gap: 4px;
+   720→  flex-shrink: 0;
+   721→}
+   722→
+   723→.tl-frame-display {
+   724→  font-family: var(--font-mono);
+   725→  font-size: 12px;
+   726→  font-weight: 500;
+   727→  color: var(--text);
+   728→  min-width: 60px;
+   729→  text-align: center;
+   730→}
+   731→
+   732→.tl-frame-slash {
+   733→  color: var(--text-dim);
+   734→  font-size: 10px;
+   735→}
+   736→
+   737→.tl-frame-total {
+   738→  color: var(--text-dim);
+   739→  font-size: 10px;
+   740→}
+   741→
+   742→.tl-frame-range {
+   743→  display: flex;
+   744→  align-items: center;
+   745→  gap: 2px;
+   746→}
+   747→
+   748→.tl-frame-input {
+   749→  width: 36px;
+   750→  height: 20px;
+   751→  padding: 0 4px;
+   752→  background: var(--bg-input);
+   753→  border: 1px solid var(--border);
+   754→  border-radius: var(--radius-sm);
+   755→  color: var(--text);
+   756→  font-family: var(--font-mono);
+   757→  font-size: 10px;
+   758→  text-align: center;
+   759→}
+   760→
+   761→.tl-frame-input:focus {
+   762→  border-color: var(--accent);
+   763→}
+   764→
+   765→.tl-fps-control {
+   766→  display: flex;
+   767→  align-items: center;
+   768→  gap: 2px;
+   769→}
+   770→
+   771→/* Tracks container */
+   772→.tl-tracks-container {
+   773→  flex: 1;
+   774→  overflow: auto;
+   775→  position: relative;
+   776→}
+   777→
+   778→/* Ruler */
+   779→.tl-ruler-row {
+   780→  display: flex;
+   781→  position: sticky;
+   782→  top: 0;
+   783→  z-index: 5;
+   784→  background: var(--bg-deep);
+   785→  border-bottom: 1px solid var(--border);
+   786→}
+   787→
+   788→.tl-ruler {
+   789→  position: relative;
+   790→  height: 22px;
+   791→  flex-shrink: 0;
+   792→  cursor: pointer;
+   793→}
+   794→
+   795→.tl-ruler-tick {
+   796→  position: absolute;
+   797→  top: 0;
+   798→  height: 100%;
+   799→  display: flex;
+   800→  flex-direction: column;
+   801→  align-items: center;
+   802→  justify-content: flex-end;
+   803→  padding-bottom: 2px;
+   804→  transform: translateX(-50%);
+   805→}
+   806→
+   807→.tl-ruler-tick::before {
+   808→  content: '';
+   809→  width: 1px;
+   810→  height: 6px;
+   811→  background: var(--border-light);
+   812→  position: absolute;
+   813→  top: 0;
+   814→}
+   815→
+   816→.tl-ruler-tick span {
+   817→  font-size: 8px;
+   818→  color: var(--text-dim);
+   819→  font-family: var(--font-mono);
+   820→  white-space: nowrap;
+   821→}
+   822→
+   823→/* Track header (left side) */
+   824→.tl-track-header {
+   825→  width: 140px;
+   826→  flex-shrink: 0;
+   827→  display: flex;
+   828→  align-items: center;
+   829→  padding: 0 6px;
+   830→  background: var(--bg-panel);
+   831→  overflow: hidden;
+   832→}
+   833→
+   834→.tl-track-header-content {
+   835→  display: flex;
+   836→  align-items: center;
+   837→  gap: 4px;
+   838→  flex: 1;
+   839→  min-width: 0;
+   840→}
+   841→
+   842→.tl-track-name {
+   843→  font-size: 10px;
+   844→  font-weight: 500;
+   845→  color: var(--text-sec);
+   846→  white-space: nowrap;
+   847→  overflow: hidden;
+   848→  text-overflow: ellipsis;
+   849→  flex: 1;
+   850→  min-width: 0;
+   851→}
+   852→
+   853→.tl-track-header-actions {
+   854→  display: flex;
+   855→  align-items: center;
+   856→  gap: 0;
+   857→  flex-shrink: 0;
+   858→  opacity: 0;
+   859→  transition: opacity 0.15s;
+   860→}
+   861→
+   862→.tl-track-row:hover .tl-track-header-actions,
+   863→.tl-track-row.selected .tl-track-header-actions {
+   864→  opacity: 1;
+   865→}
+   866→
+   867→.tl-mute-btn.muted {
+   868→  opacity: 0.4;
+   869→}
+   870→
+   871→.tl-vis-btn.hidden {
+   872→  opacity: 0.3;
+   873→}
+   874→
+   875→.tl-del-btn:hover {
+   876→  color: var(--danger) !important;
+   877→}
+   878→
+   879→/* Track rows */
+   880→.tl-tracks-body {
+   881→  position: relative;
+   882→}
+   883→
+   884→.tl-track-row {
+   885→  display: flex;
+   886→  border-bottom: 1px solid var(--border);
+   887→  cursor: pointer;
+   888→  transition: background 0.1s;
+   889→}
+   890→
+   891→.tl-track-row:hover {
+   892→  background: var(--bg-card);
+   893→}
+   894→
+   895→.tl-track-row.selected {
+   896→  background: var(--accent-bg);
+   897→}
+   898→
+   899→.tl-track-row.muted {
+   900→  opacity: 0.45;
+   901→}
+   902→
+   903→/* Track lane (right side, scrollable area) */
+   904→.tl-track-lane {
+   905→  position: relative;
+   906→  flex-shrink: 0;
+   907→  cursor: crosshair;
+   908→  border-left: 1px solid var(--border);
+   909→}
+   910→
+   911→/* Keyframe diamonds */
+   912→.tl-keyframe-diamond {
+   913→  position: absolute;
+   914→  width: 10px;
+   915→  height: 10px;
+   916→  transform: rotate(45deg);
+   917→  border: 1.5px solid;
+   918→  background: var(--bg-panel);
+   919→  cursor: pointer;
+   920→  transition: background 0.1s, transform 0.1s;
+   921→  z-index: 3;
+   922→}
+   923→
+   924→.tl-keyframe-diamond:hover {
+   925→  transform: rotate(45deg) scale(1.2);
+   926→  z-index: 4;
+   927→}
+   928→
+   929→.tl-keyframe-diamond.selected {
+   930→  transform: rotate(45deg) scale(1.15);
+   931→  z-index: 4;
+   932→}
+   933→
+   934→/* Interpolation line */
+   935→.tl-interpolation-line {
+   936→  z-index: 1;
+   937→}
+   938→
+   939→/* Playhead */
+   940→.tl-playhead {
+   941→  position: absolute;
+   942→  top: 0;
+   943→  bottom: 0;
+   944→  width: 1px;
+   945→  background: var(--accent);
+   946→  z-index: 10;
+   947→  pointer-events: none;
+   948→  box-shadow: 0 0 8px rgba(167, 139, 250, 0.4);
+   949→}
+   950→
+   951→.tl-playhead::before {
+   952→  content: '';
+   953→  position: absolute;
+   954→  top: -1px;
+   955→  left: -4px;
+   956→  width: 9px;
+   957→  height: 9px;
+   958→  background: var(--accent);
+   959→  clip-path: polygon(50% 100%, 0 0, 100% 0);
+   960→}
+   961→
+   962→/* Track color dot */
+   963→.tl-track-color-dot {
+   964→  width: 6px;
+   965→  height: 6px;
+   966→  border-radius: 50%;
+   967→  flex-shrink: 0;
+   968→}
+   969→
+   970→/* Empty state */
+   971→.tl-empty {
+   972→  display: flex;
+   973→  flex-direction: column;
+   974→  align-items: center;
+   975→  justify-content: center;
+   976→  padding: 24px;
+   977→  color: var(--text-dim);
+   978→  font-size: 11px;
+   979→  gap: 2px;
+   980→}
+   981→
+   982→/* Add track menu */
+   983→.tl-add-menu {
+   984→  position: absolute;
+   985→  top: 100%;
+   986→  right: 0;
+   987→  margin-top: 4px;
+   988→  min-width: 200px;
+   989→  background: var(--bg-card);
+   990→  border: 1px solid var(--border-light);
+   991→  border-radius: var(--radius);
+   992→  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+   993→  z-index: 100;
+   994→  overflow: hidden;
+   995→}
+   996→
+   997→.tl-add-tabs {
+   998→  display: flex;
+   999→  border-bottom: 1px solid var(--border);
+  1000→  padding: 4px 4px 0;
+  1001→  gap: 0;
+  1002→}
+  1003→
+  1004→.tl-add-tab {
+  1005→  flex: 1;
+  1006→  padding: 4px 6px;
+  1007→  font-size: 9px;
+  1008→  font-weight: 500;
+  1009→  text-transform: uppercase;
+  1010→  letter-spacing: 0.4px;
+  1011→  color: var(--text-dim);
+  1012→  border-bottom: 2px solid transparent;
+  1013→  text-align: center;
+  1014→  cursor: pointer;
+  1015→  transition: all 0.15s;
+  1016→}
+  1017→
+  1018→.tl-add-tab:hover {
+  1019→  color: var(--text-sec);
+  1020→}
+  1021→
+  1022→.tl-add-tab.active {
+  1023→  color: var(--accent);
+  1024→  border-bottom-color: var(--accent);
+  1025→}
+  1026→
+  1027→.tl-add-list {
+  1028→  max-height: 180px;
+  1029→  overflow-y: auto;
+  1030→  padding: 4px;
+  1031→}
+  1032→
+  1033→.tl-add-item {
+  1034→  display: flex;
+  1035→  align-items: center;
+  1036→  gap: 8px;
+  1037→  width: 100%;
+  1038→  padding: 5px 8px;
+  1039→  border-radius: var(--radius-sm);
+  1040→  font-size: 11px;
+  1041→  color: var(--text-sec);
+  1042→  cursor: pointer;
+  1043→  transition: background 0.1s;
+  1044→  text-align: left;
+  1045→}
+  1046→
+  1047→.tl-add-item:hover {
+  1048→  background: var(--accent-bg);
+  1049→  color: var(--accent);
+  1050→}
+  1051→
+  1052→.tl-add-note {
+  1053→  font-size: 9px;
+  1054→  color: var(--text-dim);
+  1055→  padding: 4px 8px 6px;
+  1056→  border-top: 1px solid var(--border);
+  1057→  margin-top: 4px;
+  1058→  text-align: center;
+  1059→}
+  1060→
+  1061→/* Keyframe editor strip */
+  1062→.kf-editor {
+  1063→  display: flex;
+  1064→  align-items: center;
+  1065→  gap: 8px;
+  1066→  padding: 4px 8px;
+  1067→  border-top: 1px solid var(--border);
+  1068→  background: var(--bg-deep);
+  1069→  flex-shrink: 0;
+  1070→  min-height: 32px;
+  1071→}
+  1072→
+  1073→.kf-editor-left {
+  1074→  display: flex;
+  1075→  align-items: center;
+  1076→  flex-shrink: 0;
+  1077→  min-width: 120px;
+  1078→}
+  1079→
+  1080→.kf-editor-label {
+  1081→  font-size: 10px;
+  1082→  font-weight: 500;
+  1083→  color: var(--text-sec);
+  1084→  display: flex;
+  1085→  align-items: center;
+  1086→  gap: 4px;
+  1087→  white-space: nowrap;
+  1088→  overflow: hidden;
+  1089→  text-overflow: ellipsis;
+  1090→}
+  1091→
+  1092→.kf-editor-fields {
+  1093→  display: flex;
+  1094→  align-items: center;
+  1095→  gap: 8px;
+  1096→  flex: 1;
+  1097→}
+  1098→
+  1099→.kf-field {
+  1100→  display: flex;
+  1101→  align-items: center;
+  1102→  gap: 3px;
+  1103→}
+  1104→
+  1105→.kf-field label {
+  1106→  font-size: 9px;
+  1107→  color: var(--text-dim);
+  1108→  text-transform: uppercase;
+  1109→  letter-spacing: 0.3px;
+  1110→}
+  1111→
+  1112→.kf-field-wide {
+  1113→  flex: 1;
+  1114→  min-width: 80px;
+  1115→}
+  1116→
+  1117→.kf-input {
+  1118→  width: 52px;
+  1119→  height: 20px;
+  1120→  padding: 0 4px;
+  1121→  background: var(--bg-input);
+  1122→  border: 1px solid var(--border);
+  1123→  border-radius: var(--radius-sm);
+  1124→  color: var(--text);
+  1125→  font-family: var(--font-mono);
+  1126→  font-size: 11px;
+  1127→}
+  1128→
+  1129→.kf-input:focus {
+  1130→  border-color: var(--accent);
+  1131→}
+  1132→
+  1133→.kf-select {
+  1134→  width: 90px;
+  1135→  height: 20px;
+  1136→  padding: 0 4px;
+  1137→  background: var(--bg-input);
+  1138→  border: 1px solid var(--border);
+  1139→  border-radius: var(--radius-sm);
+  1140→  color: var(--text);
+  1141→  font-size: 10px;
+  1142→  cursor: pointer;
+  1143→}
+  1144→
+  1145→.kf-select:focus {
+  1146→  border-color: var(--accent);
+  1147→}
+  1148→
+  1149→.kf-editor-actions {
+  1150→  display: flex;
+  1151→  align-items: center;
+  1152→  gap: 2px;
+  1153→  flex-shrink: 0;
+  1154→}
+  1155→
+  1156→/* ========== Phase 6: Export Dialog ========== */
+  1157→.modal-backdrop {
+  1158→  position: fixed;
+  1159→  inset: 0;
+  1160→  background: rgba(0, 0, 0, 0.6);
+  1161→  display: flex;
+  1162→  align-items: center;
+  1163→  justify-content: center;
+  1164→  z-index: 9999;
+  1165→}
+  1166→
+  1167→.export-dialog {
+  1168→  width: 400px;
+  1169→  max-height: 85vh;
+  1170→  background: var(--bg-panel);
+  1171→  border: 1px solid var(--border-light);
+  1172→  border-radius: var(--radius);
+  1173→  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.6);
+  1174→  display: flex;
+  1175→  flex-direction: column;
+  1176→  overflow: hidden;
+  1177→}
+  1178→
+  1179→.export-dialog-header {
+  1180→  display: flex;
+  1181→  align-items: center;
+  1182→  justify-content: space-between;
+  1183→  padding: 10px 14px;
+  1184→  border-bottom: 1px solid var(--border);
+  1185→  flex-shrink: 0;
+  1186→}
+  1187→
+  1188→.export-dialog-title {
+  1189→  font-size: 13px;
+  1190→  font-weight: 600;
+  1191→  color: var(--text);
+  1192→  letter-spacing: 0.3px;
+  1193→}
+  1194→
+  1195→.export-dialog-body {
+  1196→  flex: 1;
+  1197→  overflow-y: auto;
+  1198→  padding: 10px 14px;
+  1199→  display: flex;
+  1200→  flex-direction: column;
+  1201→  gap: 12px;
+  1202→}
+  1203→
+  1204→.export-dialog-footer {
+  1205→  display: flex;
+  1206→  align-items: center;
+  1207→  justify-content: flex-end;
+  1208→  gap: 8px;
+  1209→  padding: 8px 14px;
+  1210→  border-top: 1px solid var(--border);
+  1211→  flex-shrink: 0;
+  1212→  background: var(--bg-deep);
+  1213→}
+  1214→
+  1215→.export-quick-row {
+  1216→  display: flex;
+  1217→  align-items: center;
+  1218→  gap: 8px;
+  1219→}
+  1220→
+  1221→.export-sep {
+  1222→  height: 1px;
+  1223→  background: var(--border);
+  1224→  margin: 2px 0;
+  1225→}
+  1226→
+  1227→.export-section {
+  1228→  display: flex;
+  1229→  flex-direction: column;
+  1230→  gap: 6px;
+  1231→}
+  1232→
+  1233→.export-section-label {
+  1234→  font-size: 10px;
+  1235→  font-weight: 600;
+  1236→  text-transform: uppercase;
+  1237→  letter-spacing: 0.6px;
+  1238→  color: var(--text-sec);
+  1239→}
+  1240→
+  1241→.export-format-options {
+  1242→  display: flex;
+  1243→  gap: 6px;
+  1244→}
+  1245→
+  1246→.export-format-btn {
+  1247→  flex: 1;
+  1248→  display: flex;
+  1249→  flex-direction: column;
+  1250→  align-items: center;
+  1251→  gap: 2px;
+  1252→  padding: 8px;
+  1253→  border: 1px solid var(--border);
+  1254→  border-radius: var(--radius-sm);
+  1255→  background: var(--bg-input);
+  1256→  color: var(--text-sec);
+  1257→  cursor: pointer;
+  1258→  transition: all 0.15s;
+  1259→}
+  1260→
+  1261→.export-format-btn:hover {
+  1262→  border-color: var(--border-light);
+  1263→  color: var(--text);
+  1264→}
+  1265→
+  1266→.export-format-btn.active {
+  1267→  border-color: var(--accent);
+  1268→  background: var(--accent-bg);
+  1269→  color: var(--accent);
+  1270→}
+  1271→
+  1272→.export-format-name {
+  1273→  font-size: 12px;
+  1274→  font-weight: 600;
+  1275→}
+  1276→
+  1277→.export-format-desc {
+  1278→  font-size: 9px;
+  1279→  color: var(--text-dim);
+  1280→}
+  1281→
+  1282→.export-res-grid {
+  1283→  display: grid;
+  1284→  grid-template-columns: repeat(4, 1fr);
+  1285→  gap: 4px;
+  1286→}
+  1287→
+  1288→.export-res-btn {
+  1289→  padding: 5px 4px;
+  1290→  font-size: 10px;
+  1291→  font-weight: 500;
+  1292→  text-align: center;
+  1293→  border: 1px solid var(--border);
+  1294→  border-radius: var(--radius-sm);
+  1295→  background: var(--bg-input);
+  1296→  color: var(--text-sec);
+  1297→  cursor: pointer;
+  1298→  transition: all 0.15s;
+  1299→}
+  1300→
+  1301→.export-res-btn:hover {
+  1302→  border-color: var(--border-light);
+  1303→  color: var(--text);
+  1304→}
+  1305→
+  1306→.export-res-btn.active {
+  1307→  border-color: var(--accent);
+  1308→  background: var(--accent-bg);
+  1309→  color: var(--accent);
+  1310→}
+  1311→
+  1312→.export-dim-info {
+  1313→  font-size: 10px;
+  1314→  color: var(--text-dim);
+  1315→  padding: 2px 0;
+  1316→}
+  1317→
+  1318→.export-dim-info strong {
+  1319→  color: var(--text-sec);
+  1320→  font-family: var(--font-mono);
+  1321→}
+  1322→
+  1323→.export-custom-size {
+  1324→  display: flex;
+  1325→  align-items: flex-end;
+  1326→  gap: 8px;
+  1327→}
+  1328→
+  1329→.export-field {
+  1330→  display: flex;
+  1331→  flex-direction: column;
+  1332→  gap: 2px;
+  1333→}
+  1334→
+  1335→.export-field label {
+  1336→  font-size: 9px;
+  1337→  color: var(--text-dim);
+  1338→  text-transform: uppercase;
+  1339→  letter-spacing: 0.3px;
+  1340→}
+  1341→
+  1342→.export-toggle-row {
+  1343→  display: flex;
+  1344→  align-items: center;
+  1345→  justify-content: space-between;
+  1346→}
+  1347→
+  1348→.export-error {
+  1349→  display: flex;
+  1350→  align-items: center;
+  1351→  gap: 6px;
+  1352→  padding: 6px 14px;
+  1353→  background: rgba(239, 68, 68, 0.1);
+  1354→  border-top: 1px solid var(--danger);
+  1355→  color: var(--danger);
+  1356→  font-size: 11px;
+  1357→  flex-shrink: 0;
+  1358→}
+  1359→
+  1360→.export-success {
+  1361→  display: flex;
+  1362→  align-items: center;
+  1363→  gap: 6px;
+  1364→  padding: 6px 14px;
+  1365→  background: rgba(34, 197, 94, 0.08);
+  1366→  border-top: 1px solid var(--success);
+  1367→  color: var(--success);
+  1368→  font-size: 11px;
+  1369→  flex-shrink: 0;
+  1370→}
+  1371→
+  1372→/* Disabled context menu item */
+  1373→.context-menu-item.disabled {
+  1374→  opacity: 0.35;
+  1375→  pointer-events: none;
+  1376→}
+  1377→
+  1378→/* ═══════════════════════════════════════════════════════════════════════════
+  1379→   Phase 7: Undo/Redo History Styles
+  1380→   ═══════════════════════════════════════════════════════════════════════════ */
+  1381→
+  1382→/* Status bar at the bottom */
+  1383→.status-bar {
+  1384→  font-family: var(--font-ui);
+  1385→  user-select: none;
+  1386→  -webkit-user-select: none;
+  1387→}
+  1388→
+  1389→.status-bar span {
+  1390→  white-space: nowrap;
+  1391→}
+  1392→
+  1393→/* History panel */
+  1394→.history-panel {
+  1395→  display: flex;
+  1396→  flex-direction: column;
+  1397→  height: 100%;
+  1398→  overflow: hidden;
+  1399→}
+  1400→
+  1401→.history-panel-header {
+  1402→  display: flex;
+  1403→  align-items: center;
+  1404→  justify-content: space-between;
+  1405→  padding: 4px 8px;
+  1406→  border-bottom: 1px solid var(--border);
+  1407→  flex-shrink: 0;
+  1408→}
+  1409→
+  1410→.history-panel-header h3 {
+  1411→  font-size: 11px;
+  1412→  font-weight: 500;
+  1413→  color: var(--text-sec);
+  1414→  margin: 0;
+  1415→  display: flex;
+  1416→  align-items: center;
+  1417→  gap: 6px;
+  1418→}
+  1419→
+  1420→.history-list {
+  1421→  flex: 1;
+  1422→  overflow-y: auto;
+  1423→  overflow-x: hidden;
+  1424→  padding: 4px 0;
+  1425→}
+  1426→
+  1427→.history-list::-webkit-scrollbar {
+  1428→  width: 4px;
+  1429→}
+  1430→
+  1431→.history-list::-webkit-scrollbar-track {
+  1432→  background: transparent;
+  1433→}
+  1434→
+  1435→.history-list::-webkit-scrollbar-thumb {
+  1436→  background: var(--border);
+  1437→  border-radius: 2px;
+  1438→}
+  1439→
+  1440→.history-entry {
+  1441→  display: flex;
+  1442→  align-items: center;
+  1443→  padding: 3px 8px;
+  1444→  font-size: 10px;
+  1445→  color: var(--text-sec);
+  1446→  cursor: default;
+  1447→  gap: 6px;
+  1448→  transition: background 0.1s;
+  1449→}
+  1450→
+  1451→.history-entry:hover {
+  1452→  background: var(--bg-card);
+  1453→}
+  1454→
+  1455→.history-entry.current {
+  1456→  background: var(--accent-bg);
+  1457→  color: var(--text);
+  1458→  border-left: 2px solid var(--accent);
+  1459→  padding-left: 6px;
+  1460→}
+  1461→
+  1462→.history-entry.future {
+  1463→  color: var(--text-dim);
+  1464→  font-style: italic;
+  1465→}
+  1466→
+  1467→.history-entry-icon {
+  1468→  width: 14px;
+  1469→  height: 14px;
+  1470→  display: flex;
+  1471→  align-items: center;
+  1472→  justify-content: center;
+  1473→  flex-shrink: 0;
+  1474→  opacity: 0.5;
+  1475→}
+  1476→
+  1477→.history-entry-label {
+  1478→  flex: 1;
+  1479→  overflow: hidden;
+  1480→  text-overflow: ellipsis;
+  1481→  white-space: nowrap;
+  1482→}
+  1483→
+  1484→.history-entry-time {
+  1485→  font-family: var(--font-mono);
+  1486→  font-size: 9px;
+  1487→  color: var(--text-dim);
+  1488→  flex-shrink: 0;
+  1489→}
+  1490→
+  1491→.history-empty {
+  1492→  display: flex;
+  1493→  align-items: center;
+  1494→  justify-content: center;
+  1495→  height: 100%;
+  1496→  color: var(--text-dim);
+  1497→  font-size: 10px;
+  1498→  font-style: italic;
+  1499→}
+  1500→
+  1501→/* ═══════════════════════════════════════════════════════════════════════════
+  1502→   Light Profile Grid (Phase 12: Advanced UI)
+  1503→   ═══════════════════════════════════════════════════════════════════════════ */
+  1504→
+  1505→.light-profile-section {
+  1506→  border-top: 1px solid var(--border);
+  1507→  padding: 8px 6px 4px;
+  1508→  flex-shrink: 0;
+  1509→}
+  1510→
+  1511→.light-profile-section-title {
+  1512→  font-size: 10px;
+  1513→  font-weight: 600;
+  1514→  text-transform: uppercase;
+  1515→  letter-spacing: 1px;
+  1516→  color: var(--accent);
+  1517→  padding: 0 2px 6px;
+  1518→  display: flex;
+  1519→  align-items: center;
+  1520→  gap: 6px;
+  1521→}
+  1522→
+  1523→.light-profile-section-title::after {
+  1524→  content: '';
+  1525→  flex: 1;
+  1526→  height: 1px;
+  1527→  background: linear-gradient(90deg, var(--accent-dim), transparent);
+  1528→}
+  1529→
+  1530→.lp-grid {
+  1531→  display: grid;
+  1532→  grid-template-columns: repeat(auto-fill, minmax(56px, 1fr));
+  1533→  gap: 8px;
+  1534→  padding: 4px 2px;
+  1535→}
+  1536→
+  1537→.lp-item {
+  1538→  display: flex;
+  1539→  flex-direction: column;
+  1540→  align-items: center;
+  1541→  gap: 4px;
+  1542→  cursor: pointer;
+  1543→  padding: 4px;
+  1544→  border-radius: var(--radius);
+  1545→  border: 2px solid transparent;
+  1546→  transition: all 0.2s ease;
+  1547→}
+  1548→
+  1549→.lp-item:hover {
+  1550→  background: var(--accent-bg);
+  1551→  border-color: var(--border-light);
+  1552→  transform: scale(1.05);
+  1553→}
+  1554→
+  1555→.lp-item.selected {
+  1556→  border-color: var(--accent-bright);
+  1557→  box-shadow: 0 0 12px rgba(192, 132, 252, 0.35), 0 0 4px rgba(192, 132, 252, 0.2);
+  1558→  background: var(--accent-bg);
+  1559→}
+  1560→
+  1561→.lp-item canvas {
+  1562→  width: 48px;
+  1563→  height: 48px;
+  1564→  border-radius: 50%;
+  1565→  display: block;
+  1566→  transition: box-shadow 0.2s ease;
+  1567→}
+  1568→
+  1569→.lp-item.selected canvas {
+  1570→  box-shadow: 0 0 10px rgba(192, 132, 252, 0.3);
+  1571→}
+  1572→
+  1573→.lp-item:hover canvas {
+  1574→  box-shadow: 0 0 8px rgba(192, 132, 252, 0.2);
+  1575→}
+  1576→
+  1577→.lp-item-name {
+  1578→  font-size: 9px;
+  1579→  color: var(--text-sec);
+  1580→  text-align: center;
+  1581→  white-space: nowrap;
+  1582→  overflow: hidden;
+  1583→  text-overflow: ellipsis;
+  1584→  max-width: 52px;
+  1585→  line-height: 1.2;
+  1586→  transition: color 0.2s ease;
+  1587→}
+  1588→
+  1589→.lp-item.selected .lp-item-name {
+  1590→  color: var(--accent-bright);
+  1591→}
+  1592→
+  1593→.lp-item:hover .lp-item-name {
+  1594→  color: var(--text);
+  1595→}
+  1596→
+  1597→/* ═══════════════════════════════════════════════════════════════════════════
+  1598→   Enhanced Slider & Input Styling
+  1599→   ═══════════════════════════════════════════════════════════════════════════ */
+  1600→
+  1601→input[type="range"]::-webkit-slider-thumb {
+  1602→  box-shadow: 0 0 6px var(--purple-glow);
+  1603→  transition: transform 0.15s ease, box-shadow 0.15s ease;
+  1604→}
+  1605→
+  1606→input[type="range"]::-webkit-slider-thumb:hover {
+  1607→  transform: scale(1.3);
+  1608→  box-shadow: 0 0 12px var(--purple-glow);
+  1609→}
+  1610→
+  1611→input[type="range"]:active::-webkit-slider-thumb {
+  1612→  transform: scale(1.4);
+  1613→  box-shadow: 0 0 16px var(--purple-glow);
+  1614→}
+  1615→
+  1616→/* ═══════════════════════════════════════════════════════════════════════════
+  1617→   Left Toolbar Neon Styling
+  1618→   ═══════════════════════════════════════════════════════════════════════════ */
+  1619→
+  1620→.left-toolbar {
+  1621→  background: var(--bg-panel) !important;
+  1622→  border-right: 1px solid var(--border) !important;
+  1623→  box-shadow: 1px 0 0 var(--border-glow);
+  1624→  position: relative;
+  1625→}
+  1626→
+  1627→.left-toolbar::after {
+  1628→  content: '';
+  1629→  position: absolute;
+  1630→  top: 0;
+  1631→  right: -1px;
+  1632→  width: 1px;
+  1633→  height: 100%;
+  1634→  background: linear-gradient(180deg, transparent 0%, var(--accent-dim) 50%, transparent 100%);
+  1635→  pointer-events: none;
+  1636→  opacity: 0.5;
+  1637→}
+  1638→
+  1639→/* ═══════════════════════════════════════════════════════════════════════════
+  1640→   Enhanced Preset Grid — Circular Thumbnails
+  1641→   ═══════════════════════════════════════════════════════════════════════════ */
+  1642→
+  1643→.preset-grid {
+  1644→  display: grid;
+  1645→  grid-template-columns: repeat(4, 1fr);
+  1646→  gap: 8px;
+  1647→  padding: 4px 0;
+  1648→}
+  1649→
+  1650→.preset-card {
+  1651→  position: relative;
+  1652→  border-radius: var(--radius);
+  1653→  overflow: hidden;
+  1654→  cursor: pointer;
+  1655→  border: 1px solid var(--border);
+  1656→  transition: all 0.25s ease;
+  1657→  background: var(--bg-card);
+  1658→}
+  1659→
+  1660→.preset-card:hover {
+  1661→  border-color: var(--accent-dim);
+  1662→  transform: translateY(-2px);
+  1663→  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.4), var(--glow-sm);
+  1664→}
+  1665→
+  1666→.pc-inner {
+  1667→  position: relative;
+  1668→  width: 100%;
+  1669→  aspect-ratio: 1 / 1;
+  1670→  overflow: hidden;
+  1671→  background: #0a0a12;
+  1672→  border-radius: 0;
+  1673→}
+  1674→
+  1675→.preset-card:hover .pc-inner {
+  1676→  box-shadow: inset 0 0 20px rgba(167, 139, 250, 0.05);
+  1677→}
+  1678→
+  1679→/* ═══════════════════════════════════════════════════════════════════════════
+  1680→   Smooth Global Transitions
+  1681→   ═══════════════════════════════════════════════════════════════════════════ */
+  1682→
+  1683→.light-list-item,
+  1684→.preset-tab,
+  1685→.tab-item,
+  1686→.history-entry,
+  1687→.export-format-btn,
+  1688→.export-res-btn,
+  1689→.kf-input,
+  1690→.kf-select {
+  1691→  transition: all 0.2s ease;
+  1692→}
+  1693→
+  1694→.preset-tab.active {
+  1695→  color: var(--accent-bright);
+  1696→  border-bottom-color: var(--accent-bright);
+  1697→  text-shadow: 0 0 8px var(--purple-glow);
+  1698→}
