@@ -1,0 +1,766 @@
+     1→/**
+     2→ * HDRIExporter — Captures the full 360° scene lighting as a standard equirectangular
+     3→ * HDRI (.hdr) or EXR (.exr) file suitable for IBL in Blender, Photoshop, HDRView,
+     4→ * or any HDR-capable application.
+     5→ *
+     6→ * The export captures user-added lighting only:
+     7→ *   - ALL physical lights (PointLight, SpotLight, RectAreaLight, DirectionalLight)
+     8→ *     represented as bright emissive proxy meshes with HDR color values
+     9→ *   - Custom .hdr/.hdri files loaded by the user (re-loaded from stored binary data)
+    10→ *
+    11→ * Built-in environment presets are NOT included — they are viewport-only PBR
+    12→ * ambiance and not user-placed light sources.
+    13→ *
+    14→ * Process:
+    15→ *   1. Build a dedicated capture scene with custom HDRI (if loaded) + light proxies
+    16→ *   2. Render 6 cube faces via CubeCamera (HalfFloatType for Windows/Chrome compat)
+    17→ *   3. Project cubemap → equirectangular via custom ShaderMaterial
+    18→ *   4. Read back Uint16Array (half-float), convert to Float32Array with Y-flip
+    19→ *   5. Encode as Radiance RGBE (.hdr) or OpenEXR (.exr)
+    20→ *
+    21→ * No external libraries — pure Three.js r165 + TypeScript.
+    22→ */
+    23→import * as THREE from 'three';
+    24→import { getRawHDRIData } from '../store/hdriDataStore';
+    25→import { RGBELoader } from 'three/addons/loaders/RGBELoader.js';
+    26→
+    27→// ─── IEEE 754 half-float ↔ float32 ──────────────────────────────────────────────
+    28→
+    29→/**
+    30→ * Convert a 16-bit IEEE 754 half-float to a 32-bit JavaScript number.
+    31→ * Handles signed zero, denormalized, normal, infinity, and NaN.
+    32→ */
+    33→export function halfToFloat(half: number): number {
+    34→  const sign = (half >>> 15) & 0x1;
+    35→  const exponent = (half >>> 10) & 0x1f;
+    36→  const mantissa = half & 0x3ff;
+    37→
+    38→  if (exponent === 0) {
+    39→    if (mantissa === 0) return sign === 0 ? 0 : -0;
+    40→    const result = Math.pow(2, -14) * (mantissa / 1024);
+    41→    return sign === 0 ? result : -result;
+    42→  }
+    43→  if (exponent === 31) {
+    44→    if (mantissa === 0) return sign === 0 ? Infinity : -Infinity;
+    45→    return NaN;
+    46→  }
+    47→  const result = Math.pow(2, exponent - 15) * (1 + mantissa / 1024);
+    48→  return sign === 0 ? result : -result;
+    49→}
+    50→
+    51→/** Convert a 32-bit float to 16-bit half-float (for EXR HALF encoding). */
+    52→function floatToHalf(value: number): number {
+    53→  const buf = new ArrayBuffer(4);
+    54→  const f32 = new Float32Array(buf);
+    55→  const u32 = new Uint32Array(buf);
+    56→  f32[0] = value;
+    57→  const x = u32[0];
+    58→  const sign = (x >>> 16) & 0x8000;
+    59→  const absX = x & 0x7fffffff;
+    60→  if (absX > 0x477fe000) return sign | 0x7c00;
+    61→  if (absX < 0x33000000) return sign;
+    62→  if (absX < 0x38800000) {
+    63→    const shift = 125 - ((absX >>> 23) & 0xff);
+    64→    return sign | (((absX & 0x7fffff) | 0x800000) >>> shift);
+    65→  }
+    66→  const exponent = ((absX >>> 23) & 0xff) - 127 + 15;
+    67→  const mantissa = (absX >>> 13) & 0x3ff;
+    68→  return sign | (exponent << 10) | mantissa;
+    69→}
+    70→
+    71→// ─── Scene capture ─────────────────────────────────────────────────────────────
+    72→
+    73→/**
+    74→ * Captures the full 360° scene lighting (environment + all physical lights)
+    75→ * into an equirectangular Float32Array (RGB, linear, top-to-bottom).
+    76→ *
+    77→ * Environment capture strategy:
+    78→ *   - Built-in presets: Re-creates the original emissive panels from preset data.
+    79→ *     These ARE the light sources that produce the environment lighting, so
+    80→ *     capturing them directly gives the most accurate HDRI representation.
+    81→ *   - Custom .hdr files: Re-loads the raw HDR binary data (stored in hdriDataStore),
+    82→ *     creates an equirect DataTexture, and sets it as scene.background so the
+    83→ *     CubeCamera renders it as the visible sky dome.
+    84→ *
+    85→ * Light proxy strategy:
+    86→ *   Each THREE.Light (Point, Spot, Area, Directional) gets an emissive proxy mesh
+    87→ *   with HDR-bright color values. The proxy brightness is scaled so that even
+    88→ *   default-intensity lights (intensity≈1) produce values well above 1.0 in the
+    89→ *   HDRI, ensuring the exposure slider in Photoshop/Blender reveals the light sources.
+    90→ */
+    91→export async function captureSceneToHDRI(
+    92→  renderer: THREE.WebGLRenderer,
+    93→  scene: THREE.Scene,
+    94→  resolution: number,
+    95→): Promise<Float32Array> {
+    96→  // ── Save renderer state ──────────────────────────────────────────────────
+    97→  const savedToneMapping = renderer.toneMapping;
+    98→  const savedToneMappingExposure = renderer.toneMappingExposure;
+    99→  const savedOutputColorSpace = renderer.outputColorSpace;
+   100→
+   101→  renderer.toneMapping = THREE.NoToneMapping;
+   102→  renderer.toneMappingExposure = 1.0;
+   103→  renderer.outputColorSpace = THREE.LinearSRGBColorSpace;
+   104→
+   105→  // ── Build a dedicated capture scene ──────────────────────────────────────
+   106→  const captureScene = new THREE.Scene();
+   107→  const disposables: { geometry?: THREE.BufferGeometry; material?: THREE.Material; texture?: THREE.Texture }[] = [];
+   108→
+   109→  // Track any Object URL created for custom HDRI (for cleanup)
+   110→  let customHDRIObjURL: string | null = null;
+   111→
+   112→  try {
+   113→    // ── 1) Environment: re-create the light sources that produce it ────────
+   114→    await addEnvironmentToCaptureScene(captureScene, renderer, disposables);
+   115→
+   116→    // ── 2) Emissive proxies for every physical light in the scene ─────────
+   117→    addLightProxies(scene, captureScene, disposables);
+   118→
+   119→    // ── 3) Capture cubemap at scene center (0, 0, 0) ────────────────────
+   120→    const cubeSize = Math.max(512, resolution);
+   121→    const cubeRT = new THREE.WebGLCubeRenderTarget(cubeSize, {
+   122→      format: THREE.RGBAFormat,
+   123→      type: THREE.HalfFloatType,
+   124→      generateMipmaps: false,
+   125→      minFilter: THREE.LinearFilter,
+   126→      magFilter: THREE.LinearFilter,
+   127→    });
+   128→    const cubeCamera = new THREE.CubeCamera(0.01, 200, cubeRT);
+   129→    cubeCamera.position.set(0, 0, 0);
+   130→    cubeCamera.update(renderer, captureScene);
+   131→
+   132→    // ── 4) Cubemap → Equirectangular projection ────────────────────────────
+   133→    const eqWidth = resolution;
+   134→    const eqHeight = Math.floor(resolution / 2);
+   135→
+   136→    const eqRT = new THREE.WebGLRenderTarget(eqWidth, eqHeight, {
+   137→      format: THREE.RGBAFormat,
+   138→      type: THREE.HalfFloatType,
+   139→      minFilter: THREE.LinearFilter,
+   140→      magFilter: THREE.LinearFilter,
+   141→      generateMipmaps: false,
+   142→    });
+   143→
+   144→    const equirectMaterial = new THREE.ShaderMaterial({
+   145→      uniforms: {
+   146→        envMap: { value: cubeRT.texture },
+   147→      },
+   148→      vertexShader: `
+   149→        varying vec2 vUv;
+   150→        void main() {
+   151→          vUv = uv;
+   152→          gl_Position = vec4(position.xy, 0.0, 1.0);
+   153→        }
+   154→      `,
+   155→      fragmentShader: `
+   156→        uniform samplerCube envMap;
+   157→        varying vec2 vUv;
+   158→        #define PI 3.14159265359
+   159→        #define TWO_PI 6.28318530718
+   160→        void main() {
+   161→          float phi = (1.0 - vUv.y) * PI;
+   162→          float theta = vUv.x * TWO_PI;
+   163→          vec3 dir = vec3(
+   164→            sin(phi) * cos(theta),
+   165→            cos(phi),
+   166→            sin(phi) * sin(theta)
+   167→          );
+   168→          gl_FragColor = textureCube(envMap, dir);
+   169→        }
+   170→      `,
+   171→      depthWrite: false,
+   172→      depthTest: false,
+   173→    });
+   174→
+   175→    const quad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), equirectMaterial);
+   176→    const orthoCamera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+   177→    const renderScene = new THREE.Scene();
+   178→    renderScene.add(quad);
+   179→
+   180→    const prevRT = renderer.getRenderTarget();
+   181→    renderer.setRenderTarget(eqRT);
+   182→    renderer.render(renderScene, orthoCamera);
+   183→    renderer.setRenderTarget(prevRT);
+   184→
+   185→    // ── 5) Read pixels as Uint16Array (half-float) ────────────────────────
+   186→    const halfPixels = new Uint16Array(eqWidth * eqHeight * 4);
+   187→    renderer.readRenderTargetPixels(eqRT, 0, 0, eqWidth, eqHeight, halfPixels);
+   188→
+   189→    // ── 6) Convert half → float32 with Y-axis flip ────────────────────────
+   190→    const floatPixels = new Float32Array(eqWidth * eqHeight * 3);
+   191→    for (let row = 0; row < eqHeight; row++) {
+   192→      const srcRow = eqHeight - 1 - row;
+   193→      for (let col = 0; col < eqWidth; col++) {
+   194→        const srcIdx = (srcRow * eqWidth + col) * 4;
+   195→        const dstIdx = (row * eqWidth + col) * 3;
+   196→        floatPixels[dstIdx]     = halfToFloat(halfPixels[srcIdx]);
+   197→        floatPixels[dstIdx + 1] = halfToFloat(halfPixels[srcIdx + 1]);
+   198→        floatPixels[dstIdx + 2] = halfToFloat(halfPixels[srcIdx + 2]);
+   199→      }
+   200→    }
+   201→
+   202→    // ── Cleanup GPU resources ──────────────────────────────────────────────
+   203→    quad.geometry.dispose();
+   204→    equirectMaterial.dispose();
+   205→    eqRT.dispose();
+   206→    cubeRT.dispose();
+   207→
+   208→    return floatPixels;
+   209→
+   210→  } finally {
+   211→    // ── Restore renderer state ─────────────────────────────────────────────
+   212→    renderer.toneMapping = savedToneMapping;
+   213→    renderer.toneMappingExposure = savedToneMappingExposure;
+   214→    renderer.outputColorSpace = savedOutputColorSpace;
+   215→
+   216→    // ── Dispose all temporary resources ────────────────────────────────────
+   217→    for (const item of disposables) {
+   218→      item.geometry?.dispose();
+   219→      item.material?.dispose();
+   220→      item.texture?.dispose();
+   221→    }
+   222→    if (customHDRIObjURL) {
+   223→      URL.revokeObjectURL(customHDRIObjURL);
+   224→    }
+   225→  }
+   226→}
+   227→
+   228→// ─── Environment capture helpers ────────────────────────────────────────────────
+   229→
+   230→/**
+   231→ * Adds the environment content to the capture scene.
+   232→ *
+   233→ * For built-in presets: Black background only (presets are viewport-only, not exported).
+   234→ * For custom .hdr: Re-loads the raw file and sets it as scene.background.
+   235→ * For 'none': Black background only.
+   236→ */
+   237→async function addEnvironmentToCaptureScene(
+   238→  captureScene: THREE.Scene,
+   239→  renderer: THREE.WebGLRenderer,
+   240→  disposables: { geometry?: THREE.BufferGeometry; material?: THREE.Material; texture?: THREE.Texture }[],
+   241→): Promise<void> {
+   242→  // Lazy imports to avoid circular dependencies at module level
+   243→  const { useSceneStore } = await import('../store/sceneStore');
+   244→  const envState = useSceneStore.getState().environment;
+   245→
+   246→  if (envState.presetId === 'none') {
+   247→    // No environment — dark background only
+   248→    captureScene.background = new THREE.Color(0x000000);
+   249→    return;
+   250→  }
+   251→
+   252→  if (envState.presetId === '__custom__') {
+   253→    // Custom .hdr file: re-load from stored binary data
+   254→    const rawBuffer = getRawHDRIData();
+   255→    if (rawBuffer) {
+   256→      try {
+   257→        const texture = await loadHDRITexture(rawBuffer);
+   258→        if (texture) {
+   259→          // Use as scene.background — the CubeCamera renders this as the sky dome
+   260→          texture.mapping = THREE.EquirectangularReflectionMapping;
+   261→          captureScene.background = texture;
+   262→          disposables.push({ texture });
+   263→        }
+   264→      } catch {
+   265→        // Fallback: dark background if custom HDR can't be re-loaded
+   266→        captureScene.background = new THREE.Color(0x000000);
+   267→      }
+   268→    } else {
+   269→      captureScene.background = new THREE.Color(0x000000);
+   270→    }
+   271→    return;
+   272→  }
+   273→
+   274→  // Built-in preset: The HDRI export captures only user-added content:
+   275→  //   - Physical light proxies (PointLight, SpotLight, RectAreaLight, DirectionalLight)
+   276→  //   - Custom .hdr files loaded by the user
+   277→  // Built-in environment presets are viewport-only PBR lighting — they are NOT
+   278→  // exported because they are not "lights" the user placed; they are the default
+   279→  // scene ambiance. Exporting them would produce a non-black HDRI even when the
+   280→  // scene has no user-added lighting, which is incorrect.
+   281→  //
+   282→  // Pure black background ensures proper HDRI dynamic range:
+   283→  //   0 × exposure = 0 (dark stays dark)
+   284→  //   Light proxy values (20–1000) respond correctly to exposure adjustment.
+   285→  captureScene.background = new THREE.Color(0x000000);
+   286→}
+   287→
+   288→/**
+   289→ * Load a raw .hdr ArrayBuffer into a THREE.DataTexture via RGBELoader.
+   290→ */
+   291→function loadHDRITexture(buffer: ArrayBuffer): Promise<THREE.DataTexture | null> {
+   292→  return new Promise<THREE.DataTexture | null>((resolve) => {
+   293→    const blob = new Blob([buffer], { type: 'application/octet-stream' });
+   294→    const url = URL.createObjectURL(blob);
+   295→    const loader = new RGBELoader();
+   296→    loader.load(
+   297→      url,
+   298→      (texture) => {
+   299→        URL.revokeObjectURL(url);
+   300→        resolve(texture);
+   301→      },
+   302→      undefined,
+   303→      () => {
+   304→        URL.revokeObjectURL(url);
+   305→        resolve(null);
+   306→      },
+   307→    );
+   308→  });
+   309→}
+   310→
+   311→// ─── Light proxy creation ───────────────────────────────────────────────────────
+   312→
+   313→/**
+   314→ * Traverses the main scene, finds all physical lights, and creates bright
+   315→ * emissive proxy meshes in the capture scene for each one.
+   316→ *
+   317→ * Proxy brightness strategy:
+   318→ *   Light intensity in Three.js r165 (physically correct) is in real-world units
+   319→ *   (candela, lux, nits). For HDRI purposes, we need the proxy to produce values
+   320→ *   well above 1.0 so the light source is clearly visible as an HDR hotspot.
+   321→ *
+   322→ *   Mapping: proxyColor = baseColor * max(20, intensity * 50)
+   323→ *   - intensity 0.1  → color value ~20.0  (minimum HDR)
+   324→ *   - intensity 1.0  → color value ~50.0  (clearly HDR, responds to exposure)
+   325→ *   - intensity 5.0  → color value ~250.0 (very bright)
+   326→ *   - intensity 50.0 → color value ~1000.0 (capped)
+   327→ *
+   328→ *   Cap at 1000 to avoid numerical issues in the HalfFloat render target.
+   329→ *   With a pure black (0.0) background, these values create proper dynamic range
+   330→ *   so exposure adjustment in Photoshop/Blender only affects light source pixels.
+   331→ */
+   332→function addLightProxies(
+   333→  mainScene: THREE.Scene,
+   334→  captureScene: THREE.Scene,
+   335→  disposables: { geometry?: THREE.BufferGeometry; material?: THREE.Material; texture?: THREE.Texture }[],
+   336→): void {
+   337→  mainScene.traverse((child) => {
+   338→    if (!(child instanceof THREE.Light)) return;
+   339→
+   340→    // Skip ambient/hemisphere — they are omnidirectional with no clear position
+   341→    if (child instanceof THREE.AmbientLight || child instanceof THREE.HemisphereLight) {
+   342→      return;
+   343→    }
+   344→
+   345→    const light = child;
+   346→    const intensity = light.intensity ?? 1;
+   347→    if (intensity <= 0) return;
+   348→
+   349→    const baseColor = light.color ? light.color.clone() : new THREE.Color(1, 1, 1);
+   350→
+   351→    // Scale to HDR range: ensure even dim lights produce values well above 1.0
+   352→    const hdrBrightness = Math.min(1000, Math.max(20, intensity * 50));
+   353→    const emissiveColor = baseColor.clone().multiplyScalar(hdrBrightness);
+   354→
+   355→    let proxy: THREE.Mesh | null = null;
+   356→
+   357→    if (light instanceof THREE.DirectionalLight) {
+   358→      // DirectionalLight → large emissive plane far away in the light's direction
+   359→      const dir = new THREE.Vector3();
+   360→      light.getWorldDirection(dir);
+   361→      const planeSize = 40;
+   362→      const geo = new THREE.PlaneGeometry(planeSize, planeSize);
+   363→      const mat = new THREE.MeshBasicMaterial({
+   364→        color: emissiveColor,
+   365→        side: THREE.DoubleSide,
+   366→      });
+   367→      proxy = new THREE.Mesh(geo, mat);
+   368→      const pos = dir.clone().multiplyScalar(48);
+   369→      proxy.position.copy(pos);
+   370→      proxy.lookAt(0, 0, 0);
+   371→
+   372→    } else if (light instanceof THREE.SpotLight) {
+   373→      // SpotLight → emissive disc at the light's position, facing its direction
+   374→      const pos = new THREE.Vector3();
+   375→      light.getWorldPosition(pos);
+   376→      const dir = new THREE.Vector3();
+   377→      light.getWorldDirection(dir);
+   378→      const angle = light.angle ?? Math.PI / 6;
+   379→      const discRadius = Math.max(0.5, Math.tan(angle) * 4);
+   380→      const geo = new THREE.CircleGeometry(discRadius, 32);
+   381→      const mat = new THREE.MeshBasicMaterial({
+   382→        color: emissiveColor,
+   383→        side: THREE.DoubleSide,
+   384→      });
+   385→      proxy = new THREE.Mesh(geo, mat);
+   386→      proxy.position.copy(pos);
+   387→      proxy.lookAt(pos.clone().add(dir));
+   388→
+   389→    } else if (light instanceof THREE.RectAreaLight) {
+   390→      // RectAreaLight → emissive rectangle matching the light's dimensions
+   391→      const pos = new THREE.Vector3();
+   392→      light.getWorldPosition(pos);
+   393→      const w = light.width ?? 2;
+   394→      const h = light.height ?? 2;
+   395→      const geo = new THREE.PlaneGeometry(w, h);
+   396→      const mat = new THREE.MeshBasicMaterial({
+   397→        color: emissiveColor,
+   398→        side: THREE.DoubleSide,
+   399→      });
+   400→      proxy = new THREE.Mesh(geo, mat);
+   401→      proxy.position.copy(pos);
+   402→      proxy.quaternion.copy(light.quaternion);
+   403→
+   404→    } else {
+   405→      // PointLight (and IES, which is mapped to PointLight)
+   406→      // → bright emissive sphere at the light's world position
+   407→      const pos = new THREE.Vector3();
+   408→      light.getWorldPosition(pos);
+   409→      const radius = Math.max(0.3, Math.min(2.0, hdrBrightness * 0.003));
+   410→      const geo = new THREE.SphereGeometry(radius, 16, 12);
+   411→      const mat = new THREE.MeshBasicMaterial({ color: emissiveColor });
+   412→      proxy = new THREE.Mesh(geo, mat);
+   413→      proxy.position.copy(pos);
+   414→    }
+   415→
+   416→    if (proxy) {
+   417→      captureScene.add(proxy);
+   418→      disposables.push({ geometry: proxy.geometry, material: proxy.material as THREE.Material });
+   419→    }
+   420→  });
+   421→}
+   422→
+   423→// ─── Radiance HDR (RGBE) Encoding ──────────────────────────────────────────────
+   424→
+   425→/**
+   426→ * Encode HDR pixel data into a Radiance RGBE .hdr file (ArrayBuffer).
+   427→ *
+   428→ * Uses uncompressed (flat) RGBE encoding for maximum compatibility.
+   429→ *
+   430→ * @param pixels - Float32Array of RGB (3 floats/pixel, top-to-bottom, linear).
+   431→ * @param width  - Image width in pixels.
+   432→ * @param height - Image height in pixels.
+   433→ * @returns Complete .hdr file as ArrayBuffer.
+   434→ */
+   435→export function encodeHDR(
+   436→  pixels: Float32Array,
+   437→  width: number,
+   438→  height: number,
+   439→): ArrayBuffer {
+   440→  const headerText =
+   441→    '#?RADIANCE\n' +
+   442→    'FORMAT=32-bit_rle_rgbe\n' +
+   443→    'EXPOSURE=1.0\n' +
+   444→    `\n-Y ${height} +X ${width}\n`;
+   445→  const headerBytes = new TextEncoder().encode(headerText);
+   446→
+   447→  const pixelDataSize = width * height * 4;
+   448→  const pixelData = new Uint8Array(pixelDataSize);
+   449→
+   450→  for (let i = 0; i < width * height; i++) {
+   451→    const r = pixels[i * 3];
+   452→    const g = pixels[i * 3 + 1];
+   453→    const b = pixels[i * 3 + 2];
+   454→    rgbFloatToRGBE(r, g, b, pixelData, i * 4);
+   455→  }
+   456→
+   457→  const buffer = new ArrayBuffer(headerBytes.length + pixelDataSize);
+   458→  const view = new Uint8Array(buffer);
+   459→  view.set(headerBytes, 0);
+   460→  view.set(pixelData, headerBytes.length);
+   461→  return buffer;
+   462→}
+   463→
+   464→/**
+   465→ * Convert a single RGB float triplet to Radiance RGBE (4 bytes).
+   466→ *
+   467→ * RGBE encoding with shared exponent:
+   468→ *   maxVal = max(r, g, b)
+   469→ *   if maxVal < 1e-32: output [0,0,0,0]
+   470→ *   else:
+   471→ *     exp = ceil(log2(maxVal))
+   472→ *     if 2^exp <= maxVal: exp++
+   473→ *     scale = 2^(-exp) * 256
+   474→ *     R = clamp(floor(r * scale), 0, 255)
+   475→ *     G = clamp(floor(g * scale), 0, 255)
+   476→ *     B = clamp(floor(b * scale), 0, 255)
+   477→ *     E = exp + 128
+   478→ */
+   479→function rgbFloatToRGBE(
+   480→  r: number,
+   481→  g: number,
+   482→  b: number,
+   483→  out: Uint8Array,
+   484→  off: number,
+   485→): void {
+   486→  const maxVal = Math.max(r, g, b);
+   487→
+   488→  if (maxVal < 1e-32) {
+   489→    out[off] = 0;
+   490→    out[off + 1] = 0;
+   491→    out[off + 2] = 0;
+   492→    out[off + 3] = 0;
+   493→    return;
+   494→  }
+   495→
+   496→  let exp = Math.ceil(Math.log2(maxVal));
+   497→  if (Math.pow(2, exp) < maxVal) exp++;
+   498→  if (Math.pow(2, exp) < maxVal) exp++;
+   499→
+   500→  const scale = Math.pow(2, -exp) * 256.0;
+   501→  out[off]     = Math.max(0, Math.min(255, Math.floor(r * scale)));
+   502→  out[off + 1] = Math.max(0, Math.min(255, Math.floor(g * scale)));
+   503→  out[off + 2] = Math.max(0, Math.min(255, Math.floor(b * scale)));
+   504→  out[off + 3] = Math.max(0, Math.min(255, exp + 128));
+   505→}
+   506→
+   507→// ─── OpenEXR Encoding ──────────────────────────────────────────────────────────
+   508→
+   509→/**
+   510→ * Encode HDR pixel data into an OpenEXR .exr file (ArrayBuffer).
+   511→ *
+   512→ * Channels: A, B, G, R as FLOAT (32-bit) — matches standard HDRI EXR convention
+   513→ * (alphabetical channel order with alpha). Compression: NONE.
+   514→ * Alpha is set to 1.0 (fully opaque) for all pixels.
+   515→ *
+   516→ * OpenEXR header format per attribute:
+   517→ *   name\0  type\0  size(u32LE)  value(size bytes, padded to 4-byte boundary)
+   518→ *
+   519→ * @param pixels - Float32Array of RGB (3 floats/pixel, top-to-bottom, linear).
+   520→ * @param width  - Image width in pixels.
+   521→ * @param height - Image height in pixels.
+   522→ * @returns Complete .exr file as ArrayBuffer.
+   523→ */
+   524→export function encodeEXR(
+   525→  pixels: Float32Array,
+   526→  width: number,
+   527→  height: number,
+   528→): ArrayBuffer {
+   529→  const CHANNEL_NAMES = ['A', 'B', 'G', 'R'] as const;
+   530→  const PIXEL_TYPE_FLOAT = 2;
+   531→  const CHANNEL_BYTES = 4;
+   532→  const NUM_CHANNELS = 4; // A, B, G, R
+   533→  const BYTES_PER_PIXEL = NUM_CHANNELS * CHANNEL_BYTES;
+   534→  const SCANLINE_DATA_SIZE = width * BYTES_PER_PIXEL;
+   535→
+   536→  // ── Low-level write helpers ──────────────────────────────────────────────
+   537→  const writeU32LE = (arr: number[], val: number): void => {
+   538→    arr.push(val & 0xff, (val >>> 8) & 0xff, (val >>> 16) & 0xff, (val >>> 24) & 0xff);
+   539→  };
+   540→  const writeI32LE = (arr: number[], val: number): void => writeU32LE(arr, val >>> 0);
+   541→  const writeF32LE = (arr: number[], val: number): void => {
+   542→    const buf = new ArrayBuffer(4);
+   543→    new DataView(buf).setFloat32(0, val, true);
+   544→    const bytes = new Uint8Array(buf);
+   545→    arr.push(bytes[0], bytes[1], bytes[2], bytes[3]);
+   546→  };
+   547→
+   548→  /** Convert a 32-bit integer to 4 bytes (little-endian). */
+   549→  const intToBytes = (val: number): number[] => [
+   550→    val & 0xff, (val >>> 8) & 0xff, (val >>> 16) & 0xff, (val >>> 24) & 0xff,
+   551→  ];
+   552→
+   553→  /** Convert a 32-bit float to 4 bytes (little-endian). */
+   554→  const floatToBytes = (val: number): number[] => {
+   555→    const buf = new ArrayBuffer(4);
+   556→    new DataView(buf).setFloat32(0, val, true);
+   557→    return [...new Uint8Array(buf)];
+   558→  };
+   559→
+   560→  /** Write a null-terminated string (for attribute names and type names). */
+   561→  const writeName = (arr: number[], str: string): void => {
+   562→    const bytes = new TextEncoder().encode(str);
+   563→    for (const b of bytes) arr.push(b);
+   564→    arr.push(0);
+   565→  };
+   566→
+   567→  /**
+   568→   * Write a channel-list entry: name\0 + padding to 4-byte boundary,
+   569→   * then pixel_type(i32) + pLinear(u32) + x_sampling(u32) + y_sampling(u32).
+   570→   * Each entry is exactly 4 + 16 = 20 bytes.
+   571→   */
+   572→  const writeChannelEntry = (arr: number[], name: string): void => {
+   573→    const bytes = new TextEncoder().encode(name);
+   574→    for (const b of bytes) arr.push(b);
+   575→    arr.push(0); // null terminator
+   576→    // Pad name to 4-byte boundary (including null)
+   577→    const nameLen = bytes.length + 1;
+   578→    const pad = (4 - (nameLen % 4)) % 4;
+   579→    for (let i = 0; i < pad; i++) arr.push(0);
+   580→    // Channel properties (16 bytes)
+   581→    writeI32LE(arr, PIXEL_TYPE_FLOAT); // pixel type
+   582→    writeU32LE(arr, 0);                // pLinear = false
+   583→    writeU32LE(arr, 1);                // x sampling
+   584→    writeU32LE(arr, 1);                // y sampling
+   585→  };
+   586→
+   587→  /**
+   588→   * Write an attribute value with proper size field and 4-byte padding.
+   589→   * Format: size(u32LE) + value_bytes + padding_to_4_byte_boundary
+   590→   */
+   591→  const writeAttrValue = (arr: number[], valueBytes: number[]): void => {
+   592→    writeU32LE(arr, valueBytes.length); // size field
+   593→    for (const b of valueBytes) arr.push(b);
+   594→    // Pad value to 4-byte boundary
+   595→    const pad = (4 - (valueBytes.length % 4)) % 4;
+   596→    for (let i = 0; i < pad; i++) arr.push(0);
+   597→  };
+   598→
+   599→  // ── Build header attributes ──────────────────────────────────────────────
+   600→  const hdr: number[] = [];
+   601→
+   602→  // 1) channels (chlist): 4 entries × 20 bytes + 1 terminator byte = 81 bytes
+   603→  writeName(hdr, 'channels');
+   604→  writeName(hdr, 'chlist');
+   605→  const channelData: number[] = [];
+   606→  for (const chName of CHANNEL_NAMES) {
+   607→    writeChannelEntry(channelData, chName);
+   608→  }
+   609→  channelData.push(0); // channel list terminator
+   610→  writeAttrValue(hdr, channelData);
+   611→
+   612→  // 2) compression: 1 byte (0 = NO_COMPRESSION)
+   613→  writeName(hdr, 'compression');
+   614→  writeName(hdr, 'compression');
+   615→  writeAttrValue(hdr, [0]);
+   616→
+   617→  // 3) dataWindow (box2i): 4 × int32 = 16 bytes
+   618→  writeName(hdr, 'dataWindow');
+   619→  writeName(hdr, 'box2i');
+   620→  writeAttrValue(hdr, [
+   621→    ...intToBytes(0), ...intToBytes(0),
+   622→    ...intToBytes(width - 1), ...intToBytes(height - 1),
+   623→  ]);
+   624→
+   625→  // 4) displayWindow (box2i): 4 × int32 = 16 bytes
+   626→  writeName(hdr, 'displayWindow');
+   627→  writeName(hdr, 'box2i');
+   628→  writeAttrValue(hdr, [
+   629→    ...intToBytes(0), ...intToBytes(0),
+   630→    ...intToBytes(width - 1), ...intToBytes(height - 1),
+   631→  ]);
+   632→
+   633→  // 5) lineOrder: 1 byte (0 = INCREASING_Y)
+   634→  writeName(hdr, 'lineOrder');
+   635→  writeName(hdr, 'lineOrder');
+   636→  writeAttrValue(hdr, [0]);
+   637→
+   638→  // 6) pixelAspectRatio (float): 4 bytes
+   639→  writeName(hdr, 'pixelAspectRatio');
+   640→  writeName(hdr, 'float');
+   641→  writeAttrValue(hdr, floatToBytes(1.0));
+   642→
+   643→  // 7) screenWindowCenter (v2f): 8 bytes
+   644→  writeName(hdr, 'screenWindowCenter');
+   645→  writeName(hdr, 'v2f');
+   646→  writeAttrValue(hdr, [...floatToBytes(0.0), ...floatToBytes(0.0)]);
+   647→
+   648→  // 8) screenWindowWidth (float): 4 bytes
+   649→  writeName(hdr, 'screenWindowWidth');
+   650→  writeName(hdr, 'float');
+   651→  writeAttrValue(hdr, floatToBytes(1.0));
+   652→
+   653→  // End of header: empty name (single null byte), then pad to 8-byte boundary
+   654→  hdr.push(0);
+   655→  while (hdr.length % 8 !== 0) hdr.push(0);
+   656→
+   657→  const headerSize = hdr.length;
+   658→  const fileHeaderSize = 8;
+   659→  const offsetTableSize = height * 8;
+   660→  const scanlineDataStart = fileHeaderSize + headerSize + offsetTableSize;
+   661→  const scanlineBlockSize = 4 + 4 + SCANLINE_DATA_SIZE;
+   662→
+   663→  // ── Offset table ────────────────────────────────────────────────────────
+   664→  const offsets: number[] = [];
+   665→  for (let y = 0; y < height; y++) {
+   666→    offsets.push(scanlineDataStart + y * scanlineBlockSize);
+   667→  }
+   668→
+   669→  // ── Scanline pixel data ─────────────────────────────────────────────────
+   670→  // Each scanline: [y_coord (u32)] [data_size (u32)] [A(u32) B(u32) G(u32) R(u32) per pixel]
+   671→  const scanlines: number[] = [];
+   672→  for (let y = 0; y < height; y++) {
+   673→    writeU32LE(scanlines, y);
+   674→    writeU32LE(scanlines, SCANLINE_DATA_SIZE);
+   675→    for (let x = 0; x < width; x++) {
+   676→      const srcIdx = (y * width + x) * 3;
+   677→      writeF32LE(scanlines, 1.0);              // A = 1.0 (fully opaque)
+   678→      writeF32LE(scanlines, pixels[srcIdx + 2]); // B
+   679→      writeF32LE(scanlines, pixels[srcIdx + 1]); // G
+   680→      writeF32LE(scanlines, pixels[srcIdx]);     // R
+   681→    }
+   682→  }
+   683→
+   684→  // ── Assemble file ───────────────────────────────────────────────────────
+   685→  const totalSize = fileHeaderSize + headerSize + offsetTableSize + scanlines.length;
+   686→  const file = new Uint8Array(totalSize);
+   687→  const dv = new DataView(file.buffer);
+   688→
+   689→  dv.setUint32(0, 20000630, true);
+   690→  dv.setUint32(4, 2, true);
+   691→
+   692→  file.set(new Uint8Array(hdr), 8);
+   693→
+   694→  const offsetBase = 8 + headerSize;
+   695→  for (let y = 0; y < height; y++) {
+   696→    const off = offsets[y];
+   697→    dv.setUint32(offsetBase + y * 8, off & 0xffffffff, true);
+   698→    dv.setUint32(offsetBase + y * 8 + 4, Math.floor(off / 0x100000000) & 0xffffffff, true);
+   699→  }
+   700→
+   701→  file.set(new Uint8Array(scanlines), scanlineDataStart);
+   702→
+   703→  return file.buffer;
+   704→}
+   705→
+   706→// ─── Download helper ───────────────────────────────────────────────────────────
+   707→
+   708→/**
+   709→ * Download HDR pixel data as a .hdr or .exr file.
+   710→ */
+   711→export function downloadHDRI(
+   712→  pixels: Float32Array,
+   713→  width: number,
+   714→  height: number,
+   715→  format: 'hdr' | 'exr',
+   716→  filename?: string,
+   717→): void {
+   718→  const baseName = filename ?? `hdri_export_${Date.now()}`;
+   719→  const ext = format === 'hdr' ? '.hdr' : '.exr';
+   720→  const mimeType = format === 'hdr' ? 'image/vnd.radiance' : 'image/x-exr';
+   721→
+   722→  const buffer: ArrayBuffer =
+   723→    format === 'hdr'
+   724→      ? encodeHDR(pixels, width, height)
+   725→      : encodeEXR(pixels, width, height);
+   726→
+   727→  const blob = new Blob([buffer], { type: mimeType });
+   728→  const url = URL.createObjectURL(blob);
+   729→  const link = document.createElement('a');
+   730→  link.href = url;
+   731→  link.download = `${baseName}${ext}`;
+   732→  link.style.display = 'none';
+   733→  document.body.appendChild(link);
+   734→  link.click();
+   735→
+   736→  setTimeout(() => {
+   737→    URL.revokeObjectURL(url);
+   738→    if (link.parentNode) link.parentNode.removeChild(link);
+   739→  }, 250);
+   740→}
+   741→
+   742→// ─── Convenience wrappers (backward-compatible) ────────────────────────────────
+   743→
+   744→/** @deprecated Use captureSceneToHDRI() + downloadHDRI() for more control. */
+   745→export async function exportSceneAsHDR(
+   746→  renderer: THREE.WebGLRenderer,
+   747→  scene: THREE.Scene,
+   748→  options?: { size?: number; filename?: string },
+   749→): Promise<void> {
+   750→  const resolution = options?.size ?? 2048;
+   751→  const height = Math.floor(resolution / 2);
+   752→  const pixels = await captureSceneToHDRI(renderer, scene, resolution);
+   753→  downloadHDRI(pixels, resolution, height, 'hdr', options?.filename);
+   754→}
+   755→
+   756→/** @deprecated Use captureSceneToHDRI() + downloadHDRI() for more control. */
+   757→export async function exportSceneAsEXR(
+   758→  renderer: THREE.WebGLRenderer,
+   759→  scene: THREE.Scene,
+   760→  options?: { size?: number; filename?: string },
+   761→): Promise<void> {
+   762→  const resolution = options?.size ?? 2048;
+   763→  const height = Math.floor(resolution / 2);
+   764→  const pixels = await captureSceneToHDRI(renderer, scene, resolution);
+   765→  downloadHDRI(pixels, resolution, height, 'exr', options?.filename);
+   766→}

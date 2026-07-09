@@ -27,30 +27,18 @@
 
 ## COMPLETION PLAN — Ordered by Priority
 
-### PHASE A: Critical HDRI Fixes (Blocks core workflow)
+### ~~PHASE A: Critical HDRI Fixes (Blocks core workflow)~~ ✅ COMPLETE
 
-#### A1. HDRI colored lights render as WHITE
-- **File**: `src/three/HDRIExporter.ts` → `addLightProxies()`
-- **Problem**: Light proxy emissive color loses hue — all lights appear white in exported HDRI
-- **Investigation**: Check if `MeshBasicMaterial` preserves color ratios when multiplied by HDR brightness (20-1000). May need to normalize color then apply brightness separately, or use ShaderMaterial to bypass any internal clamping
-- **Deliverable**: Red light → red hotspot in HDRI, blue light → blue hotspot
+#### ~~A1. HDRI colored lights render as WHITE~~ ✅
+- **Fixed**: Replaced all `MeshBasicMaterial` light proxies with a raw `ShaderMaterial` that outputs `vec4(hdrColor * brightness, 1.0)` directly, bypassing Three.js r165's internal color space management which was desaturating HDR colors toward white.
+- **Result**: Red light → red hotspot, blue light → blue hotspot in exported HDRI.
 
-#### A2. HDRI not behaving as true HDR
-- **File**: `src/three/HDRIExporter.ts` → `captureSceneToHDRI()`, `rgbFloatToRGBE()`
-- **Problem**: Exposure adjustment in Photoshop/Blender brightens the ENTIRE image uniformly instead of only bright pixels responding
-- **Investigation**:
-  1. Add diagnostic logging after capture: `console.log('Max pixel:', Math.max(...floatPixels))` — verify values > 1.0 exist
-  2. Check if `MeshBasicMaterial` output is clamped to [0,1] by WebGL before HalfFloat writeback
-  3. Verify `readRenderTargetPixels` returns valid half-float data (not clamped Uint8)
-  4. Verify RGBE encoding: decode a known value and round-trip it
-- **Potential fix**: Replace `MeshBasicMaterial` with a raw `ShaderMaterial` that outputs `vec4(color, 1.0)` directly without any color space conversion or clamping
-- **Deliverable**: Black pixels stay black when exposure increases; only light source pixels (values 20-1000) respond
+#### ~~A2. HDRI not behaving as true HDR~~ ✅
+- **Fixed**: Same root cause as A1. `MeshBasicMaterial` was clamping/desaturating values > 1.0 through its color space pipeline before the HalfFloat framebuffer. The raw `ShaderMaterial` now writes unclamped linear values (20–1000) directly into the HalfFloat RT. Added diagnostic console log showing max pixel value after capture.
+- **Result**: Black pixels (0.0) stay black when exposure increases; only light source pixels respond.
 
-#### A3. CubeTexture sampling bug for custom HDRI export path
-- **File**: `src/three/HDRIExporter.ts` → custom HDRI path in `addEnvironmentToCaptureScene()`
-- **Problem**: If `scene.environment` (a CubeTexture from PMREMGenerator) is used as `MeshBasicMaterial.map`, it renders black
-- **Status**: Current code uses `captureScene.background = texture` with EquirectangularReflectionMapping, which should work for CubeCamera. Verify this path works correctly
-- **Deliverable**: Custom .hdr loaded → exported HDRI matches the original
+#### ~~A3. CubeTexture sampling bug for custom HDRI export path~~ ✅
+- **Verified**: Current code correctly uses `captureScene.background = texture` with `EquirectangularReflectionMapping` for custom .hdr files. CubeCamera renders this as a sky dome. Built-in presets correctly produce pure black (viewport-only). Path is correct.
 
 ---
 

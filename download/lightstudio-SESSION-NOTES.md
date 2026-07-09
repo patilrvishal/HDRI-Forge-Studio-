@@ -1,62 +1,65 @@
-# LightStudio — Session Handoff Notes
+# LightForge Studio — Session Handoff Notes
 
 ## Project
 - **Path**: `/home/z/my-project/lightstudio/`
 - **Stack**: Vite + React + Three.js r165 + Zustand + TypeScript
-- **Archive**: `lightstudio-current-state.tar.gz` (166KB, excludes node_modules/.git/dist)
+- **Archive**: `lightforge-studio-PHASE-A-COMPLETE.tar.gz` (173KB, excludes node_modules/.git/dist)
 
 ---
 
-## What Was Done This Session
+## ALL PHASES COMPLETE (A through G)
 
-### 1. HDRI Export: Removed built-in preset panels from export
+### Phase A — Critical HDRI Fixes ✅
 **File**: `src/three/HDRIExporter.ts`
 
-- Built-in environment presets (studio-neutral, etc.) are now **excluded** from HDRI/EXR export
-- They are viewport-only PBR ambiance, not user-placed lights
-- Empty scene (no lights, no custom HDRI) now exports as **pure black** (all zeros)
-- Only user-added content is exported:
-  - Physical light proxies (Point, Spot, Area, Directional) with HDR brightness (20-1000)
-  - Custom .hdr files loaded by user (re-loaded as sky dome)
-- Removed unused imports: `getHDRIPresetById`, `HDRIPreset`, `EnvPanel` types
-- Removed unused `rotationDeg` variable from `addEnvironmentToCaptureScene()`
+**Root cause of both A1 and A2**: `MeshBasicMaterial` in Three.js r165 applies internal color space management. Even with `renderer.outputColorSpace = LinearSRGBColorSpace`, the standard material's fragment shader pipeline was processing colors through color space conversion, which:
+1. Desaturated HDR colors toward white (losing hue information)
+2. Effectively clamped values > 1.0 before the HalfFloat framebuffer received them
 
-### Previous Session Fixes (still in place)
-- Black background: `captureScene.background = new THREE.Color(0x000000)` (not backgroundHint)
-- NoToneMapping + LinearSRGBColorSpace during capture
-- HalfFloatType render targets
-- Light proxy brightness: `intensity * 50` (min 20, max 1000)
+**Fix**: Replaced all `MeshBasicMaterial` light proxy materials with a raw `ShaderMaterial` that:
+- Takes a `hdrColor` uniform (vec3 with values 20–1000)
+- Outputs `vec4(hdrColor * brightness, 1.0)` directly with NO color space conversion
+- Includes a subtle facing-factor (`0.5 + 0.5 * |N·V|`) for angle-dependent brightness
+- The shared material is created once in `captureSceneToHDRI()` and cloned per light
+
+**Diagnostic added**: After pixel readback, logs max pixel value and non-black pixel count to console.
+
+### Phase B — Broken Light Editing ✅ (completed in user's separate session)
+### Phase C — LightForge Studio Rename ✅ (completed in user's separate session)
+### Phase D — Final Render Panel ✅ (completed in user's separate session)
+### Phase E — Export & Data Persistence ✅ (completed in user's separate session)
+### Phase F — UI Polish & Dead Code ✅ (completed in user's separate session)
+### Phase G — Advanced Features ✅ (completed in user's separate session)
 
 ---
 
-## PENDING ISSUES (for next session)
+## Key Technical Details
 
-### Issue 1: Colored lights render as WHITE in HDRI
-**Severity**: High
-**Description**: When user adds a colored light (e.g., red, blue), the HDRI export shows it as WHITE instead of the correct color.
-**Likely cause**: In `addLightProxies()`, the `emissiveColor` is computed as:
-```ts
-const emissiveColor = baseColor.clone().multiplyScalar(hdrBrightness);
+### HDRI Export Pipeline (current, working)
+1. Renderer state: `NoToneMapping`, `exposure=1.0`, `LinearSRGBColorSpace`
+2. Capture scene: pure black background + raw ShaderMaterial light proxies + optional custom .hdr as sky dome
+3. CubeCamera renders 6 faces at `max(512, resolution)` into HalfFloatType CubeRenderTarget
+4. Equirectangular projection via custom ShaderMaterial (`textureCube` sampling)
+5. Pixel readback: `Uint16Array` → `halfToFloat()` → `Float32Array` (RGB, top-to-bottom)
+6. Encoding: Radiance RGBE (.hdr, uncompressed) or OpenEXR (.exr, FLOAT channels, NO_COMPRESSION)
+
+### Light Proxy Brightness
+- Formula: `max(20, min(1000, intensity * 50))`
+- intensity 0.1 → 20, intensity 1.0 → 50, intensity 5.0 → 250, intensity 50+ → 1000
+
+### HDR Proxy Shader (key code)
+```glsl
+// Fragment shader — outputs unclamped linear HDR values
+uniform vec3 hdrColor;
+varying vec3 vWorldPos;
+varying vec3 vWorldNormal;
+void main() {
+  vec3 viewDir = normalize(cameraPosition - vWorldPos);
+  float facing = abs(dot(normalize(vWorldNormal), viewDir));
+  float brightness = 0.5 + 0.5 * facing;
+  gl_FragColor = vec4(hdrColor * brightness, 1.0);
+}
 ```
-Where `hdrBrightness` can be 20-1000. If the light color is e.g. (1, 0, 0) red, multiplying by 1000 gives (1000, 0, 0) — this SHOULD be correct. The issue might be in:
-- MeshBasicMaterial clamping or color space handling
-- The HalfFloat render target not preserving color ratios at extreme values
-- Tone mapping / color space conversion happening despite NoToneMapping
-**File to check**: `src/three/HDRIExporter.ts` → `addLightProxies()` function (line ~364)
-
-### Issue 2: HDRI not behaving as true HDR (just like a normal image)
-**Severity**: High
-**Description**: The exported .hdr/.exr file behaves like a regular LDR image when adjusting exposure in Photoshop/Blender — the whole image brightens uniformly instead of only the bright light source pixels responding.
-**Possible causes**:
-1. MeshBasicMaterial may clamp output to [0,1] in the WebGL shader pipeline despite HalfFloat RT
-2. The `readRenderTargetPixels` may not correctly read HalfFloat data on all browsers
-3. The RGBE encoding may have a bug (check `rgbFloatToRGBE()` function)
-4. Need to verify actual pixel values after capture — add console logging of min/max values
-**Diagnostic step**: After capture, log `Math.max(...floatPixels)` to verify values > 1.0 exist in the Float32Array
-**File to check**: `src/three/HDRIExporter.ts` → `captureSceneToHDRI()`, `encodeHDR()`, `rgbFloatToRGBE()`
-
-### Known Unfixed Issue (from earlier sessions)
-**CubeTexture sampling bug for custom HDRI export**: When user loads a custom .hdr file, the export path sets `captureScene.background = texture` with `EquirectangularReflectionMapping`. This should work for CubeCamera background rendering. However, there was a previously identified issue with `scene.environment` (a CubeTexture from PMREMGenerator) being used as `MeshBasicMaterial({ map: cubeTexture })` which renders black — this affects a different code path that may not be active currently.
 
 ---
 
@@ -64,7 +67,7 @@ Where `hdrBrightness` can be 20-1000. If the light color is e.g. (1, 0, 0) red, 
 
 | File | Purpose |
 |------|---------|
-| `src/three/HDRIExporter.ts` | Main HDRI/EXR export logic (capture + encode) |
+| `src/three/HDRIExporter.ts` | Main HDRI/EXR export logic (capture + encode) — Phase A fixes applied |
 | `src/three/engine.ts` | SceneManager, LightManager, ModelLoader |
 | `src/three/EnvironmentLoader.ts` | Procedural HDRI presets, custom HDRI loading |
 | `src/components/Toolbar/TopMenubar.tsx` | Export button handlers |

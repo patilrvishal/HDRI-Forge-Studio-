@@ -106,6 +106,42 @@ export async function captureSceneToHDRI(
   const captureScene = new THREE.Scene();
   const disposables: { geometry?: THREE.BufferGeometry; material?: THREE.Material; texture?: THREE.Texture }[] = [];
 
+  // Shared HDR proxy shader — bypasses MeshBasicMaterial's internal color space
+  // management which clamps/desaturates values > 1.0. This raw ShaderMaterial
+  // outputs the exact vec3 color value directly into the HalfFloat framebuffer,
+  // preserving full HDR dynamic range (e.g., 50.0 for a red light stays (50,0,0)
+  // instead of being sRGB-converted toward white).
+  const hdrProxyMaterial = new THREE.ShaderMaterial({
+    uniforms: {
+      hdrColor: { value: new THREE.Color(1, 1, 1) },
+    },
+    vertexShader: `
+      varying vec3 vWorldPos;
+      varying vec3 vWorldNormal;
+      void main() {
+        vWorldPos = (modelMatrix * vec4(position, 1.0)).xyz;
+        vWorldNormal = normalize(mat3(modelMatrix) * normal);
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+      }
+    `,
+    fragmentShader: `
+      uniform vec3 hdrColor;
+      varying vec3 vWorldPos;
+      varying vec3 vWorldNormal;
+      void main() {
+        // Simple N·L facing factor for subtle angle-dependent brightness
+        // (keeps both sides of DoubleSide visible without hard cutoff)
+        vec3 viewDir = normalize(cameraPosition - vWorldPos);
+        float facing = abs(dot(normalize(vWorldNormal), viewDir));
+        float brightness = 0.5 + 0.5 * facing;
+        gl_FragColor = vec4(hdrColor * brightness, 1.0);
+      }
+    `,
+    side: THREE.DoubleSide,
+    // CRITICAL: Do NOT set any color space — let raw linear values pass through
+  });
+  disposables.push({ material: hdrProxyMaterial });
+
   // Track any Object URL created for custom HDRI (for cleanup)
   let customHDRIObjURL: string | null = null;
 
@@ -114,7 +150,7 @@ export async function captureSceneToHDRI(
     await addEnvironmentToCaptureScene(captureScene, renderer, disposables);
 
     // ── 2) Emissive proxies for every physical light in the scene ─────────
-    addLightProxies(scene, captureScene, disposables);
+    addLightProxies(scene, captureScene, hdrProxyMaterial, disposables);
 
     // ── 3) Capture cubemap at scene center (0, 0, 0) ────────────────────
     const cubeSize = Math.max(512, resolution);
@@ -198,6 +234,16 @@ export async function captureSceneToHDRI(
         floatPixels[dstIdx + 2] = halfToFloat(halfPixels[srcIdx + 2]);
       }
     }
+
+    // ── Diagnostic: verify HDR values exceed 1.0 ──────────────────────────
+    let maxVal = 0;
+    let nonBlackPixels = 0;
+    for (let i = 0; i < floatPixels.length; i += 3) {
+      const m = Math.max(floatPixels[i], floatPixels[i+1], floatPixels[i+2]);
+      if (m > 0.001) nonBlackPixels++;
+      if (m > maxVal) maxVal = m;
+    }
+    console.log(`[HDRIExporter] Capture complete: ${eqWidth}x${eqHeight}, max pixel value=${maxVal.toFixed(2)}, non-black pixels=${nonBlackPixels}`);
 
     // ── Cleanup GPU resources ──────────────────────────────────────────────
     quad.geometry.dispose();
@@ -332,6 +378,7 @@ function loadHDRITexture(buffer: ArrayBuffer): Promise<THREE.DataTexture | null>
 function addLightProxies(
   mainScene: THREE.Scene,
   captureScene: THREE.Scene,
+  hdrProxyMaterial: THREE.ShaderMaterial,
   disposables: { geometry?: THREE.BufferGeometry; material?: THREE.Material; texture?: THREE.Texture }[],
 ): void {
   mainScene.traverse((child) => {
@@ -354,16 +401,17 @@ function addLightProxies(
 
     let proxy: THREE.Mesh | null = null;
 
+    // Clone the shared HDR proxy material and set this light's color
+    const mat = hdrProxyMaterial.clone();
+    mat.uniforms.hdrColor.value.copy(emissiveColor);
+    disposables.push({ material: mat });
+
     if (light instanceof THREE.DirectionalLight) {
       // DirectionalLight → large emissive plane far away in the light's direction
       const dir = new THREE.Vector3();
       light.getWorldDirection(dir);
       const planeSize = 40;
       const geo = new THREE.PlaneGeometry(planeSize, planeSize);
-      const mat = new THREE.MeshBasicMaterial({
-        color: emissiveColor,
-        side: THREE.DoubleSide,
-      });
       proxy = new THREE.Mesh(geo, mat);
       const pos = dir.clone().multiplyScalar(48);
       proxy.position.copy(pos);
@@ -378,10 +426,6 @@ function addLightProxies(
       const angle = light.angle ?? Math.PI / 6;
       const discRadius = Math.max(0.5, Math.tan(angle) * 4);
       const geo = new THREE.CircleGeometry(discRadius, 32);
-      const mat = new THREE.MeshBasicMaterial({
-        color: emissiveColor,
-        side: THREE.DoubleSide,
-      });
       proxy = new THREE.Mesh(geo, mat);
       proxy.position.copy(pos);
       proxy.lookAt(pos.clone().add(dir));
@@ -393,10 +437,6 @@ function addLightProxies(
       const w = light.width ?? 2;
       const h = light.height ?? 2;
       const geo = new THREE.PlaneGeometry(w, h);
-      const mat = new THREE.MeshBasicMaterial({
-        color: emissiveColor,
-        side: THREE.DoubleSide,
-      });
       proxy = new THREE.Mesh(geo, mat);
       proxy.position.copy(pos);
       proxy.quaternion.copy(light.quaternion);
@@ -408,14 +448,13 @@ function addLightProxies(
       light.getWorldPosition(pos);
       const radius = Math.max(0.3, Math.min(2.0, hdrBrightness * 0.003));
       const geo = new THREE.SphereGeometry(radius, 16, 12);
-      const mat = new THREE.MeshBasicMaterial({ color: emissiveColor });
       proxy = new THREE.Mesh(geo, mat);
       proxy.position.copy(pos);
     }
 
     if (proxy) {
       captureScene.add(proxy);
-      disposables.push({ geometry: proxy.geometry, material: proxy.material as THREE.Material });
+      disposables.push({ geometry: proxy.geometry });
     }
   });
 }
