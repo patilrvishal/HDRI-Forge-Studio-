@@ -4,6 +4,7 @@ import { LeftToolbar } from '../Toolbar/LeftToolbar';
 import { Viewport } from '../Viewport/Viewport';
 import { LightListPanel } from '../Lights/LightListPanel';
 import { LightProperties } from '../Lights/LightProperties';
+import { LightProfileGrid } from '../Lights/LightProfileGrid';
 import { PresetBrowser } from '../Presets/PresetBrowser';
 import { LightPreview } from '../Previews/LightPreview';
 import { MaterialPreviewTab, getMaterialPreviewThumbnail } from '../Previews/MaterialPreviewTab';
@@ -25,6 +26,26 @@ import { SceneExporter } from '../../three/SceneExporter';
 import { MaterialManager } from '../../three/MaterialManager';
 import * as THREE from 'three';
 
+
+/** Inline wrapper: Light Profile grid section below the light list */
+const LightProfileSection: React.FC = () => {
+  const lights = useLightsStore((s) => s.lights);
+  const selectedLightId = useLightsStore((s) => s.selectedLightId);
+  const selectLight = useLightsStore((s) => s.selectLight);
+
+  if (lights.length === 0) return null;
+
+  return (
+    <div className="light-profile-section">
+      <div className="light-profile-section-title">Light Profiles</div>
+      <LightProfileGrid
+        lights={lights.map((l) => ({ id: l.id, type: l.type, color: l.color, name: l.name }))}
+        selectedLightId={selectedLightId}
+        onSelectLight={selectLight}
+      />
+    </div>
+  );
+};
 
 export const AppLayout: React.FC = () => {
   const sceneManagerRef = useRef<SceneManager | null>(null);
@@ -221,7 +242,10 @@ export const AppLayout: React.FC = () => {
                 </button>
               </div>
               <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-                <LightListPanel />
+                <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+                  <LightListPanel />
+                </div>
+                <LightProfileSection />
               </div>
             </div>
             {/* Left resize handle */}
@@ -399,7 +423,7 @@ export const AppLayout: React.FC = () => {
           fontSize: 10,
           color: 'var(--text-dim)',
           borderTop: '1px solid var(--border)',
-          background: 'var(--bg-deep)',
+          background: 'linear-gradient(90deg, var(--bg-deep), rgba(167,139,250,0.02), var(--bg-deep))',
           flexShrink: 0,
         }}
       >
@@ -412,7 +436,7 @@ export const AppLayout: React.FC = () => {
           </span>
         </div>
         <div style={{ display: 'flex', gap: 12 }}>
-          <span>LightForge Studio v1.0.0</span>
+          <span>LightForge Studio <span style={{ color: 'var(--accent)' }}>v2.0</span></span>
           <span>Phase 11</span>
         </div>
       </div>
@@ -463,7 +487,7 @@ export const AppLayout: React.FC = () => {
             }}
             onClick={(e) => e.stopPropagation()}
           >
-            <div style={{ fontSize: 16, fontWeight: 700, color: 'var(--accent)', marginBottom: 4 }}>
+            <div style={{ fontSize: 16, fontWeight: 700, background: 'var(--neon-gradient)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent', marginBottom: 4 }}>
               LightForge Studio
             </div>
             <div style={{ fontSize: 11, color: 'var(--text-sec)', marginBottom: 8 }}>

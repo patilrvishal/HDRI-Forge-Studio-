@@ -144,6 +144,7 @@ export const LeftToolbar: React.FC<LeftToolbarProps> = (_sceneManagerRef) => {
 
   return (
     <div
+      className="left-toolbar"
       style={{
         width: 40,
         display: 'flex',
@@ -151,8 +152,6 @@ export const LeftToolbar: React.FC<LeftToolbarProps> = (_sceneManagerRef) => {
         alignItems: 'center',
         padding: '4px 0',
         gap: 2,
-        background: 'var(--bg-panel)',
-        borderRight: '1px solid var(--border)',
         flexShrink: 0,
         overflowY: 'auto',
       }}

@@ -263,7 +263,7 @@ function drawLightVisualization(
 
   // IES pattern visualization
   if (ld.type === 'ies') {
-    ctx.strokeStyle = hexToRgba('#4a9eff', 0.3);
+    ctx.strokeStyle = hexToRgba('#a78bfa', 0.3);
     ctx.lineWidth = 1;
     ctx.setLineDash([3, 3]);
     ctx.beginPath();
