@@ -55,6 +55,7 @@ export const RenderSettingsPanel: React.FC<RenderSettingsPanelProps> = ({ onClos
   const setRenderSettings = useSceneStore((s) => s.setRenderSettings);
   const setBloom = useSceneStore((s) => s.setBloom);
   const setAO = useSceneStore((s) => s.setAO);
+  const setGround = useSceneStore((s) => s.setGround);
   const setExposure = useSceneStore((s) => s.setExposure);
   const setVignette = useSceneStore((s) => s.setVignette);
   const setColorGrading = useSceneStore((s) => s.setColorGrading);
@@ -121,6 +122,36 @@ export const RenderSettingsPanel: React.FC<RenderSettingsPanelProps> = ({ onClos
   const handleAOIntensity = useCallback(
     (v: number) => setAO({ intensity: v }),
     [setAO],
+  );
+
+  // ── Ground ─────────────────────────────────────────────────────────────────
+  const handleGroundVisible = useCallback(
+    () => setGround({ visible: !rs.ground.visible }),
+    [setGround, rs.ground.visible],
+  );
+  const handleGroundReflections = useCallback(
+    () => setGround({ reflections: !rs.ground.reflections }),
+    [setGround, rs.ground.reflections],
+  );
+  const handleGroundSharpness = useCallback(
+    (v: number) => setGround({ reflectionSharpness: v }),
+    [setGround],
+  );
+  const handleGroundColor = useCallback(
+    (v: string) => setGround({ color: v }),
+    [setGround],
+  );
+  const handleGroundRoughness = useCallback(
+    (v: number) => setGround({ roughness: v }),
+    [setGround],
+  );
+  const handleGroundMetalness = useCallback(
+    (v: number) => setGround({ metalness: v }),
+    [setGround],
+  );
+  const handleGroundFade = useCallback(
+    (v: number) => setGround({ fadeRadius: v }),
+    [setGround],
   );
 
   // ── Vignette ──────────────────────────────────────────────────────────────
@@ -228,6 +259,36 @@ export const RenderSettingsPanel: React.FC<RenderSettingsPanelProps> = ({ onClos
               </>
             )}
             <div className="rs-note">Screen-space ambient occlusion (SSAO). Adds contact shadows in creases and corners.</div>
+          </Section>
+
+          {/* ─── Ground / Floor ─────────────────────────────────── */}
+          <Section title="Ground / Floor">
+            <Toggle label="Visible" checked={rs.ground.visible} onChange={handleGroundVisible} />
+            {rs.ground.visible && (
+              <>
+                <Toggle label="Floor Reflections" checked={rs.ground.reflections} onChange={handleGroundReflections} />
+                {rs.ground.reflections && (
+                  <Slider label="Reflection Sharpness" value={rs.ground.reflectionSharpness} min={0} max={1} step={0.05} onChange={handleGroundSharpness} />
+                )}
+                {!rs.ground.reflections && (
+                  <>
+                    <Slider label="Roughness" value={rs.ground.roughness} min={0} max={1} step={0.05} onChange={handleGroundRoughness} />
+                    <Slider label="Metalness" value={rs.ground.metalness} min={0} max={1} step={0.05} onChange={handleGroundMetalness} />
+                  </>
+                )}
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <span className="slider-label">Color</span>
+                  <input
+                    type="color"
+                    value={rs.ground.color}
+                    onChange={(e) => handleGroundColor(e.target.value)}
+                    style={{ width: 28, height: 20, border: '1px solid var(--border)', borderRadius: 3, cursor: 'pointer', background: 'transparent' }}
+                  />
+                </div>
+                <Slider label="Fade Radius" value={rs.ground.fadeRadius} min={0} max={20} step={0.5} onChange={handleGroundFade} />
+                <div className="rs-note">Fade blends ground edges into the background for a seamless studio look. Set to 0 for sharp edges.</div>
+              </>
+            )}
           </Section>
 
           {/* ─── Vignette ───────────────────────────────────────── */}

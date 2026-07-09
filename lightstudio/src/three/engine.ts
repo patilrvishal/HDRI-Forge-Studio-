@@ -10,6 +10,8 @@ import { SMAAPass } from 'three/addons/postprocessing/SMAAPass.js';
 import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
 import { SSAOPass } from 'three/addons/postprocessing/SSAOPass.js';
 import { FXAAShader } from 'three/addons/shaders/FXAAShader.js';
+import { Reflector } from 'three/addons/objects/Reflector.js';
+import type { GroundSettings } from '../types/Scene';
 
 let _rectAreaLibInitialized = false;
 function ensureRectAreaLib(): void {
@@ -32,8 +34,11 @@ export class SceneManager {
   renderer: THREE.WebGLRenderer;
   controls: OrbitControls;
   container: HTMLElement | null = null;
-  ground: THREE.Mesh | null = null;
+  ground: THREE.Mesh | Reflector | null = null;
+  groundReflector: Reflector | null = null;
+  groundOverlay: THREE.Mesh | null = null;
   grid: THREE.GridHelper | null = null;
+  _groundSettings: GroundSettings | null = null;
   pmremGenerator: THREE.PMREMGenerator;
   _animationId: number = 0;
   _clock = new THREE.Clock();
@@ -86,19 +91,10 @@ export class SceneManager {
     this.renderer.domElement.style.width = '100%';
     this.renderer.domElement.style.height = '100%';
 
-    // Ground plane
-    const groundGeo = new THREE.PlaneGeometry(40, 40);
-    const groundMat = new THREE.MeshStandardMaterial({
-      color: 0x2a2a3e,
-      metalness: 0.3,
-      roughness: 0.7,
-      envMapIntensity: 0.4,
-    });
-    this.ground = new THREE.Mesh(groundGeo, groundMat);
-    this.ground.rotation.x = -Math.PI / 2;
-    this.ground.position.y = -0.01;
-    this.ground.receiveShadow = true;
-    this.scene.add(this.ground);
+    // Ground plane (placeholder — will be replaced by updateGround)
+    this.ground = null;
+    this.groundReflector = null;
+    this.groundOverlay = null;
 
     this.setGrid(true);
     this.resize();
@@ -128,6 +124,154 @@ export class SceneManager {
       width: Math.round(this.container.clientWidth * dpr),
       height: Math.round(this.container.clientHeight * dpr),
     };
+  }
+
+  /** Remove existing ground objects from the scene and dispose their resources. */
+  private _disposeGround(): void {
+    if (this.groundReflector) {
+      this.scene.remove(this.groundReflector);
+      this.groundReflector.geometry.dispose();
+      (this.groundReflector.material as THREE.Material).dispose();
+      this.groundReflector = null;
+    }
+    if (this.groundOverlay) {
+      this.scene.remove(this.groundOverlay);
+      this.groundOverlay.geometry.dispose();
+      (this.groundOverlay.material as THREE.Material).dispose();
+      this.groundOverlay = null;
+    }
+    if (this.ground) {
+      this.scene.remove(this.ground);
+      this.ground.geometry.dispose();
+      if (Array.isArray(this.ground.material)) {
+        this.ground.material.forEach((m) => m.dispose());
+      } else {
+        this.ground.material.dispose();
+      }
+      this.ground = null;
+    }
+  }
+
+  /**
+   * Rebuild the ground plane according to the given settings.
+   * - reflections=true  → Three.js Reflector (mirror) + fade overlay
+   * - reflections=false → MeshStandardMaterial with configurable PBR properties
+   */
+  updateGround(settings: GroundSettings): void {
+    this._groundSettings = settings;
+    this._disposeGround();
+
+    if (!settings.visible) return;
+
+    const GROUND_SIZE = 40;
+    const groundGeo = new THREE.PlaneGeometry(GROUND_SIZE, GROUND_SIZE);
+    const color = new THREE.Color(settings.color);
+
+    if (settings.reflections) {
+      // ── Reflective ground (mirror floor) ──
+      const dpr = Math.min(window.devicePixelRatio, 2);
+      // Lower resolution = blurrier reflection. Sharpness 1 → full res, 0 → 1/4 res.
+      const resScale = 0.25 + 0.75 * settings.reflectionSharpness;
+
+      this.groundReflector = new Reflector(groundGeo, {
+        clipBias: 0.003,
+        textureWidth: Math.max(128, Math.round(1920 * resScale * dpr)),
+        textureHeight: Math.max(128, Math.round(1080 * resScale * dpr)),
+        color: color.getHex(),
+        multisample: settings.reflectionSharpness > 0.5 ? 4 : 0,
+      });
+      this.groundReflector.rotation.x = -Math.PI / 2;
+      this.groundReflector.position.y = -0.005;
+      this.scene.add(this.groundReflector);
+
+      // ── Fade overlay: fades ground edges into background ──
+      if (settings.fadeRadius > 0) {
+        const overlayGeo = new THREE.PlaneGeometry(GROUND_SIZE, GROUND_SIZE);
+        const overlayMat = new THREE.ShaderMaterial({
+          transparent: true,
+          depthWrite: false,
+          uniforms: {
+            uFadeRadius: { value: settings.fadeRadius },
+            uGroundSize: { value: GROUND_SIZE / 2 },
+          },
+          vertexShader: /* glsl */ `
+            varying vec2 vWorldPos;
+            void main() {
+              vec4 worldPos = modelMatrix * vec4(position, 1.0);
+              vWorldPos = worldPos.xz;
+              gl_Position = projectionMatrix * viewMatrix * worldPos;
+            }
+          `,
+          fragmentShader: /* glsl */ `
+            uniform float uFadeRadius;
+            uniform float uGroundSize;
+            varying vec2 vWorldPos;
+            void main() {
+              float dist = length(vWorldPos);
+              float alpha = 1.0 - smoothstep(uFadeRadius, uGroundSize, dist);
+              gl_FragColor = vec4(0.0, 0.0, 0.0, 1.0 - alpha);
+            }
+          `,
+        });
+        this.groundOverlay = new THREE.Mesh(overlayGeo, overlayMat);
+        this.groundOverlay.rotation.x = -Math.PI / 2;
+        this.groundOverlay.position.y = -0.003;
+        this.scene.add(this.groundOverlay);
+      }
+
+      this.ground = this.groundReflector;
+    } else {
+      // ── Standard PBR ground (no reflections) ──
+      const groundMat = new THREE.MeshStandardMaterial({
+        color: color.getHex(),
+        metalness: settings.metalness,
+        roughness: settings.roughness,
+        envMapIntensity: 0.5,
+      });
+      this.ground = new THREE.Mesh(groundGeo, groundMat);
+      this.ground.rotation.x = -Math.PI / 2;
+      this.ground.position.y = -0.01;
+      this.ground.receiveShadow = true;
+
+      // Fade overlay for non-reflective ground too
+      if (settings.fadeRadius > 0) {
+        const overlayGeo = new THREE.PlaneGeometry(GROUND_SIZE, GROUND_SIZE);
+        const overlayMat = new THREE.ShaderMaterial({
+          transparent: true,
+          depthWrite: false,
+          uniforms: {
+            uFadeRadius: { value: settings.fadeRadius },
+            uGroundSize: { value: GROUND_SIZE / 2 },
+            uBgColor: { value: new THREE.Color('#0d0d1a') },
+          },
+          vertexShader: /* glsl */ `
+            varying vec2 vWorldPos;
+            void main() {
+              vec4 worldPos = modelMatrix * vec4(position, 1.0);
+              vWorldPos = worldPos.xz;
+              gl_Position = projectionMatrix * viewMatrix * worldPos;
+            }
+          `,
+          fragmentShader: /* glsl */ `
+            uniform float uFadeRadius;
+            uniform float uGroundSize;
+            uniform vec3 uBgColor;
+            varying vec2 vWorldPos;
+            void main() {
+              float dist = length(vWorldPos);
+              float fade = 1.0 - smoothstep(uFadeRadius, uGroundSize, dist);
+              gl_FragColor = vec4(uBgColor, 1.0 - fade);
+            }
+          `,
+        });
+        this.groundOverlay = new THREE.Mesh(overlayGeo, overlayMat);
+        this.groundOverlay.rotation.x = -Math.PI / 2;
+        this.groundOverlay.position.y = -0.003;
+        this.scene.add(this.groundOverlay);
+      }
+
+      this.scene.add(this.ground);
+    }
   }
 
   setGrid(visible: boolean): void {
@@ -645,9 +789,10 @@ export class RenderPipeline {
   private _applyAOParams(radius: number, intensity: number): void {
     if (!this._ssaoPass) return;
     this._ssaoPass.kernelRadius = radius;
-    this._ssaoPass.minDistance = 0.001;
+    this._ssaoPass.minDistance = 0.005;
     // Scale maxDistance with intensity: higher intensity → AO visible at greater depth range
-    this._ssaoPass.maxDistance = 0.02 + intensity * 0.08;
+    // Tuned for car-scale scenes (objects ~2–5m across)
+    this._ssaoPass.maxDistance = 0.05 + intensity * 0.5;
   }
 
   private _applyToneMapping(mapping: 'aces' | 'reinhard' | 'linear'): void {

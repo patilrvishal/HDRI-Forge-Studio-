@@ -32,6 +32,23 @@ export interface AOSettings {
   intensity: number;
 }
 
+export interface GroundSettings {
+  /** Show the ground plane */
+  visible: boolean;
+  /** Enable mirror-like floor reflections (Reflector) */
+  reflections: boolean;
+  /** Reflection sharpness 0–1 (0 = blurry, 1 = mirror) */
+  reflectionSharpness: number;
+  /** Ground color (hex) */
+  color: string;
+  /** Ground roughness 0–1 */
+  roughness: number;
+  /** Ground metalness 0–1 */
+  metalness: number;
+  /** Fade ground edges into background (distance from center where fade starts, 0 = off) */
+  fadeRadius: number;
+}
+
 export interface RenderSettings {
   engine: 'pbr' | 'pathtracer';
   tonemapping: 'aces' | 'reinhard' | 'linear';
@@ -41,6 +58,7 @@ export interface RenderSettings {
   shadowQuality: 'none' | 'low' | 'medium' | 'high';
   bloom: BloomSettings;
   ao: AOSettings;
+  ground: GroundSettings;
   vignette: VignetteSettings;
   colorGrading: ColorGradingSettings;
   exportFormat: 'png' | 'jpeg' | 'exr' | 'webp';
@@ -85,7 +103,16 @@ export const DEFAULT_RENDER_SETTINGS: RenderSettings = {
   antialiasing: 'smaa',
   shadowQuality: 'high',
   bloom: { enabled: true, intensity: 0.3, threshold: 0.8, radius: 0.5 },
-  ao: { enabled: false, radius: 0.5, intensity: 0.5 },
+  ao: { enabled: true, radius: 0.8, intensity: 0.6 },
+  ground: {
+    visible: true,
+    reflections: true,
+    reflectionSharpness: 0.85,
+    color: '#111118',
+    roughness: 0.15,
+    metalness: 0.95,
+    fadeRadius: 8.0,
+  },
   vignette: { enabled: false, intensity: 0.4 },
   colorGrading: { enabled: false, brightness: 0, contrast: 0, saturation: 0 },
   exportFormat: 'png',

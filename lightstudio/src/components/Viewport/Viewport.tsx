@@ -348,6 +348,13 @@ export const Viewport: React.FC<ViewportProps> = ({ sceneManagerRef, onScreensho
     sm.setBackground(environment.background, environment.showBackground);
   }, [environment.background, environment.showBackground, sceneManagerRef, backplate]);
 
+  // Sync ground settings (reflections, fade, color, PBR)
+  useEffect(() => {
+    const sm = sceneManagerRef.current;
+    if (!sm) return;
+    sm.updateGround(renderSettings.ground);
+  }, [renderSettings.ground, sceneManagerRef]);
+
   // Phase 9: Sync environment preset to 3D scene (built-in presets only)
   useEffect(() => {
     const sm = sceneManagerRef.current;

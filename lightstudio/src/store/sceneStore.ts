@@ -34,6 +34,7 @@ interface SceneStore extends SceneState {
   setRenderSettings: (settings: Partial<SceneState['renderSettings']>) => void;
   setBloom: (bloom: Partial<SceneState['renderSettings']['bloom']>) => void;
   setAO: (ao: Partial<SceneState['renderSettings']['ao']>) => void;
+  setGround: (ground: Partial<SceneState['renderSettings']['ground']>) => void;
   setExposure: (exposure: number) => void;
   setVignette: (vignette: Partial<SceneState['renderSettings']['vignette']>) => void;
   setColorGrading: (cg: Partial<SceneState['renderSettings']['colorGrading']>) => void;
@@ -139,6 +140,16 @@ export const useSceneStore = create<SceneStore>((set, get) => ({
       renderSettings: {
         ...state.renderSettings,
         ao: { ...state.renderSettings.ao, ...ao },
+      },
+    }));
+  },
+
+  setGround: (ground) => {
+    history.recordThrottled('Change Ground');
+    set((state) => ({
+      renderSettings: {
+        ...state.renderSettings,
+        ground: { ...state.renderSettings.ground, ...ground },
       },
     }));
   },
