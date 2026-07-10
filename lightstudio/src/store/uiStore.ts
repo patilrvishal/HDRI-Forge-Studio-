@@ -310,10 +310,11 @@ export const useUIStore = create<UIState>((set, get) => ({
           focusMode: false,
         });
         break;
-      case 'fullPreview':
-        set((s) => ({
+      case 'fullPreview': {
+        const vis = get().panelVisibility;
+        set({
           panelLayout: layout,
-          savedLayoutBeforeFocus: { panels: { ...s.panelVisibility }, rightTab: 'properties' },
+          savedLayoutBeforeFocus: { panels: { ...vis }, rightTab: 'properties' },
           panelVisibility: {
             leftPanel: false,
             rightPanel: false,
@@ -330,6 +331,7 @@ export const useUIStore = create<UIState>((set, get) => ({
           focusMode: true,
         });
         break;
+      }
       default:
         set({ panelLayout: layout });
     }

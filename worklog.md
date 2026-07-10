@@ -107,3 +107,46 @@ Stage Summary:
 - 4 cinematic presets: each sets 3 lights (color, position, brightness) + background + bloom + vignette + AO + color grading + exposure
 - Panel toggle: toolbar icon in viewport toolbar (next to settings button)
 - All changes save/load with .lightscene files automatically (no exporter changes needed)
+---
+Task ID: B
+Agent: Super Z (main)
+Task: Fix Material Editor — All Physical Properties
+
+Work Log:
+- Added 17 MeshPhysicalMaterial properties to PBRMaterialState type (clearcoat, clearcoatRoughness, transmission, transmissionRoughness, thickness, ior, sheen, sheenRoughness, sheenColor, iridescence, iridescenceIOR, iridescenceThicknessRange, attenuationColor, attenuationDistance, specularIntensity, specularColor, isPhysical)
+- Updated createPBRMaterialState() with all physical defaults
+- Rewrote MaterialManager.ts to accept both MeshStandardMaterial and MeshPhysicalMaterial
+- Added hasPhysicalProperties() detection method
+- Added upgradeToPhysical() that copies all 24+ standard properties before adding physical ones
+- Added swapMaterialOnScene() to replace material on all scene meshes
+- Updated MaterialEditorPanel.tsx with new sections: Clearcoat, Transmission, Sheen, Iridescence, Specular
+- Added PHYSICAL badge indicator in header
+- Physical sections auto-hide when isPhysical=false, auto-enable when user touches any physical slider
+- Added sheenColor, specularColor, attenuationColor color pickers (visible only in physical mode)
+- Updated materialEditorStore export/import to handle iridescenceThicknessRange deep clone and Infinity serialization
+- Fixed pre-existing esbuild build error in uiStore.ts (set() callback in switch case)
+- tsc --noEmit = 0 errors, vite build passes
+
+Stage Summary:
+- All 16 MeshPhysicalMaterial-exclusive properties are now fully wired: type → store → manager → UI
+- Materials auto-upgrade from Standard to Physical when user adjusts any physical property
+- Materials are never downgraded (prevents data loss)
+- Build passes clean
+
+---
+Task ID: C
+Agent: Super Z (main)
+Task: Timeline + Presets Tab Reorganization
+
+Work Log:
+- Replaced side-by-side bottom panel layout with tabbed layout
+- Added bottomTab state (timeline | presets) to AppLayout
+- Bottom panel now uses same tab-bar/tab-item CSS as right panel
+- Tabs are mutually exclusive — clicking one shows only that content at full width
+- Close buttons for both sections moved into tab bar header area
+- Reused existing .tab-bar and .tab-item CSS classes
+
+Stage Summary:
+- Bottom panel now has Timeline | Presets tabs (mutually exclusive, full working area)
+- Both tsc and vite build pass clean
+

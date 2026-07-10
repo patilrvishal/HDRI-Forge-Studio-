@@ -101,6 +101,9 @@ export const AppLayout: React.FC = () => {
   const presetsVisible = panelVisibility.presetsSection;
   const viewportDesignVisible = panelVisibility.viewportDesign;
 
+  // Bottom panel: side-by-side tabs (mutually exclusive)
+  const [bottomTab, setBottomTab] = useState<'timeline' | 'presets'>('timeline');
+
   // History state for status bar
   const undoCount = useHistoryStore((s) => s.undoStack.length);
   const redoCount = useHistoryStore((s) => s.redoStack.length);
@@ -387,7 +390,7 @@ export const AppLayout: React.FC = () => {
             />
           )}
 
-          {/* Bottom panels (smooth height transition) */}
+          {/* Bottom panel (smooth height transition, tabbed) */}
           <div
             className="panel-transition"
             style={{
@@ -399,48 +402,41 @@ export const AppLayout: React.FC = () => {
             }}
           >
             <div
+              className="panel panel-glow border-light-effect"
               style={{
                 height: bottomPanelHeight,
                 display: 'flex',
+                flexDirection: 'column',
                 overflow: 'hidden',
               }}
             >
-              {/* Bottom left: Timeline */}
-              {timelineVisible && (
-                <div
-                  className="panel panel-glow border-light-effect"
-                  style={{
-                    flex: 1,
-                    borderRight: presetsVisible ? '1px solid var(--border)' : 'none',
-                    display: 'flex',
-                    flexDirection: 'column',
-                    overflow: 'hidden',
-                  }}
-                >
-                  <div className="panel-header">
-                    <h3>Timeline</h3>
-                    <PanelCloseButton panel="timelineSection" />
+              {/* Tab bar */}
+              <div style={{ borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center' }}>
+                <div className="tab-bar" style={{ flex: 1 }}>
+                  <div
+                    className={`tab-item ${bottomTab === 'timeline' ? 'active' : ''}`}
+                    onClick={() => setBottomTab('timeline')}
+                  >
+                    Timeline
                   </div>
-                  <TimelinePanel />
+                  <div
+                    className={`tab-item ${bottomTab === 'presets' ? 'active' : ''}`}
+                    onClick={() => setBottomTab('presets')}
+                  >
+                    Presets
+                  </div>
                 </div>
-              )}
+                <div style={{ display: 'flex', gap: 2, padding: '0 6px 0 0', flexShrink: 0 }}>
+                  <PanelCloseButton panel="timelineSection" />
+                  <PanelCloseButton panel="presetsSection" />
+                </div>
+              </div>
 
-              {/* Bottom right: Preset Browser */}
-              {presetsVisible && (
-                <div
-                  className="panel panel-glow border-light-effect"
-                  style={{
-                    width: timelineVisible ? 300 : '100%',
-                    flexShrink: timelineVisible ? 0 : 1,
-                  }}
-                >
-                  <div className="panel-header">
-                    <h3>Presets</h3>
-                    <PanelCloseButton panel="presetsSection" />
-                  </div>
-                  <PresetBrowser onGenerateThumbnail={handleGenerateThumbnail} />
-                </div>
-              )}
+              {/* Tab content — mutually exclusive, full width */}
+              <div style={{ flex: 1, overflow: 'hidden' }}>
+                {bottomTab === 'timeline' && <TimelinePanel />}
+                {bottomTab === 'presets' && <PresetBrowser onGenerateThumbnail={handleGenerateThumbnail} />}
+              </div>
             </div>
           </div>
         </div>

@@ -1,0 +1,644 @@
+     1→     1→import React, { useRef, useCallback, useEffect, useState, useMemo } from 'react';
+     2→     2→import { useAnimationStore } from '../../store/animationStore';
+     3→     3→import { useLightsStore } from '../../store/lightsStore';
+     4→     4→import {
+     5→     5→  type AnimationTrack,
+     6→     6→  type AnimatedProperty,
+     7→     7→  type TrackCategory,
+     8→     8→  type EasingType,
+     9→     9→  getPropertyLabel,
+    10→    10→  getCategoryColor,
+    11→    11→} from '../../types/Animation';
+    12→    12→import { KeyframeEditor } from './KeyframeEditor';
+    13→    13→
+    14→    14→// ── Constants ────────────────────────────────────────────────────────────────
+    15→    15→
+    16→    16→const FRAME_WIDTH = 8; // pixels per frame
+    17→    17→const TRACK_HEIGHT = 24;
+    18→    18→const RULER_HEIGHT = 22;
+    19→    19→const HEADER_WIDTH = 140;
+    20→    20→
+    21→    21→const TRACKABLE_PROPERTIES: { property: AnimatedProperty; label: string; category: TrackCategory }[] = [
+    22→    22→  // Light
+    23→    23→  { property: 'light.brightness', label: 'Brightness', category: 'light' },
+    24→    24→  { property: 'light.positionX', label: 'Position X', category: 'light' },
+    25→    25→  { property: 'light.positionY', label: 'Position Y', category: 'light' },
+    26→    26→  { property: 'light.positionZ', label: 'Position Z', category: 'light' },
+    27→    27→  { property: 'light.rotationX', label: 'Rotation X', category: 'light' },
+    28→    28→  { property: 'light.rotationY', label: 'Rotation Y', category: 'light' },
+    29→    29→  { property: 'light.rotationZ', label: 'Rotation Z', category: 'light' },
+    30→    30→  // Camera
+    31→    31→  { property: 'camera.positionX', label: 'Camera Pos X', category: 'camera' },
+    32→    32→  { property: 'camera.positionY', label: 'Camera Pos Y', category: 'camera' },
+    33→    33→  { property: 'camera.positionZ', label: 'Camera Pos Z', category: 'camera' },
+    34→    34→  { property: 'camera.fov', label: 'Camera FOV', category: 'camera' },
+    35→    35→  // Turntable
+    36→    36→  { property: 'turntable.speed', label: 'Turntable Speed', category: 'turntable' },
+    37→    37→  { property: 'turntable.rotation', label: 'Turntable Rotation', category: 'turntable' },
+    38→    38→  // Render
+    39→    39→  { property: 'render.exposure', label: 'Exposure', category: 'render' },
+    40→    40→  { property: 'render.bloomIntensity', label: 'Bloom Intensity', category: 'render' },
+    41→    41→];
+    42→    42→
+    43→    43→const EASING_OPTIONS: { value: EasingType; label: string }[] = [
+    44→    44→  { value: 'linear', label: 'Linear' },
+    45→    45→  { value: 'easeInQuad', label: 'Ease In Quad' },
+    46→    46→  { value: 'easeOutQuad', label: 'Ease Out Quad' },
+    47→    47→  { value: 'easeInOutQuad', label: 'Ease In/Out Quad' },
+    48→    48→  { value: 'easeInCubic', label: 'Ease In Cubic' },
+    49→    49→  { value: 'easeOutCubic', label: 'Ease Out Cubic' },
+    50→    50→  { value: 'easeInOutCubic', label: 'Ease In/Out Cubic' },
+    51→    51→  { value: 'easeInExpo', label: 'Ease In Expo' },
+    52→    52→  { value: 'easeOutExpo', label: 'Ease Out Expo' },
+    53→    53→  { value: 'easeInOutExpo', label: 'Ease In/Out Expo' },
+    54→    54→];
+    55→    55→
+    56→    56→// ── Component ────────────────────────────────────────────────────────────────
+    57→    57→
+    58→    58→export const TimelinePanel: React.FC = () => {
+    59→    59→  const tracksRef = useRef<HTMLDivElement>(null);
+    60→    60→  const [showAddMenu, setShowAddMenu] = useState(false);
+    61→    61→  const [addCategory, setAddCategory] = useState<TrackCategory>('light');
+    62→    62→
+    63→    63→  // ── Store selectors ─────────────────────────────────────────────────────
+    64→    64→  const currentFrame = useAnimationStore((s) => s.currentFrame);
+    65→    65→  const frameStart = useAnimationStore((s) => s.frameStart);
+    66→    66→  const frameEnd = useAnimationStore((s) => s.frameEnd);
+    67→    67→  const fps = useAnimationStore((s) => s.fps);
+    68→    68→  const isPlaying = useAnimationStore((s) => s.isPlaying);
+    69→    69→  const isLooping = useAnimationStore((s) => s.isLooping);
+    70→    70→  const snapToFrame = useAnimationStore((s) => s.snapToFrame);
+    71→    71→  const tracks = useAnimationStore((s) => s.tracks);
+    72→    72→  const selectedTrackId = useAnimationStore((s) => s.selectedTrackId);
+    73→    73→  const selectedKeyframeId = useAnimationStore((s) => s.selectedKeyframeId);
+    74→    74→
+    75→    75→  const togglePlaying = useAnimationStore((s) => s.togglePlaying);
+    76→    76→  const stop = useAnimationStore((s) => s.stop);
+    77→    77→  const stepForward = useAnimationStore((s) => s.stepForward);
+    78→    78→  const stepBackward = useAnimationStore((s) => s.stepBackward);
+    79→    79→  const jumpToStart = useAnimationStore((s) => s.jumpToStart);
+    80→    80→  const jumpToEnd = useAnimationStore((s) => s.jumpToEnd);
+    81→    81→  const setCurrentFrame = useAnimationStore((s) => s.setCurrentFrame);
+    82→    82→  const setFrameRange = useAnimationStore((s) => s.setFrameRange);
+    83→    83→  const setFPS = useAnimationStore((s) => s.setFPS);
+    84→    84→  const toggleLooping = useAnimationStore((s) => s.toggleLooping);
+    85→    85→  const toggleSnapToFrame = useAnimationStore((s) => s.toggleSnapToFrame);
+    86→    86→  const addTrack = useAnimationStore((s) => s.addTrack);
+    87→    87→  const removeTrack = useAnimationStore((s) => s.removeTrack);
+    88→    88→  const toggleTrackMute = useAnimationStore((s) => s.toggleTrackMute);
+    89→    89→  const toggleTrackVisible = useAnimationStore((s) => s.toggleTrackVisible);
+    90→    90→  const selectTrack = useAnimationStore((s) => s.selectTrack);
+    91→    91→  const selectKeyframe = useAnimationStore((s) => s.selectKeyframe);
+    92→    92→  const clearAllTracks = useAnimationStore((s) => s.clearAllTracks);
+    93→    93→
+    94→    94→  // ── Lights store ────────────────────────────────────────────────────────
+    95→    95→  const lights = useLightsStore((s) => s.lights);
+    96→    96→  const selectedLightId = useLightsStore((s) => s.selectedLightId);
+    97→    97→
+    98→    98→  // ── Derived ─────────────────────────────────────────────────────────────
+    99→    99→  const totalFrames = frameEnd - frameStart;
+   100→   100→  const timelineWidth = Math.max(totalFrames * FRAME_WIDTH, 200);
+   101→   101→  const frameToX = useCallback(
+   102→   102→    (frame: number) => (frame - frameStart) * FRAME_WIDTH,
+   103→   103→    [frameStart],
+   104→   104→  );
+   105→   105→  const xToFrame = useCallback(
+   106→   106→    (x: number) => {
+   107→   107→      const raw = frameStart + x / FRAME_WIDTH;
+   108→   108→      return snapToFrame ? Math.round(raw) : raw;
+   109→   109→    },
+   110→   110→    [frameStart, snapToFrame],
+   111→   111→  );
+   112→   112→
+   113→   113→  // ── Scrubbing ───────────────────────────────────────────────────────────
+   114→   114→  const isScrubbing = useRef(false);
+   115→   115→
+   116→   116→  const handleScrubAreaMouseDown = useCallback(
+   117→   117→    (e: React.MouseEvent<HTMLDivElement>) => {
+   118→   118→      const rect = e.currentTarget.getBoundingClientRect();
+   119→   119→      const x = e.clientX - rect.left;
+   120→   120→      const frame = xToFrame(x);
+   121→   121→      setCurrentFrame(frame);
+   122→   122→      isScrubbing.current = true;
+   123→   123→
+   124→   124→      const handleMove = (ev: MouseEvent) => {
+   125→   125→        if (!isScrubbing.current) return;
+   126→   126→        const mx = ev.clientX - rect.left;
+   127→   127→        setCurrentFrame(xToFrame(mx));
+   128→   128→      };
+   129→   129→      const handleUp = () => {
+   130→   130→        isScrubbing.current = false;
+   131→   131→        window.removeEventListener('mousemove', handleMove);
+   132→   132→        window.removeEventListener('mouseup', handleUp);
+   133→   133→      };
+   134→   134→      window.addEventListener('mousemove', handleMove);
+   135→   135→      window.addEventListener('mouseup', handleUp);
+   136→   136→    },
+   137→   137→    [setCurrentFrame, xToFrame],
+   138→   138→  );
+   139→   139→
+   140→   140→  // ── Keyframe click ──────────────────────────────────────────────────────
+   141→   141→  const handleKeyframeClick = useCallback(
+   142→   142→    (e: React.MouseEvent, trackId: string, kfId: string) => {
+   143→   143→      e.stopPropagation();
+   144→   144→      selectTrack(trackId);
+   145→   145→      selectKeyframe(kfId);
+   146→   146→    },
+   147→   147→    [selectTrack, selectKeyframe],
+   148→   148→  );
+   149→   149→
+   150→   150→  // ── Double-click on track lane to add keyframe ──────────────────────────
+   151→   151→  const handleTrackLaneDoubleClick = useCallback(
+   152→   152→    (e: React.MouseEvent, track: AnimationTrack) => {
+   153→   153→      const rect = e.currentTarget.getBoundingClientRect();
+   154→   154→      const x = e.clientX - rect.left;
+   155→   155→      const frame = xToFrame(x);
+   156→   156→
+   157→   157→      // Get current value for this property
+   158→   158→      let value = 0;
+   159→   159→      if (track.category === 'light' && track.lightId) {
+   160→   160→        const light = lights.find((l) => l.id === track.lightId);
+   161→   161→        if (light) {
+   162→   162→          switch (track.property) {
+   163→   163→            case 'light.brightness': value = light.brightness; break;
+   164→   164→            case 'light.positionX': value = light.transform.position.x; break;
+   165→   165→            case 'light.positionY': value = light.transform.position.y; break;
+   166→   166→            case 'light.positionZ': value = light.transform.position.z; break;
+   167→   167→            case 'light.rotationX': value = light.transform.rotation.x; break;
+   168→   168→            case 'light.rotationY': value = light.transform.rotation.y; break;
+   169→   169→            case 'light.rotationZ': value = light.transform.rotation.z; break;
+   170→   170→            default: value = 0;
+   171→   171→          }
+   172→   172→        }
+   173→   173→      } else if (track.category === 'camera') {
+   174→   174→        value = 1; // Placeholder; camera values come from scene store
+   175→   175→      } else if (track.category === 'turntable') {
+   176→   176→        value = 1.0;
+   177→   177→      } else if (track.category === 'render') {
+   178→   178→        value = 1.0;
+   179→   179→      }
+   180→   180→
+   181→   181→      useAnimationStore.getState().addKeyframe(track.id, Math.round(frame), value, 'linear');
+   182→   182→    },
+   183→   183→    [xToFrame, lights],
+   184→   184→  );
+   185→   185→
+   186→   186→  // ── Add track handler ───────────────────────────────────────────────────
+   187→   187→  const handleAddTrack = useCallback(
+   188→   188→    (item: { property: AnimatedProperty; label: string; category: TrackCategory }) => {
+   189→   189→      const lightId = item.category === 'light' ? selectedLightId : null;
+   190→   190→      const name = item.category === 'light' && selectedLightId
+   191→   191→        ? `${lights.find((l) => l.id === selectedLightId)?.name ?? 'Light'} — ${item.label}`
+   192→   192→        : item.label;
+   193→   193→      addTrack(item.property, name, item.category, lightId);
+   194→   194→      setShowAddMenu(false);
+   195→   195→    },
+   196→   196→    [addTrack, selectedLightId, lights],
+   197→   197→  );
+   198→   198→
+   199→   199→  // ── Selected keyframe data ──────────────────────────────────────────────
+   200→   200→  const selectedKfData = useMemo(() => {
+   201→   201→    if (!selectedTrackId || !selectedKeyframeId) return null;
+   202→   202→    const track = tracks.find((t) => t.id === selectedTrackId);
+   203→   203→    if (!track) return null;
+   204→   204→    const kf = track.keyframes.find((k) => k.id === selectedKeyframeId);
+   205→   205→    if (!kf) return null;
+   206→   206→    return { track, keyframe: kf };
+   207→   207→  }, [selectedTrackId, selectedKeyframeId, tracks]);
+   208→   208→
+   209→   209→  // ── Format time from frame ──────────────────────────────────────────────
+   210→   210→  const formatTime = useCallback(
+   211→   211→    (frame: number) => {
+   212→   212→      const totalSec = frame / fps;
+   213→   213→      const min = Math.floor(totalSec / 60);
+   214→   214→      const sec = Math.floor(totalSec % 60);
+   215→   215→      const frac = Math.floor((totalSec % 1) * 100);
+   216→   216→      return `${min.toString().padStart(2, '0')}:${sec.toString().padStart(2, '0')}.${frac.toString().padStart(2, '0')}`;
+   217→   217→    },
+   218→   218→    [fps],
+   219→   219→  );
+   220→   220→
+   221→   221→  // ── Ruler tick marks ────────────────────────────────────────────────────
+   222→   222→  const rulerTicks = useMemo(() => {
+   223→   223→    const ticks: number[] = [];
+   224→   224→    // Determine tick interval based on total frames
+   225→   225→    let interval = 1;
+   226→   226→    if (totalFrames > 500) interval = 50;
+   227→   227→    else if (totalFrames > 200) interval = 20;
+   228→   228→    else if (totalFrames > 100) interval = 10;
+   229→   229→    else if (totalFrames > 50) interval = 5;
+   230→   230→
+   231→   231→    for (let f = frameStart; f <= frameEnd; f += interval) {
+   232→   232→      ticks.push(f);
+   233→   233→    }
+   234→   234→    return ticks;
+   235→   235→  }, [frameStart, frameEnd, totalFrames]);
+   236→   236→
+   237→   237→  // ── Close add menu on outside click ─────────────────────────────────────
+   238→   238→  useEffect(() => {
+   239→   239→    if (!showAddMenu) return;
+   240→   240→    const handler = () => setShowAddMenu(false);
+   241→   241→    const timer = setTimeout(() => window.addEventListener('click', handler), 0);
+   242→   242→    return () => {
+   243→   243→      clearTimeout(timer);
+   244→   244→      window.removeEventListener('click', handler);
+   245→   245→    };
+   246→   246→  }, [showAddMenu]);
+   247→   247→
+   248→   248→  // ── Scroll to keep current frame visible ────────────────────────────────
+   249→   249→  useEffect(() => {
+   250→   250→    if (!tracksRef.current) return;
+   251→   251→    const playheadX = frameToX(currentFrame);
+   252→   252→    const scrollLeft = tracksRef.current.scrollLeft;
+   253→   253→    const viewWidth = tracksRef.current.clientWidth;
+   254→   254→    if (playheadX < scrollLeft || playheadX > scrollLeft + viewWidth) {
+   255→   255→      tracksRef.current.scrollLeft = playheadX - viewWidth / 3;
+   256→   256→    }
+   257→   257→  }, [currentFrame, frameToX]);
+   258→   258→
+   259→   259→  // ── Render ──────────────────────────────────────────────────────────────
+   260→   260→  return (
+   261→   261→    <div className="timeline-panel">
+   262→   262→      {/* ── Transport bar ──────────────────────────────────────────────── */}
+   263→   263→      <div className="tl-transport">
+   264→   264→        <div className="tl-transport-left">
+   265→   265→          {/* Play/Pause */}
+   266→   266→          <button
+   267→   267→            className={`btn-icon ${isPlaying ? 'active' : ''}`}
+   268→   268→            onClick={togglePlaying}
+   269→   269→            title={isPlaying ? 'Pause (Space)' : 'Play (Space)'}
+   270→   270→            aria-label={isPlaying ? 'Pause' : 'Play'}
+   271→   271→          >
+   272→   272→            {isPlaying ? (
+   273→   273→              <svg width="10" height="10" viewBox="0 0 10 10" fill="currentColor">
+   274→   274→                <rect x="1" y="0.5" width="3" height="9" rx="0.5" />
+   275→   275→                <rect x="6" y="0.5" width="3" height="9" rx="0.5" />
+   276→   276→              </svg>
+   277→   277→            ) : (
+   278→   278→              <svg width="10" height="10" viewBox="0 0 10 10" fill="currentColor">
+   279→   279→                <path d="M1.5 1l8 4-8 4z" />
+   280→   280→              </svg>
+   281→   281→            )}
+   282→   282→          </button>
+   283→   283→
+   284→   284→          {/* Stop */}
+   285→   285→          <button className="btn-icon" onClick={stop} title="Stop" aria-label="Stop">
+   286→   286→            <svg width="10" height="10" viewBox="0 0 10 10" fill="currentColor">
+   287→   287→              <rect x="1" y="1" width="8" height="8" rx="1" />
+   288→   288→            </svg>
+   289→   289→          </button>
+   290→   290→
+   291→   291→          {/* Step back */}
+   292→   292→          <button className="btn-icon" onClick={stepBackward} title="Step Back (<)" aria-label="Step Back">
+   293→   293→            <svg width="10" height="10" viewBox="0 0 10 10" fill="currentColor">
+   294→   294→              <path d="M8 1l-6 4 6 4z" />
+   295→   295→              <rect x="1" y="1" width="1.5" height="8" />
+   296→   296→            </svg>
+   297→   297→          </button>
+   298→   298→
+   299→   299→          {/* Step forward */}
+   300→   300→          <button className="btn-icon" onClick={stepForward} title="Step Forward (>)" aria-label="Step Forward">
+   301→   301→            <svg width="10" height="10" viewBox="0 0 10 10" fill="currentColor">
+   302→   302→              <path d="M2 1l6 4-6 4z" />
+   303→   303→              <rect x="7.5" y="1" width="1.5" height="8" />
+   304→   304→            </svg>
+   305→   305→          </button>
+   306→   306→
+   307→   307→          {/* Jump to start */}
+   308→   308→          <button className="btn-icon" onClick={jumpToStart} title="Jump to Start (Home)" aria-label="Jump to Start">
+   309→   309→            <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.5">
+   310→   310→              <path d="M1 5h8M5 1L1 5l4 4" />
+   311→   311→              <line x1="1" y1="1" x2="1" y2="9" />
+   312→   312→            </svg>
+   313→   313→          </button>
+   314→   314→
+   315→   315→          {/* Jump to end */}
+   316→   316→          <button className="btn-icon" onClick={jumpToEnd} title="Jump to End (End)" aria-label="Jump to End">
+   317→   317→            <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.5">
+   318→   318→              <path d="M9 5H1M5 1l4 4-4 4" />
+   319→   319→              <line x1="9" y1="1" x2="9" y2="9" />
+   320→   320→            </svg>
+   321→   321→          </button>
+   322→   322→        </div>
+   323→   323→
+   324→   324→        <div className="tl-transport-center">
+   325→   325→          {/* Current frame display */}
+   326→   326→          <span className="tl-frame-display">{formatTime(currentFrame)}</span>
+   327→   327→          <span className="tl-frame-slash">/</span>
+   328→   328→          <span className="tl-frame-display tl-frame-total">{formatTime(frameEnd)}</span>
+   329→   329→        </div>
+   330→   330→
+   331→   331→        <div className="tl-transport-right">
+   332→   332→          {/* Frame range */}
+   333→   333→          <div className="tl-frame-range">
+   334→   334→            <input
+   335→   335→              type="number"
+   336→   336→              className="tl-frame-input"
+   337→   337→              value={frameStart}
+   338→   338→              onChange={(e) => {
+   339→   339→                const v = parseInt(e.target.value, 10);
+   340→   340→                if (!isNaN(v)) setFrameRange(v, frameEnd);
+   341→   341→              }}
+   342→   342→              title="Start Frame"
+   343→   343→              aria-label="Start Frame"
+   344→   344→            />
+   345→   345→            <span style={{ color: 'var(--text-dim)', fontSize: 9 }}>-</span>
+   346→   346→            <input
+   347→   347→              type="number"
+   348→   348→              className="tl-frame-input"
+   349→   349→              value={frameEnd}
+   350→   350→              onChange={(e) => {
+   351→   351→                const v = parseInt(e.target.value, 10);
+   352→   352→                if (!isNaN(v)) setFrameRange(frameStart, v);
+   353→   353→              }}
+   354→   354→              title="End Frame"
+   355→   355→              aria-label="End Frame"
+   356→   356→            />
+   357→   357→          </div>
+   358→   358→
+   359→   359→          {/* FPS */}
+   360→   360→          <div className="tl-fps-control">
+   361→   361→            <span style={{ fontSize: 9, color: 'var(--text-dim)', marginRight: 2 }}>FPS</span>
+   362→   362→            <input
+   363→   363→              type="number"
+   364→   364→              className="tl-frame-input"
+   365→   365→              style={{ width: 34 }}
+   366→   366→              value={fps}
+   367→   367→              onChange={(e) => {
+   368→   368→                const v = parseInt(e.target.value, 10);
+   369→   369→                if (!isNaN(v)) setFPS(v);
+   370→   370→              }}
+   371→   371→              min={1}
+   372→   372→              max={120}
+   373→   373→              title="Frames Per Second"
+   374→   374→              aria-label="FPS"
+   375→   375→            />
+   376→   376→          </div>
+   377→   377→
+   378→   378→          {/* Loop toggle */}
+   379→   379→          <button
+   380→   380→            className={`btn-icon ${isLooping ? 'active' : ''}`}
+   381→   381→            onClick={toggleLooping}
+   382→   382→            title={isLooping ? 'Looping On' : 'Looping Off'}
+   383→   383→            aria-label="Toggle Looping"
+   384→   384→          >
+   385→   385→            <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.2">
+   386→   386→              <path d="M2 6a4 4 0 018 0 4 4 0 01-8 0" />
+   387→   387→              <path d="M9 2.5v2.5H6.5" />
+   388→   388→            </svg>
+   389→   389→          </button>
+   390→   390→
+   391→   391→          {/* Snap toggle */}
+   392→   392→          <button
+   393→   393→            className={`btn-icon ${snapToFrame ? 'active' : ''}`}
+   394→   394→            onClick={toggleSnapToFrame}
+   395→   395→            title={snapToFrame ? 'Snap On' : 'Snap Off'}
+   396→   396→            aria-label="Toggle Snap"
+   397→   397→          >
+   398→   398→            <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.2">
+   399→   399→              <path d="M0 3h12M0 6h12M0 9h12M3 0v12M6 0v12M9 0v12" />
+   400→   400→            </svg>
+   401→   401→          </button>
+   402→   402→
+   403→   403→          {/* Clear all */}
+   404→   404→          <button className="btn-icon" onClick={clearAllTracks} title="Clear All Tracks" aria-label="Clear All">
+   405→   405→            <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.2">
+   406→   406→              <path d="M2 2l8 8M10 2l-8 8" />
+   407→   407→            </svg>
+   408→   408→          </button>
+   409→   409→
+   410→   410→          {/* Add track */}
+   411→   411→          <div style={{ position: 'relative' }}>
+   412→   412→            <button
+   413→   413→              className="btn-icon"
+   414→   414→              onClick={(e) => {
+   415→   415→                e.stopPropagation();
+   416→   416→                setShowAddMenu(!showAddMenu);
+   417→   417→              }}
+   418→   418→              title="Add Track"
+   419→   419→              aria-label="Add Track"
+   420→   420→            >
+   421→   421→              <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5">
+   422→   422→                <path d="M6 1v10M1 6h10" />
+   423→   423→              </svg>
+   424→   424→            </button>
+   425→   425→
+   426→   426→            {/* Add track dropdown */}
+   427→   427→            {showAddMenu && (
+   428→   428→              <div className="tl-add-menu" onClick={(e) => e.stopPropagation()}>
+   429→   429→                {/* Category tabs */}
+   430→   430→                <div className="tl-add-tabs">
+   431→   431→                  {(['light', 'camera', 'turntable', 'render'] as const).map((cat) => (
+   432→   432→                    <button
+   433→   433→                      key={cat}
+   434→   434→                      className={`tl-add-tab ${addCategory === cat ? 'active' : ''}`}
+   435→   435→                      onClick={() => setAddCategory(cat)}
+   436→   436→                    >
+   437→   437→                      {cat.charAt(0).toUpperCase() + cat.slice(1)}
+   438→   438→                    </button>
+   439→   439→                  ))}
+   440→   440→                </div>
+   441→   441→
+   442→   442→                {/* Property list */}
+   443→   443→                <div className="tl-add-list">
+   444→   444→                  {TRACKABLE_PROPERTIES.filter((p) => p.category === addCategory).map((item) => (
+   445→   445→                    <button
+   446→   446→                      key={item.property}
+   447→   447→                      className="tl-add-item"
+   448→   448→                      onClick={() => handleAddTrack(item)}
+   449→   449→                    >
+   450→   450→                      <span
+   451→   451→                        className="tl-track-color-dot"
+   452→   452→                        style={{ background: getCategoryColor(item.category) }}
+   453→   453→                      />
+   454→   454→                      {item.label}
+   455→   455→                    </button>
+   456→   456→                  ))}
+   457→   457→                  {addCategory === 'light' && (
+   458→   458→                    <div className="tl-add-note">
+   459→   459→                      {selectedLightId
+   460→   460→                        ? `Targets: ${lights.find((l) => l.id === selectedLightId)?.name ?? '—'}`
+   461→   461→                        : 'Select a light first'}
+   462→   462→                    </div>
+   463→   463→                  )}
+   464→   464→                </div>
+   465→   465→              </div>
+   466→   466→            )}
+   467→   467→          </div>
+   468→   468→        </div>
+   469→   469→      </div>
+   470→   470→
+   471→   471→      {/* ── Tracks area ────────────────────────────────────────────────── */}
+   472→   472→      <div className="tl-tracks-container" ref={tracksRef}>
+   473→   473→        {/* Ruler row */}
+   474→   474→        <div className="tl-ruler-row">
+   475→   475→          <div className="tl-track-header" style={{ width: HEADER_WIDTH }}>
+   476→   476→            <span style={{ fontSize: 9, color: 'var(--text-dim)' }}>TRACKS</span>
+   477→   477→          </div>
+   478→   478→          <div
+   479→   479→            className="tl-ruler"
+   480→   480→            style={{ width: timelineWidth }}
+   481→   481→            onMouseDown={handleScrubAreaMouseDown}
+   482→   482→          >
+   483→   483→            {rulerTicks.map((f) => (
+   484→   484→              <div
+   485→   485→                key={f}
+   486→   486→                className="tl-ruler-tick"
+   487→   487→                style={{ left: frameToX(f) }}
+   488→   488→              >
+   489→   489→                <span>{f}</span>
+   490→   490→              </div>
+   491→   491→            ))}
+   492→   492→          </div>
+   493→   493→        </div>
+   494→   494→
+   495→   495→        {/* Track rows */}
+   496→   496→        <div className="tl-tracks-body">
+   497→   497→          {tracks.length === 0 ? (
+   498→   498→            <div className="tl-empty">
+   499→   499→              <span>No animation tracks</span>
+   500→   500→              <span style={{ fontSize: 9, color: 'var(--text-dim)', marginTop: 2 }}>
+   501→   501→                Click + to add a track, or double-click a track lane to add keyframes
+   502→   502→              </span>
+   503→   503→            </div>
+   504→   504→          ) : (
+   505→   505→            tracks.map((track) => (
+   506→   506→              <div
+   507→   507→                key={track.id}
+   508→   508→                className={`tl-track-row ${selectedTrackId === track.id ? 'selected' : ''} ${track.muted ? 'muted' : ''}`}
+   509→   509→                onClick={() => selectTrack(track.id)}
+   510→   510→              >
+   511→   511→                {/* Track header */}
+   512→   512→                <div
+   513→   513→                  className="tl-track-header"
+   514→   514→                  style={{ width: HEADER_WIDTH, borderRight: `2px solid ${track.color}` }}
+   515→   515→                >
+   516→   516→                  <div className="tl-track-header-content">
+   517→   517→                    <span className="tl-track-name" title={track.name}>
+   518→   518→                      {track.name}
+   519→   519→                    </span>
+   520→   520→                    <div className="tl-track-header-actions">
+   521→   521→                      <button
+   522→   522→                        className={`btn-icon tl-mute-btn ${track.muted ? 'muted' : ''}`}
+   523→   523→                        onClick={(e) => { e.stopPropagation(); toggleTrackMute(track.id); }}
+   524→   524→                        title={track.muted ? 'Unmute' : 'Mute'}
+   525→   525→                        aria-label={track.muted ? 'Unmute' : 'Mute'}
+   526→   526→                      >
+   527→   527→                        <svg width="8" height="8" viewBox="0 0 8 8" fill="currentColor">
+   528→   528→                          {track.muted ? (
+   529→   529→                            <path d="M1 2h1v4H1zM3 1h1v6H3zM5 2.5h1v3H5zM7 1.5h1v5H7z" />
+   530→   530→                          ) : (
+   531→   531→                            <path d="M1 2h1v4H1zM3 1h1v6H3zM5 2.5h1v3H5z" />
+   532→   532→                          )}
+   533→   533→                        </svg>
+   534→   534→                      </button>
+   535→   535→                      <button
+   536→   536→                        className={`btn-icon tl-vis-btn ${!track.visible ? 'hidden' : ''}`}
+   537→   537→                        onClick={(e) => { e.stopPropagation(); toggleTrackVisible(track.id); }}
+   538→   538→                        title={track.visible ? 'Hide' : 'Show'}
+   539→   539→                        aria-label={track.visible ? 'Hide Track' : 'Show Track'}
+   540→   540→                      >
+   541→   541→                        <svg width="8" height="8" viewBox="0 0 8 8" fill="none" stroke="currentColor" strokeWidth="1">
+   542→   542→                          {track.visible ? (
+   543→   543→                            <>
+   544→   544→                              <path d="M1 4a3.5 3.5 0 016 0 3.5 3.5 0 01-6 0" />
+   545→   545→                              <circle cx="4" cy="4" r="1" fill="currentColor" />
+   546→   546→                            </>
+   547→   547→                          ) : (
+   548→   548→                            <path d="M2 2l4 4M6 2l-4 4" />
+   549→   549→                          )}
+   550→   550→                        </svg>
+   551→   551→                      </button>
+   552→   552→                      <button
+   553→   553→                        className="btn-icon tl-del-btn"
+   554→   554→                        onClick={(e) => { e.stopPropagation(); removeTrack(track.id); }}
+   555→   555→                        title="Remove Track"
+   556→   556→                        aria-label="Remove Track"
+   557→   557→                      >
+   558→   558→                        <svg width="8" height="8" viewBox="0 0 8 8" fill="none" stroke="currentColor" strokeWidth="1.2">
+   559→   559→                          <path d="M1 1l6 6M7 1l-6 6" />
+   560→   560→                        </svg>
+   561→   561→                      </button>
+   562→   562→                    </div>
+   563→   563→                  </div>
+   564→   564→                </div>
+   565→   565→
+   566→   566→                {/* Track lane */}
+   567→   567→                <div
+   568→   568→                  className="tl-track-lane"
+   569→   569→                  style={{ width: timelineWidth, height: TRACK_HEIGHT }}
+   570→   570→                  onDoubleClick={(e) => handleTrackLaneDoubleClick(e, track)}
+   571→   571→                  onMouseDown={handleScrubAreaMouseDown}
+   572→   572→                >
+   573→   573→                  {/* Keyframe diamonds */}
+   574→   574→                  {track.keyframes.map((kf) => (
+   575→   575→                    <div
+   576→   576→                      key={kf.id}
+   577→   577→                      className={`tl-keyframe-diamond ${selectedKeyframeId === kf.id ? 'selected' : ''}`}
+   578→   578→                      style={{
+   579→   579→                        left: frameToX(kf.frame) - 5,
+   580→   580→                        top: (TRACK_HEIGHT - 10) / 2,
+   581→   581→                        borderColor: track.color,
+   582→   582→                        background: selectedKeyframeId === kf.id ? track.color : 'var(--bg-panel)',
+   583→   583→                      }}
+   584→   584→                      onMouseDown={(e) => handleKeyframeClick(e, track.id, kf.id)}
+   585→   585→                      title={`Frame ${kf.frame}: ${kf.value.toFixed(2)} [${kf.easing}]`}
+   586→   586→                    />
+   587→   587→                  ))}
+   588→   588→
+   589→   589→                  {/* Interpolation line between keyframes */}
+   590→   590→                  {track.keyframes.length >= 2 && (
+   591→   591→                    <svg
+   592→   592→                      className="tl-interpolation-line"
+   593→   593→                      style={{
+   594→   594→                        position: 'absolute',
+   595→   595→                        top: 0,
+   596→   596→                        left: 0,
+   597→   597→                        width: timelineWidth,
+   598→   598→                        height: TRACK_HEIGHT,
+   599→   599→                        pointerEvents: 'none',
+   600→   600→                      }}
+   601→   601→                    >
+   602→   602→                      <polyline
+   603→   603→                        fill="none"
+   604→   604→                        stroke={track.color}
+   605→   605→                        strokeWidth={1}
+   606→   606→                        strokeOpacity={0.4}
+   607→   607→                        points={track.keyframes
+   608→   608→                          .map((kf) => {
+   609→   609→                            const x = frameToX(kf.frame);
+   610→   610→                            // Normalize value to track height for visualization
+   611→   611→                            const values = track.keyframes.map((k) => k.value);
+   612→   612→                            const min = Math.min(...values);
+   613→   613→                            const max = Math.max(...values);
+   614→   614→                            const range = max - min || 1;
+   615→   615→                            const y = TRACK_HEIGHT - 2 - ((kf.value - min) / range) * (TRACK_HEIGHT - 4);
+   616→   616→                            return `${x},${y}`;
+   617→   617→                          })
+   618→   618→                          .join(' ')}
+   619→   619→                      />
+   620→   620→                    </svg>
+   621→   621→                  )}
+   622→   622→                </div>
+   623→   623→              </div>
+   624→   624→            ))
+   625→   625→          )}
+   626→   626→        </div>
+   627→   627→
+   628→   628→        {/* Playhead */}
+   629→   629→        <div
+   630→   630→          className="tl-playhead"
+   631→   631→          style={{ left: HEADER_WIDTH + frameToX(currentFrame) }}
+   632→   632→        />
+   633→   633→      </div>
+   634→   634→
+   635→   635→      {/* ── Keyframe editor (bottom strip) ─────────────────────────────── */}
+   636→   636→      {selectedKfData && (
+   637→   637→        <KeyframeEditor
+   638→   638→          track={selectedKfData.track}
+   639→   639→          keyframe={selectedKfData.keyframe}
+   640→   640→        />
+   641→   641→      )}
+   642→   642→    </div>
+   643→   643→  );
+   644→   644→};

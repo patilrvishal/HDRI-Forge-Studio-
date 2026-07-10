@@ -1,6 +1,6 @@
 /**
  * PBR Material Editor types.
- * Mirrors Three.js MeshStandardMaterial properties for UI editing.
+ * Mirrors Three.js MeshStandardMaterial + MeshPhysicalMaterial properties for UI editing.
  */
 
 export interface MaterialTextureSlot {
@@ -19,9 +19,8 @@ export interface PBRMaterialState {
   name: string;
   /** Names of meshes that use this material */
   meshNames: string[];
-  /** Index of the material in the original model */
 
-  // ── PBR Properties ─────────────────────────────────────────────────
+  // ── PBR Properties (MeshStandardMaterial) ──────────────────────────
   /** Base color (hex string) */
   color: string;
   /** Emissive color (hex string) */
@@ -59,13 +58,49 @@ export interface PBRMaterialState {
   /** Alpha map (for cutout transparency) */
   alphaMap: MaterialTextureSlot;
 
-  // ── Advanced ───────────────────────────────────────────────────────
+  // ── Advanced (MeshStandardMaterial) ────────────────────────────────
   /** Normal map intensity (0-2, default 1) */
   normalScale: number;
   /** Bump map intensity */
   bumpScale: number;
   /** AO map intensity */
   aoMapIntensity: number;
+
+  // ── Physical Material Properties (MeshPhysicalMaterial) ────────────
+  /** Whether this material uses physical (extended PBR) properties */
+  isPhysical: boolean;
+  /** Clearcoat: thin reflective coating (0 = none, 1 = full) */
+  clearcoat: number;
+  /** Clearcoat roughness (0 = mirror, 1 = rough) */
+  clearcoatRoughness: number;
+  /** Transmission: light transmission for glass-like materials (0 = opaque, 1 = fully transparent) */
+  transmission: number;
+  /** Transmission roughness: blurs the view through the material (0 = clear, 1 = frosted) */
+  transmissionRoughness: number;
+  /** Thickness: volume thickness for transmission (default 0) */
+  thickness: number;
+  /** Index of refraction (default 1.5) */
+  ior: number;
+  /** Sheen: fabric-like scattering (0 = none, 1 = full) */
+  sheen: number;
+  /** Sheen roughness (0 = silk, 1 = cotton) */
+  sheenRoughness: number;
+  /** Sheen color (hex string) */
+  sheenColor: string;
+  /** Iridescence: rainbow-like effect (0 = none, 1 = full) */
+  iridescence: number;
+  /** Iridescence IOR (default 1.3) */
+  iridescenceIOR: number;
+  /** Iridescence thickness range [min, max] in nm */
+  iridescenceThicknessRange: [number, number];
+  /** Attenuation color for transmission volume (hex string) */
+  attenuationColor: string;
+  /** Attenuation distance for transmission volume (default Infinity) */
+  attenuationDistance: number;
+  /** Specular intensity (0 = no reflection, 1 = full) */
+  specularIntensity: number;
+  /** Specular color (hex string) */
+  specularColor: string;
 }
 
 export type TextureSlotKey = 'map' | 'normalMap' | 'roughnessMap' | 'metalnessMap' | 'emissiveMap' | 'aoMap' | 'bumpMap' | 'alphaMap';
@@ -114,5 +149,23 @@ export function createPBRMaterialState(
     normalScale: 1,
     bumpScale: 1,
     aoMapIntensity: 1,
+    // Physical material defaults
+    isPhysical: false,
+    clearcoat: 0,
+    clearcoatRoughness: 0,
+    transmission: 0,
+    transmissionRoughness: 0,
+    thickness: 0,
+    ior: 1.5,
+    sheen: 0,
+    sheenRoughness: 0,
+    sheenColor: '#000000',
+    iridescence: 0,
+    iridescenceIOR: 1.3,
+    iridescenceThicknessRange: [100, 400],
+    attenuationColor: '#ffffff',
+    attenuationDistance: Infinity,
+    specularIntensity: 1,
+    specularColor: '#ffffff',
   };
 }

@@ -61,8 +61,8 @@ export const useMaterialEditorStore = create<MaterialEditorStore>((set, get) => 
           ? {
               ...m,
               [slotKey]: { enabled: true, dataUrl, fileName },
-              // Auto-enable transparency for alpha maps
-              transparent: slotKey === 'alphaMap' ? true : m.transparent,
+              // Auto-enable transparency for alpha maps or transmission
+              transparent: slotKey === 'alphaMap' ? true : (m.transparent || m.transmission > 0),
             }
           : m,
       ),
@@ -82,7 +82,7 @@ export const useMaterialEditorStore = create<MaterialEditorStore>((set, get) => 
   exportMaterials: () => {
     return get().materials.map((m) => ({
       ...m,
-      // Deep clone texture slots without any non-serializable data
+      // Deep clone texture slots
       map: { ...m.map },
       normalMap: { ...m.normalMap },
       roughnessMap: { ...m.roughnessMap },
@@ -91,13 +91,23 @@ export const useMaterialEditorStore = create<MaterialEditorStore>((set, get) => 
       aoMap: { ...m.aoMap },
       bumpMap: { ...m.bumpMap },
       alphaMap: { ...m.alphaMap },
+      // Deep clone iridescence range
+      iridescenceThicknessRange: [...m.iridescenceThicknessRange] as [number, number],
+      // Ensure Infinity serializes properly for JSON
+      attenuationDistance: m.attenuationDistance === Infinity ? -1 : m.attenuationDistance,
     }));
   },
 
   importMaterials: (materials) => {
+    // Restore Infinity from -1 sentinel
+    const restored = materials.map((m) => ({
+      ...m,
+      attenuationDistance: m.attenuationDistance === -1 ? Infinity : m.attenuationDistance,
+      iridescenceThicknessRange: m.iridescenceThicknessRange ?? [100, 400],
+    }));
     set({
-      materials,
-      selectedMaterialId: materials.length > 0 ? materials[0].id : null,
+      materials: restored,
+      selectedMaterialId: restored.length > 0 ? restored[0].id : null,
     });
   },
 }));

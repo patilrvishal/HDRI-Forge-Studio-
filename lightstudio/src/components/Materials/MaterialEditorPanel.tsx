@@ -16,17 +16,51 @@ const TEXTURE_SLOTS: TextureSlotKey[] = [
   'emissiveMap', 'aoMap', 'bumpMap', 'alphaMap',
 ];
 
-const PROP_ROWS: { label: string; key: keyof PBRMaterialState; min: number; max: number; step: number; section: string }[] = [
+interface PropRow {
+  label: string;
+  key: keyof PBRMaterialState;
+  min: number;
+  max: number;
+  step: number;
+  section: string;
+  unit?: string;
+  /** Show only when isPhysical is true */
+  physicalOnly?: boolean;
+  /** Infinity-safe: clamp display */
+  infinityKey?: boolean;
+}
+
+const PROP_ROWS: PropRow[] = [
+  // Base
+  { label: 'Opacity', key: 'opacity', min: 0, max: 1, step: 0.01, section: 'Base' },
+  // Surface
   { label: 'Roughness', key: 'roughness', min: 0, max: 1, step: 0.01, section: 'Surface' },
   { label: 'Metalness', key: 'metalness', min: 0, max: 1, step: 0.01, section: 'Surface' },
   { label: 'Normal Scale', key: 'normalScale', min: 0, max: 2, step: 0.05, section: 'Surface' },
-  { label: 'Opacity', key: 'opacity', min: 0, max: 1, step: 0.01, section: 'Base' },
-  { label: 'Emissive Int.', key: 'emissiveIntensity', min: 0, max: 5, step: 0.1, section: 'Emission' },
   { label: 'Bump Scale', key: 'bumpScale', min: 0, max: 2, step: 0.05, section: 'Surface' },
   { label: 'AO Intensity', key: 'aoMapIntensity', min: 0, max: 3, step: 0.05, section: 'Surface' },
+  // Emission
+  { label: 'Emissive Int.', key: 'emissiveIntensity', min: 0, max: 5, step: 0.1, section: 'Emission' },
+  // Clearcoat
+  { label: 'Clearcoat', key: 'clearcoat', min: 0, max: 1, step: 0.01, section: 'Clearcoat', physicalOnly: true },
+  { label: 'Clearcoat Rough.', key: 'clearcoatRoughness', min: 0, max: 1, step: 0.01, section: 'Clearcoat', physicalOnly: true },
+  // Transmission
+  { label: 'Transmission', key: 'transmission', min: 0, max: 1, step: 0.01, section: 'Transmission', physicalOnly: true },
+  { label: 'Trans. Rough.', key: 'transmissionRoughness', min: 0, max: 1, step: 0.01, section: 'Transmission', physicalOnly: true },
+  { label: 'Thickness', key: 'thickness', min: 0, max: 10, step: 0.1, section: 'Transmission', physicalOnly: true },
+  { label: 'IOR', key: 'ior', min: 1, max: 2.5, step: 0.01, section: 'Transmission', physicalOnly: true },
+  { label: 'Atten. Distance', key: 'attenuationDistance', min: 0, max: 20, step: 0.1, section: 'Transmission', physicalOnly: true, infinityKey: true },
+  // Sheen
+  { label: 'Sheen', key: 'sheen', min: 0, max: 1, step: 0.01, section: 'Sheen', physicalOnly: true },
+  { label: 'Sheen Rough.', key: 'sheenRoughness', min: 0, max: 1, step: 0.01, section: 'Sheen', physicalOnly: true },
+  // Iridescence
+  { label: 'Iridescence', key: 'iridescence', min: 0, max: 1, step: 0.01, section: 'Iridescence', physicalOnly: true },
+  { label: 'Irid. IOR', key: 'iridescenceIOR', min: 1, max: 2.333, step: 0.01, section: 'Iridescence', physicalOnly: true },
+  // Specular
+  { label: 'Specular Int.', key: 'specularIntensity', min: 0, max: 1, step: 0.01, section: 'Specular', physicalOnly: true },
 ];
 
-const SECTIONS = ['Base', 'Surface', 'Emission', 'Texture Maps'] as const;
+const SECTIONS = ['Base', 'Surface', 'Emission', 'Clearcoat', 'Transmission', 'Sheen', 'Iridescence', 'Specular', 'Texture Maps'] as const;
 
 const MaterialEditorPanel: React.FC<MaterialEditorPanelProps> = ({ materialManagerRef, sceneRef }) => {
   const materials = useMaterialEditorStore((s) => s.materials);
@@ -38,7 +72,7 @@ const MaterialEditorPanel: React.FC<MaterialEditorPanelProps> = ({ materialManag
 
   const [searchOpen, setSearchOpen] = useState(false);
   const [search, setSearch] = useState('');
-  const [collapsedSections, setCollapsedSections] = useState<Set<string>>(new Set());
+  const [collapsedSections, setCollapsedSections] = useState<Set<string>>(new Set(['Sheen', 'Iridescence', 'Specular']));
   const textureInputRefs = useRef<Record<string, HTMLInputElement | null>>({});
   const searchInputRef = useRef<HTMLInputElement>(null);
 
@@ -63,7 +97,24 @@ const MaterialEditorPanel: React.FC<MaterialEditorPanelProps> = ({ materialManag
   const handlePropChange = useCallback(
     (key: keyof PBRMaterialState, value: number | string | boolean) => {
       if (!selectedId) return;
-      updateMaterial(selectedId, { [key]: value } as Partial<PBRMaterialState>);
+
+      // If changing a physical property, mark isPhysical = true
+      const updates: Partial<PBRMaterialState> = { [key]: value } as Partial<PBRMaterialState>;
+      const physicalKeys = new Set<string>([
+        'clearcoat', 'clearcoatRoughness', 'transmission', 'transmissionRoughness',
+        'thickness', 'ior', 'sheen', 'sheenRoughness', 'sheenColor',
+        'iridescence', 'iridescenceIOR', 'iridescenceThicknessRange',
+        'attenuationColor', 'attenuationDistance', 'specularIntensity', 'specularColor',
+      ]);
+      if (physicalKeys.has(key as string)) {
+        updates.isPhysical = true;
+      }
+      // Auto-enable transparent when transmission > 0
+      if (key === 'transmission' && typeof value === 'number' && value > 0) {
+        updates.transparent = true;
+      }
+
+      updateMaterial(selectedId, updates);
 
       const mm = materialManagerRef.current;
       const scene = sceneRef.current;
@@ -130,13 +181,32 @@ const MaterialEditorPanel: React.FC<MaterialEditorPanelProps> = ({ materialManag
 
   // Group props by section
   const propsBySection = useMemo(() => {
-    const map: Record<string, typeof PROP_ROWS> = {};
+    const map: Record<string, PropRow[]> = {};
     for (const row of PROP_ROWS) {
       if (!map[row.section]) map[row.section] = [];
       map[row.section].push(row);
     }
     return map;
   }, []);
+
+  // Filter out physical-only sections when not in physical mode
+  const visibleSections = useMemo(() => {
+    if (!selected) return SECTIONS;
+    const phys = selected.isPhysical;
+    return SECTIONS.filter((s) => {
+      if (s === 'Texture Maps') return true;
+      const rows = propsBySection[s];
+      if (!rows) return true;
+      if (s === 'Base' || s === 'Surface' || s === 'Emission') return true;
+      return phys;
+    });
+  }, [selected, propsBySection]);
+
+  const formatValue = (val: number, step: number, infinityKey?: boolean): string => {
+    if (infinityKey && (val === Infinity || val >= 20)) return '\u221e';
+    if (step >= 1) return Math.round(val).toString();
+    return val.toFixed(2);
+  };
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
@@ -145,6 +215,21 @@ const MaterialEditorPanel: React.FC<MaterialEditorPanelProps> = ({ materialManag
         <span style={{ fontSize: 9, fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.8, color: 'var(--text-dim)', flex: 1 }}>
           Materials ({materials.length})
         </span>
+        {selected && (
+          <div
+            style={{
+              fontSize: 8,
+              padding: '1px 5px',
+              borderRadius: 3,
+              background: selected.isPhysical ? 'rgba(167, 139, 250, 0.15)' : 'var(--bg-input)',
+              color: selected.isPhysical ? 'var(--accent-bright)' : 'var(--text-dim)',
+              border: `1px solid ${selected.isPhysical ? 'rgba(167, 139, 250, 0.3)' : 'var(--border)'}`,
+              letterSpacing: '0.3px',
+            }}
+          >
+            {selected.isPhysical ? 'PHYSICAL' : 'STANDARD'}
+          </div>
+        )}
         <button
           className={`btn-icon btn-glow ${searchOpen ? 'active' : ''}`}
           style={{ width: 22, height: 22 }}
@@ -179,7 +264,6 @@ const MaterialEditorPanel: React.FC<MaterialEditorPanelProps> = ({ materialManag
               onChange={(e) => setSearch(e.target.value)}
             />
           </div>
-          {/* Search results dropdown */}
           {search && (
             <div className="mat-search-results">
               {filteredMaterials.length === 0 && (
@@ -195,11 +279,8 @@ const MaterialEditorPanel: React.FC<MaterialEditorPanelProps> = ({ materialManag
                 >
                   <div
                     style={{
-                      width: 14,
-                      height: 14,
-                      borderRadius: 2,
-                      background: mat.color,
-                      flexShrink: 0,
+                      width: 14, height: 14, borderRadius: 2,
+                      background: mat.color, flexShrink: 0,
                       border: '1px solid var(--border)',
                     }}
                   />
@@ -221,11 +302,8 @@ const MaterialEditorPanel: React.FC<MaterialEditorPanelProps> = ({ materialManag
         <div className="mat-selected-chip">
           <div
             style={{
-              width: 12,
-              height: 12,
-              borderRadius: 2,
-              background: selected.color,
-              flexShrink: 0,
+              width: 12, height: 12, borderRadius: 2,
+              background: selected.color, flexShrink: 0,
               border: '1px solid var(--border)',
             }}
           />
@@ -243,7 +321,7 @@ const MaterialEditorPanel: React.FC<MaterialEditorPanelProps> = ({ materialManag
         </div>
       )}
 
-      {/* Empty state — click hint */}
+      {/* Empty state */}
       {!selected && (
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: 24, textAlign: 'center' }}>
           <div style={{
@@ -263,7 +341,7 @@ const MaterialEditorPanel: React.FC<MaterialEditorPanelProps> = ({ materialManag
         </div>
       )}
 
-      {/* Material properties — only shown when selected */}
+      {/* Material properties */}
       {selected && (
         <div style={{ flex: 1, overflowY: 'auto', padding: '8px 10px' }}>
           {/* Material name + meshes */}
@@ -275,31 +353,51 @@ const MaterialEditorPanel: React.FC<MaterialEditorPanelProps> = ({ materialManag
           </div>
 
           {/* Color pickers */}
-          <div style={{ display: 'flex', gap: 10, marginBottom: 8, alignItems: 'flex-start' }}>
-            <div style={{ flex: 1 }}>
+          <div style={{ display: 'flex', gap: 10, marginBottom: 8, alignItems: 'flex-start', flexWrap: 'wrap' }}>
+            <div>
               <div className="mat-section-title" style={{ marginBottom: 3 }}>Base Color</div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-                <input
-                  type="color"
-                  value={selected.color}
-                  onChange={(e) => handlePropChange('color', e.target.value)}
-                  style={{ width: 28, height: 20, border: '1px solid var(--border)', borderRadius: 3, cursor: 'pointer', padding: 0 }}
-                />
+                <input type="color" value={selected.color} onChange={(e) => handlePropChange('color', e.target.value)}
+                  style={{ width: 28, height: 20, border: '1px solid var(--border)', borderRadius: 3, cursor: 'pointer', padding: 0 }} />
                 <span style={{ fontSize: 9, color: 'var(--text-dim)', fontFamily: 'var(--font-mono)' }}>{selected.color}</span>
               </div>
             </div>
-            <div style={{ flex: 1 }}>
+            <div>
               <div className="mat-section-title" style={{ marginBottom: 3 }}>Emissive</div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-                <input
-                  type="color"
-                  value={selected.emissive}
-                  onChange={(e) => handlePropChange('emissive', e.target.value)}
-                  style={{ width: 28, height: 20, border: '1px solid var(--border)', borderRadius: 3, cursor: 'pointer', padding: 0 }}
-                />
+                <input type="color" value={selected.emissive} onChange={(e) => handlePropChange('emissive', e.target.value)}
+                  style={{ width: 28, height: 20, border: '1px solid var(--border)', borderRadius: 3, cursor: 'pointer', padding: 0 }} />
                 <span style={{ fontSize: 9, color: 'var(--text-dim)', fontFamily: 'var(--font-mono)' }}>{selected.emissive}</span>
               </div>
             </div>
+            {selected.isPhysical && (
+              <>
+                <div>
+                  <div className="mat-section-title" style={{ marginBottom: 3 }}>Sheen Color</div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+                    <input type="color" value={selected.sheenColor} onChange={(e) => handlePropChange('sheenColor', e.target.value)}
+                      style={{ width: 28, height: 20, border: '1px solid var(--border)', borderRadius: 3, cursor: 'pointer', padding: 0 }} />
+                    <span style={{ fontSize: 9, color: 'var(--text-dim)', fontFamily: 'var(--font-mono)' }}>{selected.sheenColor}</span>
+                  </div>
+                </div>
+                <div>
+                  <div className="mat-section-title" style={{ marginBottom: 3 }}>Specular Color</div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+                    <input type="color" value={selected.specularColor} onChange={(e) => handlePropChange('specularColor', e.target.value)}
+                      style={{ width: 28, height: 20, border: '1px solid var(--border)', borderRadius: 3, cursor: 'pointer', padding: 0 }} />
+                    <span style={{ fontSize: 9, color: 'var(--text-dim)', fontFamily: 'var(--font-mono)' }}>{selected.specularColor}</span>
+                  </div>
+                </div>
+                <div>
+                  <div className="mat-section-title" style={{ marginBottom: 3 }}>Atten. Color</div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+                    <input type="color" value={selected.attenuationColor} onChange={(e) => handlePropChange('attenuationColor', e.target.value)}
+                      style={{ width: 28, height: 20, border: '1px solid var(--border)', borderRadius: 3, cursor: 'pointer', padding: 0 }} />
+                    <span style={{ fontSize: 9, color: 'var(--text-dim)', fontFamily: 'var(--font-mono)' }}>{selected.attenuationColor}</span>
+                  </div>
+                </div>
+              </>
+            )}
           </div>
 
           {/* Toggles */}
@@ -320,8 +418,8 @@ const MaterialEditorPanel: React.FC<MaterialEditorPanelProps> = ({ materialManag
             ))}
           </div>
 
-          {/* Sections: Base, Surface, Emission, Texture Maps */}
-          {SECTIONS.map((section) => {
+          {/* Property sections */}
+          {visibleSections.map((section) => {
             if (section === 'Texture Maps') {
               return (
                 <div key={section} style={{ marginBottom: 8 }}>
@@ -346,11 +444,8 @@ const MaterialEditorPanel: React.FC<MaterialEditorPanelProps> = ({ materialManag
                           <div
                             key={slotKey}
                             style={{
-                              display: 'flex',
-                              alignItems: 'center',
-                              gap: 4,
-                              padding: '3px 4px',
-                              borderRadius: 'var(--radius-sm)',
+                              display: 'flex', alignItems: 'center', gap: 4,
+                              padding: '3px 4px', borderRadius: 'var(--radius-sm)',
                               background: slot.enabled ? 'var(--bg-card)' : 'transparent',
                               border: `1px solid ${slot.enabled ? 'var(--border-light)' : 'var(--border)'}`,
                             }}
@@ -360,12 +455,9 @@ const MaterialEditorPanel: React.FC<MaterialEditorPanelProps> = ({ materialManag
                               <>
                                 <div
                                   style={{
-                                    width: 22,
-                                    height: 22,
-                                    borderRadius: 3,
+                                    width: 22, height: 22, borderRadius: 3,
                                     background: `url(${slot.dataUrl}) center/cover`,
-                                    border: '1px solid var(--border)',
-                                    flexShrink: 0,
+                                    border: '1px solid var(--border)', flexShrink: 0,
                                   }}
                                 />
                                 <span style={{ flex: 1, fontSize: 8, color: 'var(--text-dim)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={slot.fileName}>
@@ -391,8 +483,7 @@ const MaterialEditorPanel: React.FC<MaterialEditorPanelProps> = ({ materialManag
                             )}
                             <input
                               ref={(el) => { textureInputRefs.current[slotKey] = el; }}
-                              type="file"
-                              accept="image/*"
+                              type="file" accept="image/*"
                               style={{ display: 'none' }}
                               onChange={(e) => handleTextureFileChange(slotKey, e)}
                             />
@@ -422,6 +513,15 @@ const MaterialEditorPanel: React.FC<MaterialEditorPanelProps> = ({ materialManag
                     <path d="M1 1l6 3-6 3z" />
                   </svg>
                   {section}
+                  {rows[0]?.physicalOnly && (
+                    <span style={{
+                      fontSize: 7, padding: '0 4px', borderRadius: 2, marginLeft: 'auto',
+                      background: 'rgba(167, 139, 250, 0.12)', color: 'var(--accent-bright)',
+                      letterSpacing: '0.4px', fontWeight: 600,
+                    }}>
+                      PHYSICAL
+                    </span>
+                  )}
                 </div>
                 {!collapsedSections.has(section) && (
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 4, marginTop: 4 }}>
@@ -438,7 +538,7 @@ const MaterialEditorPanel: React.FC<MaterialEditorPanelProps> = ({ materialManag
                           style={{ flex: 1, height: 4, cursor: 'pointer', accentColor: 'var(--accent)' }}
                         />
                         <span className="mat-param-value">
-                          {(selected[row.key] as number).toFixed(2)}
+                          {formatValue(selected[row.key] as number, row.step, row.infinityKey)}{row.unit || ''}
                         </span>
                       </div>
                     ))}
