@@ -42,6 +42,7 @@ interface UIState {
   settingsModalOpen: boolean;
   aboutModalOpen: boolean;
   envBrowserModalOpen: boolean;
+  manualModalOpen: boolean;
 
   // Tools
   activeTool: ActiveTool;
@@ -85,6 +86,7 @@ interface UIState {
   setSettingsModal: (open: boolean) => void;
   setAboutModal: (open: boolean) => void;
   setEnvBrowserModal: (open: boolean) => void;
+  setManualModal: (open: boolean) => void;
 
   // Tools & Layout
   setActiveTool: (tool: ActiveTool) => void;
@@ -129,6 +131,7 @@ export const useUIStore = create<UIState>((set, get) => ({
   settingsModalOpen: false,
   aboutModalOpen: false,
   envBrowserModalOpen: false,
+  manualModalOpen: false,
   activeTool: 'select',
   panelLayout: 'default',
   isFullscreen: false,
@@ -285,6 +288,7 @@ export const useUIStore = create<UIState>((set, get) => ({
   setSettingsModal: (open) => set({ settingsModalOpen: open }),
   setAboutModal: (open) => set({ aboutModalOpen: open }),
   setEnvBrowserModal: (open) => set({ envBrowserModalOpen: open }),
+  setManualModal: (open) => set({ manualModalOpen: open }),
 
   // ── Tools & Layout ────────────────────────────────────────────
   setActiveTool: (tool) => set({ activeTool: tool }),

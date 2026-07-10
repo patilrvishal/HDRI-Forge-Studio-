@@ -150,3 +150,50 @@ Stage Summary:
 - Bottom panel now has Timeline | Presets tabs (mutually exclusive, full working area)
 - Both tsc and vite build pass clean
 
+---
+Task ID: D
+Agent: Super Z (main)
+Task: Fix Scene Hierarchy panel — create from scratch
+
+Work Log:
+- Created SceneHierarchy.tsx component at src/components/Scene/SceneHierarchy.tsx
+- Tree view that traverses THREE.Scene and builds a hierarchy of all objects
+- Filters out grid, proxy, and helper objects
+- Type detection: group, mesh, light, camera, helper, other with color-coded icons
+- Search bar with real-time filtering (searches names, auto-expands matching branches)
+- Click to select objects (shows position info in footer bar)
+- Eye icon toggle for visibility (propagates to children)
+- Expand/collapse arrows with depth < 2 auto-expanded
+- Stats bar: total objects, meshes, lights count
+- Refresh button to rebuild tree after scene changes
+- Added "Scene" as third tab in left panel (Lights | Env | Scene)
+- Updated AppLayout.tsx left tab type union, tab bar, and content area
+
+Stage Summary:
+- Scene hierarchy panel is now the third tab in the left panel
+- Shows full tree of scene objects with search, select, visibility toggle
+- tsc --noEmit = 0 errors, vite build passes
+
+---
+Task ID: E
+Agent: Super Z (main)
+Task: In-App Manual / Documentation Window
+
+Work Log:
+- Created ManualWindow.tsx at src/components/Help/ManualWindow.tsx
+- 7 documentation sections: Getting Started, Lighting System, Material Editor, Environment & HDRIs, Animation & Timeline, Keyboard Shortcuts, Scene Management, Troubleshooting
+- Each section has headings, paragraphs, bullet lists, shortcut tables, and tip callouts
+- Sidebar navigation with section list and search (searches across all content)
+- Keyboard shortcut table format with monospace keys
+- Tip boxes with accent-colored left border
+- Added manualModalOpen state to uiStore
+- Updated Help menu: Documentation (?) and Keyboard Shortcuts both open the manual
+- Added "?" keyboard shortcut to open manual (useKeyboardShortcuts.ts)
+- Manual modal renders in AppLayout.tsx alongside About modal
+
+Stage Summary:
+- Help > Documentation and Help > Keyboard Shortcuts open a full in-app documentation window
+- Press "?" to open the manual from anywhere
+- 7 comprehensive sections covering all studio features
+- tsc --noEmit = 0 errors, vite build passes
+

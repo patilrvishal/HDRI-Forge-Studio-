@@ -1,5 +1,6 @@
 import { useEffect } from 'react';
 import type { ActiveTool } from '../store/uiStore';
+import { useUIStore } from '../store/uiStore';
 import { useAnimationStore } from '../store/animationStore';
 
 interface KeyboardShortcutCallbacks {
@@ -134,6 +135,12 @@ export function useKeyboardShortcuts(callbacks: KeyboardShortcutCallbacks): void
         case 'F11':
           e.preventDefault();
           callbacks.toggleFullscreen?.();
+          break;
+        case '?':
+          if (!e.ctrlKey && !e.metaKey && !e.altKey) {
+            e.preventDefault();
+            useUIStore.getState().setManualModal(true);
+          }
           break;
         // Numpad view shortcuts
         case '1':

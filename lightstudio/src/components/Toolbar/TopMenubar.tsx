@@ -255,8 +255,8 @@ const MENU_DEFINITIONS = (
     },
   },
   Help: {
-    docs: { label: 'Documentation', action: () => window.open('https://docs.lightforgestudio.dev', '_blank') },
-    shortcuts: { label: 'Keyboard Shortcuts', action: () => {} },
+    docs: { label: 'Documentation', shortcut: '?', action: () => useUIStore.getState().setManualModal(true) },
+    shortcuts: { label: 'Keyboard Shortcuts', action: () => useUIStore.getState().setManualModal(true) },
     sep1: { label: '', separator: true },
     about: { label: 'About', action: () => useUIStore.getState().setAboutModal(true) },
   },

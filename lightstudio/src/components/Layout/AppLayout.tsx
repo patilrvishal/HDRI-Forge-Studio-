@@ -23,6 +23,8 @@ import { ExportDialog } from '../Export/ExportDialog';
 import { FinalRenderPanel } from '../Export/FinalRenderPanel';
 import { EnvironmentBrowser } from '../Environment/EnvironmentBrowser';
 import { EnvironmentAssetsPanel } from '../Environment/EnvironmentAssetsPanel';
+import { SceneHierarchy } from '../Scene/SceneHierarchy';
+import { ManualWindow } from '../Help/ManualWindow';
 import { SceneManager, RenderPipeline } from '../../three/engine';
 import { SceneExporter } from '../../three/SceneExporter';
 import { MaterialManager } from '../../three/MaterialManager';
@@ -70,7 +72,7 @@ export const AppLayout: React.FC = () => {
   const envMapRef = useRef<THREE.Texture | null>(null);
 
   // Left panel tab state
-  const [leftTab, setLeftTab] = useState<'lights' | 'environment'>('lights');
+  const [leftTab, setLeftTab] = useState<'lights' | 'environment' | 'scene'>('lights');
 
   // Resizable panel sizes from store
   const leftPanelWidth = useUILayoutStore((s) => s.leftPanelWidth);
@@ -88,10 +90,12 @@ export const AppLayout: React.FC = () => {
   const panelVisibility = useUIStore((s) => s.panelVisibility);
   const settingsModalOpen = useUIStore((s) => s.settingsModalOpen);
   const aboutModalOpen = useUIStore((s) => s.aboutModalOpen);
+  const manualModalOpen = useUIStore((s) => s.manualModalOpen);
   const envBrowserOpen = useUIStore((s) => s.envBrowserModalOpen);
   const setSettingsModal = useUIStore((s) => s.setSettingsModal);
   const setAboutModal = useUIStore((s) => s.setAboutModal);
   const setEnvBrowserModal = useUIStore((s) => s.setEnvBrowserModal);
+  const setManualModal = useUIStore((s) => s.setManualModal);
   const setActiveTool = useUIStore((s) => s.setActiveTool);
   const toggleFullscreen = useUIStore((s) => s.toggleFullscreen);
   const toggleTurntable = useSceneStore((s) => s.toggleTurntable);
@@ -267,7 +271,7 @@ export const AppLayout: React.FC = () => {
                 <svg width="10" height="10" viewBox="0 0 10 10" fill="currentColor" style={{ opacity: 0.6 }}>
                   <circle cx="5" cy="5" r="3" />
                 </svg>
-                {leftTab === 'lights' ? 'Light List' : 'Environment'}
+                {leftTab === 'lights' ? 'Light List' : leftTab === 'environment' ? 'Environment' : 'Scene Hierarchy'}
               </h3>
               <div style={{ display: 'flex', gap: 2, alignItems: 'center' }}>
                 {leftTab === 'lights' && (
@@ -295,7 +299,7 @@ export const AppLayout: React.FC = () => {
                 flexShrink: 0,
               }}
             >
-              {(['lights', 'environment'] as const).map((tab) => (
+              {(['lights', 'environment', 'scene'] as const).map((tab) => (
                 <button
                   key={tab}
                   className={`tab-item ${leftTab === tab ? 'active' : ''}`}
@@ -310,7 +314,7 @@ export const AppLayout: React.FC = () => {
                     marginBottom: -1,
                   }}
                 >
-                  {tab === 'lights' ? 'Lights' : 'Environment'}
+                  {tab === 'lights' ? 'Lights' : tab === 'environment' ? 'Env' : 'Scene'}
                 </button>
               ))}
             </div>
@@ -324,8 +328,10 @@ export const AppLayout: React.FC = () => {
                   </div>
                   <LightProfileSection />
                 </>
-              ) : (
+              ) : leftTab === 'environment' ? (
                 <EnvironmentAssetsPanel />
+              ) : (
+                <SceneHierarchy sceneRef={sceneRef} />
               )}
             </div>
           </div>
@@ -620,7 +626,7 @@ export const AppLayout: React.FC = () => {
               3D Car Lighting Studio
             </div>
             <div style={{ fontSize: 10, color: 'var(--text-dim)' }}>
-              Version 1.0.0 — Phase 12
+              Version 1.0.0
             </div>
             <button
               className="btn-primary"
@@ -632,6 +638,9 @@ export const AppLayout: React.FC = () => {
           </div>
         </div>
       )}
+
+      {/* Manual / Documentation Modal */}
+      {manualModalOpen && <ManualWindow onClose={() => setManualModal(false)} />}
     </div>
   );
 };
