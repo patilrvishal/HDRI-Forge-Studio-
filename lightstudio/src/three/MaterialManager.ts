@@ -61,6 +61,12 @@ export class MaterialManager {
       state.normalScale = mat.normalScale?.x ?? 1;
       state.bumpScale = mat.bumpScale;
       state.aoMapIntensity = mat.aoMapIntensity;
+      state.displacementScale = mat.displacementScale;
+      state.displacementBias = mat.displacementBias;
+      state.envMapIntensity = mat.envMapIntensity;
+      state.alphaTest = mat.alphaTest;
+      state.depthWrite = mat.depthWrite;
+      state.colorWrite = mat.colorWrite;
 
       // Read physical material properties if applicable
       if (isPhys) {
@@ -108,6 +114,9 @@ export class MaterialManager {
       }
       if (mat.alphaMap) {
         state.alphaMap = { enabled: true, dataUrl: null, fileName: '(embedded)' };
+      }
+      if (mat.displacementMap) {
+        state.displacementMap = { enabled: true, dataUrl: null, fileName: '(embedded)' };
       }
 
       // Store mapping: state.id → [actual Three.js materials]
@@ -205,6 +214,11 @@ export class MaterialManager {
     phys.userData = mat.userData;
     phys.envMap = mat.envMap;
     phys.envMapIntensity = mat.envMapIntensity;
+    phys.displacementScale = mat.displacementScale;
+    phys.displacementBias = mat.displacementBias;
+    phys.alphaTest = mat.alphaTest;
+    phys.depthWrite = mat.depthWrite;
+    phys.colorWrite = mat.colorWrite;
 
     // If the old material had an envMapIntensity set, preserve it
     if ('envMapIntensity' in mat) {
@@ -293,6 +307,12 @@ export class MaterialManager {
       mat.normalScale = new THREE.Vector2(state.normalScale, state.normalScale);
       mat.bumpScale = state.bumpScale;
       mat.aoMapIntensity = state.aoMapIntensity;
+      mat.displacementScale = state.displacementScale;
+      mat.displacementBias = state.displacementBias;
+      mat.envMapIntensity = state.envMapIntensity;
+      mat.alphaTest = state.alphaTest;
+      mat.depthWrite = state.depthWrite;
+      mat.colorWrite = state.colorWrite;
 
       // Apply physical properties if material is MeshPhysicalMaterial
       if (mat instanceof THREE.MeshPhysicalMaterial) {
@@ -319,7 +339,7 @@ export class MaterialManager {
       // Textures (only apply user-uploaded textures, don't override embedded ones)
       const slotKeys: TextureSlotKey[] = [
         'map', 'normalMap', 'roughnessMap', 'metalnessMap',
-        'emissiveMap', 'aoMap', 'bumpMap', 'alphaMap',
+        'emissiveMap', 'aoMap', 'bumpMap', 'alphaMap', 'displacementMap',
       ];
       for (const slotKey of slotKeys) {
         const slot = state[slotKey];

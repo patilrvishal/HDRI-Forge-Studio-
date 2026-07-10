@@ -101,9 +101,25 @@ export interface PBRMaterialState {
   specularIntensity: number;
   /** Specular color (hex string) */
   specularColor: string;
+
+  // ── Displacement / Carpet / Fabric Properties ─────────────────────
+  /** Displacement map for surface detail (carpet pile, fabric weave) */
+  displacementMap: MaterialTextureSlot;
+  /** Displacement map intensity (0-5, default 0) */
+  displacementScale: number;
+  /** Displacement bias (default 0) */
+  displacementBias: number;
+  /** Environment map intensity (0-5, default 1). Key for carpet: reduces env reflections */
+  envMapIntensity: number;
+  /** Alpha test threshold (0-1, default 0). For cutout transparency */
+  alphaTest: number;
+  /** Depth write (default true). Disable for transparent carpets */
+  depthWrite: boolean;
+  /** Color write (default true) */
+  colorWrite: boolean;
 }
 
-export type TextureSlotKey = 'map' | 'normalMap' | 'roughnessMap' | 'metalnessMap' | 'emissiveMap' | 'aoMap' | 'bumpMap' | 'alphaMap';
+export type TextureSlotKey = 'map' | 'normalMap' | 'roughnessMap' | 'metalnessMap' | 'emissiveMap' | 'aoMap' | 'bumpMap' | 'alphaMap' | 'displacementMap';
 
 export const TEXTURE_SLOT_LABELS: Record<TextureSlotKey, string> = {
   map: 'Albedo',
@@ -114,6 +130,7 @@ export const TEXTURE_SLOT_LABELS: Record<TextureSlotKey, string> = {
   aoMap: 'AO',
   bumpMap: 'Bump',
   alphaMap: 'Alpha',
+  displacementMap: 'Displacement',
 };
 
 export function createEmptyTextureSlot(): MaterialTextureSlot {
@@ -167,5 +184,13 @@ export function createPBRMaterialState(
     attenuationDistance: Infinity,
     specularIntensity: 1,
     specularColor: '#ffffff',
+    // Displacement / Carpet / Fabric defaults
+    displacementMap: createEmptyTextureSlot(),
+    displacementScale: 0,
+    displacementBias: 0,
+    envMapIntensity: 1,
+    alphaTest: 0,
+    depthWrite: true,
+    colorWrite: true,
   };
 }

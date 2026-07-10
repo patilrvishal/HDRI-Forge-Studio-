@@ -264,3 +264,50 @@ Stage Summary:
 - MaterialEditorPanel.tsx: 739 lines, Blender Material Properties layout with editable numeric inputs
 - sceneHierarchyStore.ts: New store for hierarchy state management
 - Build verified: 0 errors, 110ms
+---
+Task ID: 1
+Agent: Main Agent
+Task: Blender-style Scene Hierarchy + Carpet Material Parameters
+
+Work Log:
+- Analyzed uploaded reference images showing Blender's outliner panel (Scene Collection root, eye/camera icons, type icons, search, context menu)
+- Read all existing source files: SceneHierarchy.tsx (1426 lines), MaterialEditorPanel.tsx (739 lines), materialEditorStore.ts, MaterialEditor.ts, MaterialManager.ts, sceneHierarchyStore.ts, AppLayout.tsx
+- Rewrote SceneHierarchy.tsx with Blender-style clean layout:
+  - Search bar at top (Blender position)
+  - Filter buttons row with object count badge, expand/collapse all, new collection, show all, refresh
+  - Tree nodes with: chevron, type icon (distinct for mesh/light/camera/group/collection), name, eye icon for visibility
+  - Collection support via userData._isCollection flag, yellow color coding, folder icon
+  - Enhanced context menu with toggle-isolate, separate New Collection and New Collection Here
+  - RowIconButton component with hover states matching Blender style
+  - Enhanced ObjectPropertiesPanel at bottom:
+    - Quick Actions row (Visible/Hidden + Isolate toggle buttons)
+    - Transform section (Location/Rotation/Scale + World Position display)
+    - Object Info section (Type, Vertices, Triangles, Size, Material, Mat Type, UVs, Normals, Vertex Colors, Children, UUID)
+    - For lights: Type, Color, Intensity, Distance, Decay, Angle, Penumbra
+- Added carpet/fabric material parameters to PBRMaterialState:
+  - displacementMap (MaterialTextureSlot), displacementScale, displacementBias
+  - envMapIntensity, alphaTest, depthWrite, colorWrite
+- Updated MaterialEditor.ts types, TextureSlotKey, TEXTURE_SLOT_LABELS, createPBRMaterialState()
+- Updated MaterialEditorPanel.tsx:
+  - New "Fabric / Carpet" section (physical) with Sheen, Sheen Roughness, Sheen Color
+  - New "Displacement" section with Displace Scale, Displace Bias
+  - New "Environment" section with Env Map Intensity
+  - Added displacementMap to TEXTURE_SLOTS
+  - Added Alpha Test slider to Settings
+  - Added Depth Write, Color Write checkboxes to Settings
+  - Replaced old "Sheen" section with "Fabric / Carpet"
+- Updated MaterialManager.ts:
+  - extractMaterials reads new properties from loaded models
+  - applyMaterialState applies displacementScale, displacementBias, envMapIntensity, alphaTest, depthWrite, colorWrite
+  - upgradeToPhysical preserves new properties
+  - displacementMap added to texture slot processing
+- Updated materialEditorStore.ts:
+  - exportMaterials includes displacementMap deep clone
+  - importMaterials handles displacementMap guard
+
+Stage Summary:
+- SceneHierarchy.tsx fully rewritten with Blender-style layout (clean, organized)
+- ObjectPropertiesPanel enhanced with comprehensive info at bottom on selection
+- Carpet/fabric material parameters fully added and functional
+- TypeScript compilation: zero new errors (all pre-existing)
+- Dev server starts successfully

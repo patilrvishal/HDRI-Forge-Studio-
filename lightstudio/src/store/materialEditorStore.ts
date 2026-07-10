@@ -91,6 +91,7 @@ export const useMaterialEditorStore = create<MaterialEditorStore>((set, get) => 
       aoMap: { ...m.aoMap },
       bumpMap: { ...m.bumpMap },
       alphaMap: { ...m.alphaMap },
+      displacementMap: { ...m.displacementMap },
       // Deep clone iridescence range
       iridescenceThicknessRange: [...m.iridescenceThicknessRange] as [number, number],
       // Ensure Infinity serializes properly for JSON
@@ -114,6 +115,7 @@ export const useMaterialEditorStore = create<MaterialEditorStore>((set, get) => 
         aoMap: (m.aoMap && typeof m.aoMap === 'object' && 'enabled' in m.aoMap) ? m.aoMap : base.aoMap,
         bumpMap: (m.bumpMap && typeof m.bumpMap === 'object' && 'enabled' in m.bumpMap) ? m.bumpMap : base.bumpMap,
         alphaMap: (m.alphaMap && typeof m.alphaMap === 'object' && 'enabled' in m.alphaMap) ? m.alphaMap : base.alphaMap,
+        displacementMap: (m.displacementMap && typeof m.displacementMap === 'object' && 'enabled' in m.displacementMap) ? m.displacementMap : base.displacementMap,
         // Restore Infinity from -1 sentinel
         attenuationDistance: m.attenuationDistance === -1 ? Infinity : (m.attenuationDistance ?? Infinity),
         iridescenceThicknessRange: m.iridescenceThicknessRange ?? [100, 400],

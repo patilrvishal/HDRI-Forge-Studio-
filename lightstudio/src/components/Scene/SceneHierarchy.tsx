@@ -17,6 +17,7 @@ interface HierarchyNode {
   type: 'group' | 'mesh' | 'light' | 'camera' | 'helper' | 'other';
   object: THREE.Object3D;
   children: HierarchyNode[];
+  isCollection?: boolean;
 }
 
 interface ContextMenuState {
@@ -39,6 +40,13 @@ function getNodeType(obj: THREE.Object3D): HierarchyNode['type'] {
   return 'other';
 }
 
+function isCollection(obj: THREE.Object3D): boolean {
+  return obj instanceof THREE.Group &&
+    !obj.userData.isGrid &&
+    !obj.userData.isProxy &&
+    obj.userData._isCollection === true;
+}
+
 function buildTree(scene: THREE.Scene): HierarchyNode[] {
   const nodes: HierarchyNode[] = [];
   for (const child of scene.children) {
@@ -59,6 +67,7 @@ function buildNode(obj: THREE.Object3D): HierarchyNode {
     type: getNodeType(obj),
     object: obj,
     children,
+    isCollection: isCollection(obj),
   };
 }
 
@@ -84,12 +93,10 @@ function getAllDescendantIds(obj: THREE.Object3D): string[] {
   return ids;
 }
 
-function getAllGroupsInScene(scene: THREE.Scene): THREE.Group[] {
+function getAllCollections(scene: THREE.Scene): THREE.Group[] {
   const groups: THREE.Group[] = [];
   scene.traverse((child) => {
-    if (child instanceof THREE.Group && child.children.length > 0 && !child.userData.isGrid && !child.userData.isProxy) {
-      groups.push(child);
-    }
+    if (isCollection(child)) groups.push(child as THREE.Group);
   });
   return groups;
 }
@@ -97,63 +104,78 @@ function getAllGroupsInScene(scene: THREE.Scene): THREE.Group[] {
 function countCollections(scene: THREE.Scene): number {
   let count = 0;
   for (const child of scene.children) {
-    if (child instanceof THREE.Group && !child.userData.isGrid && !child.userData.isProxy) {
-      count++;
-    }
+    if (isCollection(child)) count++;
   }
+  scene.traverse((child) => {
+    if (child !== scene && isCollection(child)) count++;
+  });
   return count;
 }
 
 /* ═══════════════════════════════════════════════════════════════════
-   Type colors & SVG icons
+   Type colors & SVG icons (Blender-style small icons)
    ═══════════════════════════════════════════════════════════════════ */
 
 const TYPE_COLORS: Record<string, string> = {
   group: '#7dd3fc',
-  mesh: 'var(--accent-bright)',
+  mesh: '#a78bfa',
   light: '#f0a868',
-  camera: 'var(--text-sec)',
-  helper: 'var(--text-dim)',
-  other: 'var(--text-dim)',
+  camera: '#94a3b8',
+  helper: '#475569',
+  other: '#475569',
+  collection: '#fbbf24',
 };
 
-const TypeIcon: React.FC<{ type: string; color?: string }> = ({ type, color }) => {
-  const c = color || TYPE_COLORS[type] || 'var(--text-dim)';
-  const sz = 14;
+const TypeIcon: React.FC<{ type: string; isCollection?: boolean; size?: number }> = ({ type, isCollection: isColl, size = 13 }) => {
+  const c = isColl ? TYPE_COLORS.collection : (TYPE_COLORS[type] || 'var(--text-dim)');
+  if (isColl) {
+    return (
+      <svg width={size} height={size} viewBox="0 0 16 16" fill="none" style={{ color: c, flexShrink: 0 }}>
+        <path d="M2 4h4l1.5-2h5L14 4h2v8a1 1 0 01-1 1H2a1 1 0 01-1-1V5a1 1 0 011-1z" stroke="currentColor" strokeWidth="1.2" fill="none" />
+        <line x1="4" y1="8" x2="12" y2="8" stroke="currentColor" strokeWidth="0.8" opacity="0.5" />
+      </svg>
+    );
+  }
   switch (type) {
     case 'mesh':
       return (
-        <svg width={sz} height={sz} viewBox="0 0 16 16" fill="none" style={{ color: c, flexShrink: 0 }}>
-          <rect x="2" y="2" width="12" height="12" rx="1" fill="none" stroke="currentColor" strokeWidth="1.2" />
+        <svg width={size} height={size} viewBox="0 0 16 16" fill="none" style={{ color: c, flexShrink: 0 }}>
+          <path d="M8 1.5L14.5 5v6L8 14.5 1.5 11V5z" stroke="currentColor" strokeWidth="1.1" />
+          <path d="M1.5 5L8 8l6.5-3M8 8v6.5" stroke="currentColor" strokeWidth="0.8" opacity="0.5" />
         </svg>
       );
     case 'light':
       return (
-        <svg width={sz} height={sz} viewBox="0 0 16 16" fill="none" style={{ color: c, flexShrink: 0 }}>
-          <circle cx="8" cy="8" r="4" fill="none" stroke="currentColor" strokeWidth="1.2" />
-          <line x1="8" y1="1" x2="8" y2="3" stroke="currentColor" strokeWidth="1.2" />
-          <line x1="8" y1="13" x2="8" y2="15" stroke="currentColor" strokeWidth="1.2" />
-          <line x1="1" y1="8" x2="3" y2="8" stroke="currentColor" strokeWidth="1.2" />
-          <line x1="13" y1="8" x2="15" y2="8" stroke="currentColor" strokeWidth="1.2" />
+        <svg width={size} height={size} viewBox="0 0 16 16" fill="none" style={{ color: c, flexShrink: 0 }}>
+          <circle cx="8" cy="8" r="3.5" stroke="currentColor" strokeWidth="1.1" />
+          <line x1="8" y1="2" x2="8" y2="3.5" stroke="currentColor" strokeWidth="1" />
+          <line x1="8" y1="12.5" x2="8" y2="14" stroke="currentColor" strokeWidth="1" />
+          <line x1="2" y1="8" x2="3.5" y2="8" stroke="currentColor" strokeWidth="1" />
+          <line x1="12.5" y1="8" x2="14" y2="8" stroke="currentColor" strokeWidth="1" />
+          <line x1="3.8" y1="3.8" x2="4.9" y2="4.9" stroke="currentColor" strokeWidth="0.8" />
+          <line x1="11.1" y1="11.1" x2="12.2" y2="12.2" stroke="currentColor" strokeWidth="0.8" />
+          <line x1="3.8" y1="12.2" x2="4.9" y2="11.1" stroke="currentColor" strokeWidth="0.8" />
+          <line x1="11.1" y1="4.9" x2="12.2" y2="3.8" stroke="currentColor" strokeWidth="0.8" />
         </svg>
       );
     case 'camera':
       return (
-        <svg width={sz} height={sz} viewBox="0 0 16 16" fill="none" style={{ color: c, flexShrink: 0 }}>
-          <path d="M2 5a1 1 0 011-1h3l1.5-2h1L11 4h2a1 1 0 011 1v7a1 1 0 01-1 1H3a1 1 0 01-1-1V5z" fill="none" stroke="currentColor" strokeWidth="1.2" />
-          <circle cx="8" cy="8.5" r="2.5" fill="none" stroke="currentColor" strokeWidth="1.2" />
+        <svg width={size} height={size} viewBox="0 0 16 16" fill="none" style={{ color: c, flexShrink: 0 }}>
+          <path d="M2 5h3l1-1.5h4l1 1.5h3a1 1 0 011 1v6a1 1 0 01-1 1H2a1 1 0 01-1-1V6a1 1 0 011-1z" stroke="currentColor" strokeWidth="1.1" />
+          <circle cx="8" cy="8.5" r="2.5" stroke="currentColor" strokeWidth="1" />
         </svg>
       );
     case 'group':
       return (
-        <svg width={sz} height={sz} viewBox="0 0 16 16" fill="none" style={{ color: c, flexShrink: 0 }}>
-          <path d="M2 4h4l1.5-2h5L14 4h2a1 1 0 011 1v8a1 1 0 01-1 1H2a1 1 0 01-1-1V5a1 1 0 011-1z" fill="none" stroke="currentColor" strokeWidth="1.2" />
+        <svg width={size} height={size} viewBox="0 0 16 16" fill="none" style={{ color: c, flexShrink: 0 }}>
+          <rect x="1" y="3" width="14" height="10" rx="1.5" stroke="currentColor" strokeWidth="1.1" />
+          <line x1="1" y1="7" x2="15" y2="7" stroke="currentColor" strokeWidth="0.8" opacity="0.4" />
         </svg>
       );
     default:
       return (
-        <svg width={sz} height={sz} viewBox="0 0 16 16" fill="none" style={{ color: c, flexShrink: 0 }}>
-          <circle cx="8" cy="8" r="3" fill="none" stroke="currentColor" strokeWidth="1.2" />
+        <svg width={size} height={size} viewBox="0 0 16 16" fill="none" style={{ color: c, flexShrink: 0 }}>
+          <circle cx="8" cy="8" r="3" stroke="currentColor" strokeWidth="1.1" />
         </svg>
       );
   }
@@ -195,15 +217,15 @@ const ContextMenu: React.FC<{
 
   const store = useSceneHierarchyStore.getState();
   const isHidden = obj ? store.hiddenIds.includes(obj.uuid) : false;
+  const isIsolated = obj ? store.isolatedId === obj.uuid : false;
 
-  const groups = useMemo(() => {
+  const collections = useMemo(() => {
     if (!scene) return [];
-    return getAllGroupsInScene(scene).filter((g) => g.uuid !== state.objectId);
+    return getAllCollections(scene).filter((g) => g.uuid !== state.objectId);
   }, [scene, state.objectId]);
 
   const handleSelectHierarchy = useCallback(() => {
     if (!obj) return;
-    const ids = getAllDescendantIds(obj);
     store.select(obj.uuid);
     refresh();
     onClose();
@@ -269,17 +291,25 @@ const ContextMenu: React.FC<{
   }, [obj, refresh, onClose]);
 
   const handleIsolate = useCallback(() => {
-    if (!obj) return;
-    useSceneHierarchyStore.getState().isolate(obj.uuid);
-    if (scene) {
+    if (!obj || !scene) return;
+    const s = useSceneHierarchyStore.getState();
+    // Toggle isolation
+    if (s.isolatedId === obj.uuid) {
+      s.showAll();
+      scene.traverse((child) => {
+        if (child.userData.isGrid || child.userData.isProxy) return;
+        child.visible = true;
+      });
+    } else {
+      s.isolate(obj.uuid);
       scene.traverse((child) => {
         if (child.userData.isGrid || child.userData.isProxy) return;
         if (child.uuid === obj.uuid) {
           child.visible = true;
         } else {
-          let isDescendant = false;
-          obj.traverse((d) => { if (d.uuid === child.uuid) isDescendant = true; });
-          child.visible = isDescendant;
+          let isDesc = false;
+          obj.traverse((d) => { if (d.uuid === child.uuid) isDesc = true; });
+          child.visible = isDesc;
         }
       });
     }
@@ -298,13 +328,24 @@ const ContextMenu: React.FC<{
     [obj, scene, refresh, onClose],
   );
 
-  const handleNewCollectionHere = useCallback(() => {
-    if (!obj) return;
-    const parent = obj instanceof THREE.Group && obj.children.length > 0 ? obj : obj;
-    const n = countCollections(scene!) + 1;
+  const handleNewCollection = useCallback(() => {
+    if (!scene) return;
+    const n = countCollections(scene) + 1;
     const g = new THREE.Group();
     g.name = `Collection ${n}`;
-    parent.add(g);
+    g.userData._isCollection = true;
+    scene.add(g);
+    refresh();
+    onClose();
+  }, [scene, refresh, onClose]);
+
+  const handleNewCollectionHere = useCallback(() => {
+    if (!obj || !scene) return;
+    const n = countCollections(scene) + 1;
+    const g = new THREE.Group();
+    g.name = `Collection ${n}`;
+    g.userData._isCollection = true;
+    obj.add(g);
     refresh();
     onClose();
   }, [obj, scene, refresh, onClose]);
@@ -368,7 +409,7 @@ const ContextMenu: React.FC<{
         </svg>
       ),
       submenu:
-        groups.length > 0 ? (
+        collections.length > 0 ? (
           <div
             style={{
               position: 'absolute',
@@ -385,7 +426,7 @@ const ContextMenu: React.FC<{
               boxShadow: '0 4px 16px rgba(0,0,0,0.5)',
             }}
           >
-            {groups.map((g) => (
+            {collections.map((g) => (
               <div
                 key={g.uuid}
                 onMouseDown={(e) => {
@@ -411,7 +452,7 @@ const ContextMenu: React.FC<{
                   (e.currentTarget as HTMLElement).style.color = 'var(--text-sec)';
                 }}
               >
-                <TypeIcon type="group" />
+                <TypeIcon type="group" isCollection />
                 <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{g.name}</span>
               </div>
             ))}
@@ -420,53 +461,54 @@ const ContextMenu: React.FC<{
     },
     { divider: true },
     {
-      label: 'Hide',
-      icon: (
+      label: isHidden ? 'Show' : 'Hide',
+      icon: isHidden ? (
+        <svg width="11" height="11" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3">
+          <path d="M1 8s3-5 7-5 7 5 7 5-3 5-7 5-7-5-7-5z" />
+          <circle cx="8" cy="8" r="2" />
+        </svg>
+      ) : (
         <svg width="11" height="11" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3">
           <path d="M1 8s3-5 7-5 7 5 7 5-3 5-7 5-7-5-7-5z" />
           <line x1="2" y1="2" x2="14" y2="14" />
         </svg>
       ),
       shortcut: 'H',
-      action: handleHide,
-      disabled: isHidden,
+      action: isHidden ? handleShow : handleHide,
     },
     {
-      label: 'Show',
-      icon: (
-        <svg width="11" height="11" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3">
-          <path d="M1 8s3-5 7-5 7 5 7 5-3 5-7 5-7-5-7-5z" />
-          <circle cx="8" cy="8" r="2" />
-        </svg>
-      ),
-      action: handleShow,
-      disabled: !isHidden,
-    },
-    {
-      label: 'Isolate',
+      label: isIsolated ? 'Disable Isolate' : 'Isolate',
       icon: (
         <svg width="11" height="11" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3">
           <circle cx="8" cy="8" r="6" />
           <circle cx="8" cy="8" r="2" />
         </svg>
       ),
-      shortcut: 'Numpad /',
       action: handleIsolate,
     },
     { divider: true },
     {
+      label: 'New Collection',
+      icon: (
+        <svg width="11" height="11" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3">
+          <path d="M2 4h4l1.5-2h5L14 4h2a1 1 0 011 1v8a1 1 0 01-1 1H2a1 1 0 01-1-1V5a1 1 0 011-1z" />
+          <path d="M8 7v5M5.5 9.5h5" />
+        </svg>
+      ),
+      action: handleNewCollection,
+    },
+    {
       label: 'New Collection Here',
       icon: (
         <svg width="11" height="11" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3">
-          <path d="M3 3h3l1-1h4l1 1h2a1 1 0 011 1v8a1 1 0 01-1 1H3a1 1 0 01-1-1V4a1 1 0 011-1z" />
-          <path d="M8 7v5M5.5 9.5l5 0" />
+          <path d="M2 4h4l1.5-2h5L14 4h2a1 1 0 011 1v8a1 1 0 01-1 1H2a1 1 0 01-1-1V5a1 1 0 011-1z" />
+          <path d="M8 7v5M5.5 9.5h5" />
         </svg>
       ),
       action: handleNewCollectionHere,
     },
   ];
 
-  // Calculate position to keep menu in viewport
   const menuWidth = 200;
   const menuHeight = menuItems.length * 26 + 10;
   const adjustedX = state.x + menuWidth > window.innerWidth ? state.x - menuWidth : state.x;
@@ -548,7 +590,50 @@ const ContextMenu: React.FC<{
 };
 
 /* ═══════════════════════════════════════════════════════════════════
-   Tree Node
+   Blender-style Row Icons (Eye, Camera, Select Arrow)
+   ═══════════════════════════════════════════════════════════════════ */
+
+/** Small inline icon button for the tree row */
+const RowIconButton: React.FC<{
+  active?: boolean;
+  title: string;
+  onClick: (e: React.MouseEvent) => void;
+  children: React.ReactNode;
+}> = ({ active, title, onClick, children }) => (
+  <button
+    onClick={onClick}
+    title={title}
+    style={{
+      width: 16,
+      height: 16,
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      background: 'none',
+      border: 'none',
+      cursor: 'pointer',
+      color: active ? 'var(--text-sec)' : 'var(--text-dim)',
+      opacity: active ? 1 : 0.35,
+      flexShrink: 0,
+      padding: 0,
+      borderRadius: 2,
+      transition: 'opacity 0.1s',
+    }}
+    onMouseEnter={(e) => {
+      (e.currentTarget as HTMLElement).style.opacity = '1';
+      (e.currentTarget as HTMLElement).style.background = 'var(--accent-bg)';
+    }}
+    onMouseLeave={(e) => {
+      (e.currentTarget as HTMLElement).style.opacity = active ? '1' : '0.35';
+      (e.currentTarget as HTMLElement).style.background = 'none';
+    }}
+  >
+    {children}
+  </button>
+);
+
+/* ═══════════════════════════════════════════════════════════════════
+   Tree Node (Blender-style)
    ═══════════════════════════════════════════════════════════════════ */
 
 const TreeNode: React.FC<{
@@ -575,6 +660,7 @@ const TreeNode: React.FC<{
   const isSelected = selectedId === node.object.uuid;
   const isHidden = hiddenIds.includes(node.object.uuid);
   const isExpanded = expandedIds.includes(node.object.uuid);
+  const isColl = node.isCollection;
 
   // Filter by type
   if (filterType !== 'all') {
@@ -586,7 +672,6 @@ const TreeNode: React.FC<{
     };
     const allowed = typeMap[filterType] || [];
     if (allowed.length > 0 && !allowed.includes(node.type)) {
-      // Check if any descendant matches
       let hasMatch = false;
       const checkDescendants = (n: HierarchyNode) => {
         if (allowed.includes(n.type)) hasMatch = true;
@@ -683,7 +768,6 @@ const TreeNode: React.FC<{
         const allowed = typeMap[filterType] || [];
         if (allowed.length > 0) {
           if (allowed.includes(child.type)) return true;
-          // Check descendants
           let hasMatch = false;
           const check = (n: HierarchyNode) => {
             if (allowed.includes(n.type)) hasMatch = true;
@@ -707,12 +791,14 @@ const TreeNode: React.FC<{
         style={{
           display: 'flex',
           alignItems: 'center',
-          gap: 2,
-          paddingLeft: 4 + depth * 14,
-          paddingRight: 4,
-          height: 24,
+          gap: 1,
+          paddingLeft: 2 + depth * 16,
+          paddingRight: 2,
+          height: 22,
           cursor: 'pointer',
-          background: isSelected ? 'var(--accent-bg)' : 'transparent',
+          background: isSelected
+            ? 'rgba(167, 139, 250, 0.12)'
+            : 'transparent',
           borderLeft: isSelected ? '2px solid var(--accent)' : '2px solid transparent',
           transition: 'background 0.1s',
         }}
@@ -721,23 +807,23 @@ const TreeNode: React.FC<{
         onMouseEnter={(e) => {
           if (!isSelected) {
             (e.currentTarget as HTMLElement).style.background = 'var(--bg-card)';
-          } else {
-            (e.currentTarget as HTMLElement).style.background = 'rgba(167, 139, 250, 0.12)';
           }
         }}
         onMouseLeave={(e) => {
-          (e.currentTarget as HTMLElement).style.background = isSelected ? 'var(--accent-bg)' : 'transparent';
+          (e.currentTarget as HTMLElement).style.background = isSelected
+            ? 'rgba(167, 139, 250, 0.12)'
+            : 'transparent';
         }}
       >
         {/* Chevron */}
         <span
           style={{
-            width: 14,
-            height: 14,
+            width: 12,
+            height: 12,
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
-            fontSize: 7,
+            fontSize: 6,
             color: 'var(--text-dim)',
             visibility: hasChildren ? 'visible' : 'hidden',
             transform: isExpanded ? 'rotate(90deg)' : 'rotate(0deg)',
@@ -749,11 +835,11 @@ const TreeNode: React.FC<{
             toggleExpanded(node.object.uuid);
           }}
         >
-          \u25B6
+          {'\u25B6'}
         </span>
 
         {/* Type icon */}
-        <TypeIcon type={node.type} />
+        <TypeIcon type={node.type} isCollection={isColl} />
 
         {/* Name / Rename input */}
         {renaming ? (
@@ -784,13 +870,14 @@ const TreeNode: React.FC<{
             style={{
               flex: 1,
               fontSize: 10,
-              color: isHidden ? 'var(--text-dim)' : 'var(--text-sec)',
+              color: isHidden ? 'var(--text-dim)' : (isColl ? '#fbbf24' : 'var(--text-sec)'),
               opacity: isHidden ? 0.5 : 1,
               overflow: 'hidden',
               textOverflow: 'ellipsis',
               whiteSpace: 'nowrap',
               fontStyle: isHidden ? 'italic' : 'normal',
               minWidth: 0,
+              fontWeight: isColl ? 500 : 400,
             }}
             title={node.name}
             onDoubleClick={(e) => {
@@ -802,24 +889,13 @@ const TreeNode: React.FC<{
           </span>
         )}
 
-        {/* Visibility eye */}
-        <button
+        {/* ── Blender-style row action icons ── */}
+
+        {/* Eye (viewport visibility) */}
+        <RowIconButton
+          active={!isHidden}
+          title={isHidden ? 'Show in Viewport' : 'Hide in Viewport'}
           onClick={handleToggleVisibility}
-          style={{
-            width: 18,
-            height: 18,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            background: 'none',
-            border: 'none',
-            cursor: 'pointer',
-            color: isHidden ? 'var(--text-dim)' : 'var(--text-sec)',
-            opacity: 0.6,
-            flexShrink: 0,
-            padding: 0,
-          }}
-          title={isHidden ? 'Show' : 'Hide'}
         >
           {!isHidden ? (
             <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.2">
@@ -832,7 +908,7 @@ const TreeNode: React.FC<{
               <line x1="2" y1="2" x2="14" y2="14" />
             </svg>
           )}
-        </button>
+        </RowIconButton>
       </div>
 
       {/* Children */}
@@ -855,7 +931,7 @@ const TreeNode: React.FC<{
 };
 
 /* ═══════════════════════════════════════════════════════════════════
-   Number Input
+   Number Input (Vec3)
    ═══════════════════════════════════════════════════════════════════ */
 
 const AXIS_COLORS = ['#f87171', '#4ade80', '#60a5fa'];
@@ -868,7 +944,7 @@ const Vec3Input: React.FC<{
   decimals?: number;
 }> = ({ label, values, onChange, decimals = 3 }) => (
   <div style={{ display: 'flex', alignItems: 'center', gap: 3 }}>
-    <span style={{ fontSize: 9, color: 'var(--text-dim)', width: 28, flexShrink: 0, fontFamily: 'var(--font-mono)' }}>
+    <span style={{ fontSize: 9, color: 'var(--text-dim)', width: 32, flexShrink: 0, fontFamily: 'var(--font-mono)' }}>
       {label}
     </span>
     {[0, 1, 2].map((idx) => (
@@ -882,7 +958,7 @@ const Vec3Input: React.FC<{
           value={parseFloat(values[idx].toFixed(decimals))}
           onChange={(e) => onChange(idx, parseFloat(e.target.value) || 0)}
           style={{
-            width: 52,
+            width: 48,
             fontSize: 9,
             fontFamily: 'var(--font-mono)',
             background: 'var(--bg-input)',
@@ -906,8 +982,9 @@ const Vec3Input: React.FC<{
 const CollapsibleSection: React.FC<{
   title: string;
   defaultOpen?: boolean;
+  icon?: React.ReactNode;
   children: React.ReactNode;
-}> = ({ title, defaultOpen = true, children }) => {
+}> = ({ title, defaultOpen = true, icon, children }) => {
   const [open, setOpen] = useState(defaultOpen);
   return (
     <div style={{ borderBottom: '1px solid var(--border)' }}>
@@ -933,8 +1010,9 @@ const CollapsibleSection: React.FC<{
             textAlign: 'center',
           }}
         >
-          \u25B6
+          {'\u25B6'}
         </span>
+        {icon && <span style={{ display: 'flex', alignItems: 'center' }}>{icon}</span>}
         <span style={{ fontSize: 9, color: 'var(--text-sec)', fontWeight: 500 }}>{title}</span>
       </div>
       {open && <div style={{ paddingLeft: 12, paddingBottom: 4, display: 'flex', flexDirection: 'column', gap: 2 }}>{children}</div>}
@@ -943,7 +1021,7 @@ const CollapsibleSection: React.FC<{
 };
 
 /* ═══════════════════════════════════════════════════════════════════
-   Object Properties Panel
+   Object Properties Panel (Enhanced — Blender-style bottom panel)
    ═══════════════════════════════════════════════════════════════════ */
 
 const ObjectPropertiesPanel: React.FC<{
@@ -962,6 +1040,7 @@ const ObjectPropertiesPanel: React.FC<{
 
   const nodeType = getNodeType(selectedObj);
   const isHidden = hiddenIds.includes(selectedObj.uuid);
+  const isColl = isCollection(selectedObj);
 
   const toDeg = THREE.MathUtils.radToDeg;
   const toRad = THREE.MathUtils.degToRad;
@@ -996,37 +1075,104 @@ const ObjectPropertiesPanel: React.FC<{
     refresh();
   };
 
-  // Mesh info
+  const handleIsolate = () => {
+    const s = useSceneHierarchyStore.getState();
+    const scene = sceneRef.current;
+    if (!scene) return;
+    if (s.isolatedId === selectedObj.uuid) {
+      s.showAll();
+      scene.traverse((child) => {
+        if (child.userData.isGrid || child.userData.isProxy) return;
+        child.visible = true;
+      });
+    } else {
+      s.isolate(selectedObj.uuid);
+      scene.traverse((child) => {
+        if (child.userData.isGrid || child.userData.isProxy) return;
+        if (child.uuid === selectedObj.uuid) {
+          child.visible = true;
+        } else {
+          let isDesc = false;
+          selectedObj.traverse((d) => { if (d.uuid === child.uuid) isDesc = true; });
+          child.visible = isDesc;
+        }
+      });
+    }
+    refresh();
+  };
+
+  const isIsolated = useSceneHierarchyStore((s) => s.isolatedId === selectedObj.uuid);
+
+  // ── Mesh info ──
   let meshInfo: React.ReactNode = null;
   if (selectedObj instanceof THREE.Mesh) {
     const geo = selectedObj.geometry;
     const verts = geo.attributes.position ? geo.attributes.position.count : 0;
     const tris = geo.index ? geo.index.count / 3 : verts / 3;
-    const matNames = (Array.isArray(selectedObj.material) ? selectedObj.material : [selectedObj.material])
+    const mat = selectedObj.material;
+    const matNames = (Array.isArray(mat) ? mat : [mat])
       .map((m) => m.name || 'unnamed')
       .join(', ');
+    const matType = (Array.isArray(mat) ? mat[0] : mat)?.type || '—';
+    const hasVertexColors = geo.attributes.color ? true : false;
+    const hasUVs = geo.attributes.uv ? true : false;
+    const hasNormals = geo.attributes.normal ? true : false;
+
+    // Get bounding box
+    geo.computeBoundingBox();
+    const bb = geo.boundingBox;
+    const size = bb ? new THREE.Vector3() : new THREE.Vector3();
+    if (bb) bb.getSize(size);
 
     meshInfo = (
       <div style={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 9 }}>
           <span style={{ color: 'var(--text-dim)' }}>Vertices</span>
-          <span style={{ color: 'var(--text-sec)', fontFamily: 'var(--font-mono)' }}>{verts}</span>
+          <span style={{ color: 'var(--text-sec)', fontFamily: 'var(--font-mono)' }}>{verts.toLocaleString()}</span>
         </div>
         <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 9 }}>
           <span style={{ color: 'var(--text-dim)' }}>Triangles</span>
-          <span style={{ color: 'var(--text-sec)', fontFamily: 'var(--font-mono)' }}>{Math.floor(tris)}</span>
+          <span style={{ color: 'var(--text-sec)', fontFamily: 'var(--font-mono)' }}>{Math.floor(tris).toLocaleString()}</span>
+        </div>
+        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 9 }}>
+          <span style={{ color: 'var(--text-dim)' }}>Size</span>
+          <span style={{ color: 'var(--text-sec)', fontFamily: 'var(--font-mono)' }}>
+            {size.x.toFixed(2)} x {size.y.toFixed(2)} x {size.z.toFixed(2)}
+          </span>
         </div>
         <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 9 }}>
           <span style={{ color: 'var(--text-dim)' }}>Material</span>
-          <span style={{ color: 'var(--text-sec)', fontFamily: 'var(--font-mono)', maxWidth: 100, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={matNames}>
+          <span style={{ color: 'var(--accent-bright)', fontFamily: 'var(--font-mono)', maxWidth: 110, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={matNames}>
             {matNames}
+          </span>
+        </div>
+        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 9 }}>
+          <span style={{ color: 'var(--text-dim)' }}>Mat. Type</span>
+          <span style={{ color: 'var(--text-sec)', fontFamily: 'var(--font-mono)' }}>{matType.replace('Material', '')}</span>
+        </div>
+        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 9 }}>
+          <span style={{ color: 'var(--text-dim)' }}>UVs</span>
+          <span style={{ color: hasUVs ? 'var(--success)' : 'var(--text-dim)', fontFamily: 'var(--font-mono)' }}>
+            {hasUVs ? 'Yes' : 'No'}
+          </span>
+        </div>
+        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 9 }}>
+          <span style={{ color: 'var(--text-dim)' }}>Normals</span>
+          <span style={{ color: hasNormals ? 'var(--success)' : 'var(--text-dim)', fontFamily: 'var(--font-mono)' }}>
+            {hasNormals ? 'Yes' : 'No'}
+          </span>
+        </div>
+        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 9 }}>
+          <span style={{ color: 'var(--text-dim)' }}>Vertex Colors</span>
+          <span style={{ color: hasVertexColors ? 'var(--success)' : 'var(--text-dim)', fontFamily: 'var(--font-mono)' }}>
+            {hasVertexColors ? 'Yes' : 'No'}
           </span>
         </div>
       </div>
     );
   }
 
-  // Light info
+  // ── Light info ──
   let lightInfo: React.ReactNode = null;
   if (selectedObj instanceof THREE.Light) {
     const lightColor = '#' + selectedObj.color.getHexString();
@@ -1034,11 +1180,12 @@ const ObjectPropertiesPanel: React.FC<{
     if ('intensity' in selectedObj) {
       intensity = (selectedObj as THREE.Light).intensity;
     }
+    const lightType = selectedObj.type.replace('Light', '');
     lightInfo = (
       <div style={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 9 }}>
           <span style={{ color: 'var(--text-dim)' }}>Type</span>
-          <span style={{ color: 'var(--text-sec)', fontFamily: 'var(--font-mono)' }}>{selectedObj.type.replace('Light', '')}</span>
+          <span style={{ color: '#f0a868', fontFamily: 'var(--font-mono)', fontWeight: 500 }}>{lightType}</span>
         </div>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 9 }}>
           <span style={{ color: 'var(--text-dim)' }}>Color</span>
@@ -1060,6 +1207,32 @@ const ObjectPropertiesPanel: React.FC<{
           <span style={{ color: 'var(--text-dim)' }}>Intensity</span>
           <span style={{ color: 'var(--text-sec)', fontFamily: 'var(--font-mono)' }}>{intensity.toFixed(3)}</span>
         </div>
+        {selectedObj instanceof THREE.PointLight && (
+          <>
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 9 }}>
+              <span style={{ color: 'var(--text-dim)' }}>Distance</span>
+              <span style={{ color: 'var(--text-sec)', fontFamily: 'var(--font-mono)' }}>
+                {selectedObj.distance === 0 ? 'Infinite' : selectedObj.distance.toFixed(2)}
+              </span>
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 9 }}>
+              <span style={{ color: 'var(--text-dim)' }}>Decay</span>
+              <span style={{ color: 'var(--text-sec)', fontFamily: 'var(--font-mono)' }}>{selectedObj.decay}</span>
+            </div>
+          </>
+        )}
+        {selectedObj instanceof THREE.SpotLight && (
+          <>
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 9 }}>
+              <span style={{ color: 'var(--text-dim)' }}>Angle</span>
+              <span style={{ color: 'var(--text-sec)', fontFamily: 'var(--font-mono)' }}>{toDeg(selectedObj.angle).toFixed(1)} deg</span>
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 9 }}>
+              <span style={{ color: 'var(--text-dim)' }}>Penumbra</span>
+              <span style={{ color: 'var(--text-sec)', fontFamily: 'var(--font-mono)' }}>{selectedObj.penumbra.toFixed(2)}</span>
+            </div>
+          </>
+        )}
       </div>
     );
   }
@@ -1068,26 +1241,29 @@ const ObjectPropertiesPanel: React.FC<{
     (c) => !c.userData.isGrid && !c.userData.isProxy,
   ).length;
 
+  const worldPos = new THREE.Vector3();
+  selectedObj.getWorldPosition(worldPos);
+
   return (
     <div
       style={{
         borderTop: '1px solid var(--border)',
         background: 'var(--bg-card)',
-        maxHeight: '45%',
+        maxHeight: '50%',
         overflowY: 'auto',
         flexShrink: 0,
       }}
     >
-      {/* Header */}
+      {/* Header with type badge and name */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '4px 6px', borderBottom: '1px solid var(--border)' }}>
-        <TypeIcon type={nodeType} />
-        <span style={{ fontSize: 10, color: 'var(--text)', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={selectedObj.name || selectedObj.type}>
+        <TypeIcon type={nodeType} isCollection={isColl} size={12} />
+        <span style={{ fontSize: 10, color: 'var(--text)', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontWeight: 500 }} title={selectedObj.name || selectedObj.type}>
           {selectedObj.name || selectedObj.type}
         </span>
         <span
           style={{
-            fontSize: 8,
-            color: TYPE_COLORS[nodeType],
+            fontSize: 7,
+            color: TYPE_COLORS[isColl ? 'collection' : nodeType],
             background: 'var(--bg-input)',
             border: '1px solid var(--border)',
             borderRadius: 3,
@@ -1096,21 +1272,60 @@ const ObjectPropertiesPanel: React.FC<{
             textTransform: 'uppercase',
             fontFamily: 'var(--font-mono)',
             flexShrink: 0,
+            fontWeight: 600,
           }}
         >
-          {nodeType}
+          {isColl ? 'Collection' : nodeType}
         </span>
+      </div>
+
+      {/* Quick Actions Row */}
+      <div style={{ display: 'flex', gap: 4, padding: '4px 6px', borderBottom: '1px solid var(--border)' }}>
+        <button
+          onClick={handleVisibleToggle}
+          style={{
+            flex: 1,
+            fontSize: 8,
+            padding: '2px 0',
+            borderRadius: 3,
+            cursor: 'pointer',
+            fontFamily: 'var(--font-mono)',
+            border: `1px solid ${isHidden ? 'var(--border)' : 'rgba(74, 222, 128, 0.3)'}`,
+            background: isHidden ? 'var(--bg-input)' : 'rgba(74, 222, 128, 0.1)',
+            color: isHidden ? 'var(--text-dim)' : 'var(--success)',
+            transition: 'all 0.1s',
+          }}
+        >
+          {isHidden ? 'Hidden' : 'Visible'}
+        </button>
+        <button
+          onClick={handleIsolate}
+          style={{
+            flex: 1,
+            fontSize: 8,
+            padding: '2px 0',
+            borderRadius: 3,
+            cursor: 'pointer',
+            fontFamily: 'var(--font-mono)',
+            border: `1px solid ${isIsolated ? 'rgba(167, 139, 250, 0.3)' : 'var(--border)'}`,
+            background: isIsolated ? 'rgba(167, 139, 250, 0.1)' : 'var(--bg-input)',
+            color: isIsolated ? 'var(--accent-bright)' : 'var(--text-dim)',
+            transition: 'all 0.1s',
+          }}
+        >
+          {isIsolated ? 'Isolated' : 'Isolate'}
+        </button>
       </div>
 
       {/* Transform */}
       <CollapsibleSection title="Transform" defaultOpen={true}>
         <Vec3Input
-          label="Pos"
+          label="Location"
           values={[selectedObj.position.x, selectedObj.position.y, selectedObj.position.z]}
           onChange={handlePositionChange}
         />
         <Vec3Input
-          label="Rot"
+          label="Rotation"
           values={[
             toDeg(selectedObj.rotation.x),
             toDeg(selectedObj.rotation.y),
@@ -1123,13 +1338,26 @@ const ObjectPropertiesPanel: React.FC<{
           values={[selectedObj.scale.x, selectedObj.scale.y, selectedObj.scale.z]}
           onChange={handleScaleChange}
         />
+        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 9, marginTop: 1 }}>
+          <span style={{ color: 'var(--text-dim)' }}>World Pos</span>
+          <span style={{ color: 'var(--text-dim)', fontFamily: 'var(--font-mono)', fontSize: 8 }}>
+            {worldPos.x.toFixed(2)}, {worldPos.y.toFixed(2)}, {worldPos.z.toFixed(2)}
+          </span>
+        </div>
       </CollapsibleSection>
 
-      {/* Info */}
-      <CollapsibleSection title="Info" defaultOpen={false}>
+      {/* Object Info */}
+      <CollapsibleSection title="Object Info" defaultOpen={true} icon={
+        <svg width="10" height="10" viewBox="0 0 16 16" fill="none" stroke="var(--text-dim)" strokeWidth="1.2">
+          <circle cx="8" cy="8" r="6" />
+          <path d="M8 5v3.5M8 10.5v.5" />
+        </svg>
+      }>
         <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 9 }}>
           <span style={{ color: 'var(--text-dim)' }}>Type</span>
-          <span style={{ color: 'var(--text-sec)', fontFamily: 'var(--font-mono)' }}>{nodeType}</span>
+          <span style={{ color: 'var(--text-sec)', fontFamily: 'var(--font-mono)', textTransform: 'capitalize' }}>
+            {isColl ? 'Collection' : nodeType}
+          </span>
         </div>
         {meshInfo}
         {lightInfo}
@@ -1137,24 +1365,11 @@ const ObjectPropertiesPanel: React.FC<{
           <span style={{ color: 'var(--text-dim)' }}>Children</span>
           <span style={{ color: 'var(--text-sec)', fontFamily: 'var(--font-mono)' }}>{childCount}</span>
         </div>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 9 }}>
-          <span style={{ color: 'var(--text-dim)' }}>Visible</span>
-          <button
-            onClick={handleVisibleToggle}
-            style={{
-              fontSize: 8,
-              background: isHidden ? 'var(--bg-input)' : 'rgba(74, 222, 128, 0.15)',
-              color: isHidden ? 'var(--text-dim)' : 'var(--success)',
-              border: `1px solid ${isHidden ? 'var(--border)' : 'rgba(74, 222, 128, 0.3)'}`,
-              borderRadius: 3,
-              padding: '0 6px',
-              lineHeight: '14px',
-              cursor: 'pointer',
-              fontFamily: 'var(--font-mono)',
-            }}
-          >
-            {isHidden ? 'Hidden' : 'Visible'}
-          </button>
+        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 9 }}>
+          <span style={{ color: 'var(--text-dim)' }}>UUID</span>
+          <span style={{ color: 'var(--text-dim)', fontFamily: 'var(--font-mono)', fontSize: 7, maxWidth: 120, overflow: 'hidden', textOverflow: 'ellipsis' }} title={selectedObj.uuid}>
+            {selectedObj.uuid.slice(0, 16)}...
+          </span>
         </div>
       </CollapsibleSection>
     </div>
@@ -1162,7 +1377,7 @@ const ObjectPropertiesPanel: React.FC<{
 };
 
 /* ═══════════════════════════════════════════════════════════════════
-   Main SceneHierarchy Component
+   Main SceneHierarchy Component (Blender-style)
    ═══════════════════════════════════════════════════════════════════ */
 
 export const SceneHierarchy: React.FC<SceneHierarchyProps> = ({ sceneRef }) => {
@@ -1173,6 +1388,7 @@ export const SceneHierarchy: React.FC<SceneHierarchyProps> = ({ sceneRef }) => {
   const searchQuery = useSceneHierarchyStore((s) => s.searchQuery);
   const setFilterType = useSceneHierarchyStore((s) => s.setFilterType);
   const setSearchQuery = useSceneHierarchyStore((s) => s.setSearchQuery);
+  const isolatedId = useSceneHierarchyStore((s) => s.isolatedId);
 
   const refresh = useCallback(() => setTick((n) => n + 1), []);
 
@@ -1182,6 +1398,19 @@ export const SceneHierarchy: React.FC<SceneHierarchyProps> = ({ sceneRef }) => {
     return buildTree(scene);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sceneRef.current, tick]);
+
+  // Count total objects
+  const objectCount = useMemo(() => {
+    let count = 0;
+    const countNodes = (nodes: HierarchyNode[]) => {
+      for (const n of nodes) {
+        count++;
+        countNodes(n.children);
+      }
+    };
+    countNodes(tree);
+    return count;
+  }, [tree]);
 
   // Expand all
   const handleExpandAll = useCallback(() => {
@@ -1209,6 +1438,7 @@ export const SceneHierarchy: React.FC<SceneHierarchyProps> = ({ sceneRef }) => {
     const n = countCollections(scene) + 1;
     const g = new THREE.Group();
     g.name = `Collection ${n}`;
+    g.userData._isCollection = true;
     scene.add(g);
     refresh();
   }, [sceneRef, refresh]);
@@ -1254,17 +1484,51 @@ export const SceneHierarchy: React.FC<SceneHierarchyProps> = ({ sceneRef }) => {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', position: 'relative' }}>
-      {/* Toolbar */}
-      <div style={{ padding: '4px 6px', borderBottom: '1px solid var(--border)', display: 'flex', flexDirection: 'column', gap: 4 }}>
-        {/* Filter buttons row */}
-        <div style={{ display: 'flex', gap: 2, alignItems: 'center', flexWrap: 'wrap' }}>
+      {/* ── Clean Toolbar ── */}
+      <div style={{ padding: '3px 4px', borderBottom: '1px solid var(--border)', display: 'flex', flexDirection: 'column', gap: 3 }}>
+        {/* Search bar — Blender-style at top */}
+        <div style={{ position: 'relative' }}>
+          <svg
+            width="10"
+            height="10"
+            viewBox="0 0 16 16"
+            fill="none"
+            stroke="var(--text-dim)"
+            strokeWidth="1.5"
+            style={{ position: 'absolute', left: 6, top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none' }}
+          >
+            <circle cx="6.5" cy="6.5" r="5" />
+            <path d="M10.5 10.5L15 15" />
+          </svg>
+          <input
+            type="text"
+            placeholder="Filter objects..."
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            style={{
+              width: '100%',
+              padding: '3px 6px 3px 22px',
+              fontSize: 10,
+              background: 'var(--bg-input)',
+              border: '1px solid var(--border)',
+              borderRadius: 'var(--radius-sm)',
+              color: 'var(--text)',
+              outline: 'none',
+              fontFamily: 'inherit',
+              boxSizing: 'border-box',
+            }}
+          />
+        </div>
+
+        {/* Filter buttons + action icons row */}
+        <div style={{ display: 'flex', gap: 1, alignItems: 'center' }}>
           {filterButtons.map((fb) => (
             <button
               key={fb.value}
               onClick={() => setFilterType(fb.value)}
               style={{
                 fontSize: 9,
-                padding: '1px 6px',
+                padding: '1px 5px',
                 borderRadius: 'var(--radius-sm)',
                 border: 'none',
                 cursor: 'pointer',
@@ -1283,118 +1547,98 @@ export const SceneHierarchy: React.FC<SceneHierarchyProps> = ({ sceneRef }) => {
 
           <div style={{ flex: 1 }} />
 
+          {/* Object count badge */}
+          <span style={{ fontSize: 8, color: 'var(--text-dim)', fontFamily: 'var(--font-mono)', marginRight: 2 }}>
+            {objectCount}
+          </span>
+
+          {/* Expand/Collapse All */}
+          <button
+            onClick={handleExpandAll}
+            title="Expand All"
+            style={{
+              width: 18, height: 18, display: 'flex', alignItems: 'center', justifyContent: 'center',
+              background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-dim)',
+              padding: 0, borderRadius: 2,
+            }}
+          >
+            <svg width="10" height="10" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3">
+              <path d="M4 2l8 6-8 6z" />
+            </svg>
+          </button>
+          <button
+            onClick={handleCollapseAll}
+            title="Collapse All"
+            style={{
+              width: 18, height: 18, display: 'flex', alignItems: 'center', justifyContent: 'center',
+              background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-dim)',
+              padding: 0, borderRadius: 2,
+            }}
+          >
+            <svg width="10" height="10" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3">
+              <path d="M2 6l12-4v12L2 10z" />
+            </svg>
+          </button>
+
           {/* New Collection */}
           <button
             onClick={handleNewCollection}
             title="New Collection"
             style={{
-              width: 20,
-              height: 20,
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              background: 'none',
-              border: '1px solid var(--border)',
-              borderRadius: 'var(--radius-sm)',
-              cursor: 'pointer',
-              color: 'var(--text-dim)',
-              padding: 0,
+              width: 18, height: 18, display: 'flex', alignItems: 'center', justifyContent: 'center',
+              background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-dim)',
+              padding: 0, borderRadius: 2,
             }}
           >
-            <svg width="11" height="11" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3">
+            <svg width="10" height="10" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3">
               <path d="M2 4h4l1.5-2h5L14 4h2a1 1 0 011 1v8a1 1 0 01-1 1H2a1 1 0 01-1-1V5a1 1 0 011-1z" />
               <path d="M8 7v4M6 9h4" />
             </svg>
           </button>
 
-          {/* Show All */}
-          <button
-            onClick={handleShowAll}
-            title="Show All"
-            style={{
-              width: 20,
-              height: 20,
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              background: 'none',
-              border: '1px solid var(--border)',
-              borderRadius: 'var(--radius-sm)',
-              cursor: 'pointer',
-              color: 'var(--text-dim)',
-              padding: 0,
-            }}
-          >
-            <svg width="11" height="11" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3">
-              <path d="M1 8s3-5 7-5 7 5 7 5-3 5-7 5-7-5-7-5z" />
-              <circle cx="8" cy="8" r="2" />
-            </svg>
-          </button>
+          {/* Show All (visible when isolated) */}
+          {isolatedId && (
+            <button
+              onClick={handleShowAll}
+              title="Show All (exit isolation)"
+              style={{
+                width: 18, height: 18, display: 'flex', alignItems: 'center', justifyContent: 'center',
+                background: 'rgba(167,139,250,0.15)', border: '1px solid rgba(167,139,250,0.3)',
+                cursor: 'pointer', color: 'var(--accent-bright)',
+                padding: 0, borderRadius: 2,
+              }}
+            >
+              <svg width="10" height="10" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3">
+                <path d="M1 8s3-5 7-5 7 5 7 5-3 5-7 5-7-5-7-5z" />
+                <circle cx="8" cy="8" r="2" />
+              </svg>
+            </button>
+          )}
 
           {/* Refresh */}
           <button
             onClick={refresh}
             title="Refresh"
             style={{
-              width: 20,
-              height: 20,
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              background: 'none',
-              border: '1px solid var(--border)',
-              borderRadius: 'var(--radius-sm)',
-              cursor: 'pointer',
-              color: 'var(--text-dim)',
-              padding: 0,
+              width: 18, height: 18, display: 'flex', alignItems: 'center', justifyContent: 'center',
+              background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-dim)',
+              padding: 0, borderRadius: 2,
             }}
           >
-            <svg width="11" height="11" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3">
+            <svg width="10" height="10" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3">
               <path d="M13.5 8A5.5 5.5 0 113 5.5" />
               <path d="M13.5 3v5h-5" />
             </svg>
           </button>
         </div>
-
-        {/* Search bar */}
-        <div style={{ position: 'relative' }}>
-          <svg
-            width="10"
-            height="10"
-            viewBox="0 0 16 16"
-            fill="none"
-            stroke="var(--text-dim)"
-            strokeWidth="1.5"
-            style={{ position: 'absolute', left: 6, top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none' }}
-          >
-            <circle cx="6.5" cy="6.5" r="5" />
-            <path d="M10.5 10.5L15 15" />
-          </svg>
-          <input
-            type="text"
-            placeholder="Search objects..."
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            style={{
-              width: '100%',
-              padding: '3px 6px 3px 22px',
-              fontSize: 10,
-              background: 'var(--bg-input)',
-              border: '1px solid var(--border)',
-              borderRadius: 'var(--radius-sm)',
-              color: 'var(--text)',
-              outline: 'none',
-              fontFamily: 'inherit',
-              boxSizing: 'border-box',
-            }}
-          />
-        </div>
       </div>
 
-      {/* Tree View */}
-      <div style={{ flex: 1, overflowY: 'auto', paddingTop: 2 }}>
+      {/* ── Tree View ── */}
+      <div style={{ flex: 1, overflowY: 'auto', paddingTop: 1 }}>
         {tree.length === 0 ? (
-          <div style={{ padding: 16, textAlign: 'center', fontSize: 10, color: 'var(--text-dim)' }}>No objects in scene</div>
+          <div style={{ padding: 16, textAlign: 'center', fontSize: 10, color: 'var(--text-dim)' }}>
+            No objects in scene
+          </div>
         ) : (
           tree.map((node) => (
             <TreeNode
@@ -1409,10 +1653,10 @@ export const SceneHierarchy: React.FC<SceneHierarchyProps> = ({ sceneRef }) => {
         )}
       </div>
 
-      {/* Properties Panel */}
+      {/* ── Properties Panel (bottom, shows on selection) ── */}
       <ObjectPropertiesPanel sceneRef={sceneRef} refresh={refresh} />
 
-      {/* Context Menu */}
+      {/* ── Context Menu ── */}
       {ctxMenu && (
         <ContextMenu
           state={ctxMenu}

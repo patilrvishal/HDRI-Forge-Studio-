@@ -1,0 +1,739 @@
+     1→import React, { useCallback, useRef, useState, useMemo, useEffect } from 'react';
+     2→import * as THREE from 'three';
+     3→import { useMaterialEditorStore } from '../../store/materialEditorStore';
+     4→import { useUIStore } from '../../store/uiStore';
+     5→import type { PBRMaterialState, TextureSlotKey } from '../../types/MaterialEditor';
+     6→import { TEXTURE_SLOT_LABELS } from '../../types/MaterialEditor';
+     7→import type { MaterialManager } from '../../three/MaterialManager';
+     8→
+     9→interface MaterialEditorPanelProps {
+    10→  materialManagerRef: React.MutableRefObject<MaterialManager | null>;
+    11→  sceneRef: React.MutableRefObject<THREE.Scene | null>;
+    12→}
+    13→
+    14→const TEXTURE_SLOTS: TextureSlotKey[] = [
+    15→  'map', 'normalMap', 'roughnessMap', 'metalnessMap',
+    16→  'emissiveMap', 'aoMap', 'bumpMap', 'alphaMap',
+    17→];
+    18→
+    19→interface PropRow {
+    20→  label: string;
+    21→  key: keyof PBRMaterialState;
+    22→  min: number;
+    23→  max: number;
+    24→  step: number;
+    25→  section: string;
+    26→  unit?: string;
+    27→  physicalOnly?: boolean;
+    28→  infinityKey?: boolean;
+    29→  isColor?: boolean;
+    30→  colorKey?: string;
+    31→  /** For iridescence thickness: 0 = min, 1 = max */
+    32→  iridTupleIndex?: 0 | 1;
+    33→  /** Show as integer (no decimals) */
+    34→  integerOnly?: boolean;
+    35→}
+    36→
+    37→const PROP_ROWS: PropRow[] = [
+    38→  // ── Surface ──────────────────────────────────────────────────
+    39→  { label: 'Base Color', key: 'color', min: 0, max: 0, step: 0, section: 'Surface', isColor: true, colorKey: 'color' },
+    40→  { label: 'Metallic', key: 'metalness', min: 0, max: 1, step: 0.001, section: 'Surface' },
+    41→  { label: 'Roughness', key: 'roughness', min: 0, max: 1, step: 0.001, section: 'Surface' },
+    42→  { label: 'Normal Scale', key: 'normalScale', min: 0, max: 2, step: 0.001, section: 'Surface' },
+    43→  { label: 'Bump Scale', key: 'bumpScale', min: 0, max: 2, step: 0.001, section: 'Surface' },
+    44→  { label: 'AO Intensity', key: 'aoMapIntensity', min: 0, max: 3, step: 0.001, section: 'Surface' },
+    45→
+    46→  // ── Specular ─────────────────────────────────────────────────
+    47→  { label: 'Specular Int.', key: 'specularIntensity', min: 0, max: 1, step: 0.001, section: 'Specular', physicalOnly: true },
+    48→  { label: 'Specular Color', key: 'specularColor', min: 0, max: 0, step: 0, section: 'Specular', physicalOnly: true, isColor: true, colorKey: 'specularColor' },
+    49→
+    50→  // ── Transmission ─────────────────────────────────────────────
+    51→  { label: 'Transmission', key: 'transmission', min: 0, max: 1, step: 0.001, section: 'Transmission', physicalOnly: true },
+    52→  { label: 'Trans. Rough.', key: 'transmissionRoughness', min: 0, max: 1, step: 0.001, section: 'Transmission', physicalOnly: true },
+    53→  { label: 'Thickness', key: 'thickness', min: 0, max: 10, step: 0.001, section: 'Transmission', physicalOnly: true },
+    54→  { label: 'IOR', key: 'ior', min: 1, max: 2.5, step: 0.001, section: 'Transmission', physicalOnly: true },
+    55→  { label: 'Atten. Color', key: 'attenuationColor', min: 0, max: 0, step: 0, section: 'Transmission', physicalOnly: true, isColor: true, colorKey: 'attenuationColor' },
+    56→  { label: 'Atten. Dist.', key: 'attenuationDistance', min: 0, max: 20, step: 0.001, section: 'Transmission', physicalOnly: true, infinityKey: true },
+    57→
+    58→  // ── Coat ─────────────────────────────────────────────────────
+    59→  { label: 'Clearcoat', key: 'clearcoat', min: 0, max: 1, step: 0.001, section: 'Coat', physicalOnly: true },
+    60→  { label: 'Clearcoat Rough.', key: 'clearcoatRoughness', min: 0, max: 1, step: 0.001, section: 'Coat', physicalOnly: true },
+    61→
+    62→  // ── Sheen ────────────────────────────────────────────────────
+    63→  { label: 'Sheen', key: 'sheen', min: 0, max: 1, step: 0.001, section: 'Sheen', physicalOnly: true },
+    64→  { label: 'Sheen Rough.', key: 'sheenRoughness', min: 0, max: 1, step: 0.001, section: 'Sheen', physicalOnly: true },
+    65→  { label: 'Sheen Color', key: 'sheenColor', min: 0, max: 0, step: 0, section: 'Sheen', physicalOnly: true, isColor: true, colorKey: 'sheenColor' },
+    66→
+    67→  // ── Iridescence ──────────────────────────────────────────────
+    68→  { label: 'Iridescence', key: 'iridescence', min: 0, max: 1, step: 0.001, section: 'Iridescence', physicalOnly: true },
+    69→  { label: 'Irid. IOR', key: 'iridescenceIOR', min: 1, max: 2.333, step: 0.001, section: 'Iridescence', physicalOnly: true },
+    70→  { label: 'Irid. Thick. Min', key: 'iridescenceThicknessRange', min: 100, max: 800, step: 1, section: 'Iridescence', physicalOnly: true, iridTupleIndex: 0, integerOnly: true },
+    71→  { label: 'Irid. Thick. Max', key: 'iridescenceThicknessRange', min: 100, max: 800, step: 1, section: 'Iridescence', physicalOnly: true, iridTupleIndex: 1, integerOnly: true },
+    72→
+    73→  // ── Emission ─────────────────────────────────────────────────
+    74→  { label: 'Emissive Color', key: 'emissive', min: 0, max: 0, step: 0, section: 'Emission', isColor: true, colorKey: 'emissive' },
+    75→  { label: 'Emissive Int.', key: 'emissiveIntensity', min: 0, max: 5, step: 0.001, section: 'Emission' },
+    76→
+    77→  // ── Settings ─────────────────────────────────────────────────
+    78→  { label: 'Opacity', key: 'opacity', min: 0, max: 1, step: 0.001, section: 'Settings' },
+    79→];
+    80→
+    81→interface SectionDef {
+    82→  name: string;
+    83→  physicalOnly?: boolean;
+    84→  defaultExpanded?: boolean;
+    85→}
+    86→
+    87→const SECTIONS: SectionDef[] = [
+    88→  { name: 'Surface', defaultExpanded: true },
+    89→  { name: 'Specular', physicalOnly: true },
+    90→  { name: 'Transmission', physicalOnly: true },
+    91→  { name: 'Coat', physicalOnly: true },
+    92→  { name: 'Sheen', physicalOnly: true },
+    93→  { name: 'Iridescence', physicalOnly: true },
+    94→  { name: 'Emission' },
+    95→  { name: 'Settings' },
+    96→  { name: 'Texture Maps' },
+    97→];
+    98→
+    99→const NUM_INPUT_STYLE: React.CSSProperties = {
+   100→  width: 52,
+   101→  height: 20,
+   102→  background: 'var(--bg-input)',
+   103→  border: '1px solid var(--border)',
+   104→  borderRadius: 3,
+   105→  color: 'var(--text-sec)',
+   106→  fontSize: 9,
+   107→  fontFamily: 'var(--font-mono)',
+   108→  padding: '0 4px',
+   109→  outline: 'none',
+   110→  flexShrink: 0,
+   111→  textAlign: 'right' as const,
+   112→};
+   113→
+   114→const NUM_INPUT_FOCUS_STYLE: React.CSSProperties = {
+   115→  ...NUM_INPUT_STYLE,
+   116→  borderColor: 'var(--accent)',
+   117→};
+   118→
+   119→const MaterialEditorPanel: React.FC<MaterialEditorPanelProps> = ({ materialManagerRef, sceneRef }) => {
+   120→  const materials = useMaterialEditorStore((s) => s.materials);
+   121→  const selectedId = useMaterialEditorStore((s) => s.selectedMaterialId);
+   122→  const selectMaterial = useMaterialEditorStore((s) => s.selectMaterial);
+   123→  const updateMaterial = useMaterialEditorStore((s) => s.updateMaterial);
+   124→  const updateTextureSlot = useMaterialEditorStore((s) => s.updateTextureSlot);
+   125→  const removeTextureSlot = useMaterialEditorStore((s) => s.removeTextureSlot);
+   126→
+   127→  const [searchOpen, setSearchOpen] = useState(false);
+   128→  const [search, setSearch] = useState('');
+   129→  const [focusedNumInput, setFocusedNumInput] = useState<string | null>(null);
+   130→  const [collapsedSections, setCollapsedSections] = useState<Set<string>>(() => {
+   131→    const set = new Set<string>();
+   132→    for (const s of SECTIONS) {
+   133→      if (!s.defaultExpanded) set.add(s.name);
+   134→    }
+   135→    return set;
+   136→  });
+   137→  const textureInputRefs = useRef<Record<string, HTMLInputElement | null>>({});
+   138→  const searchInputRef = useRef<HTMLInputElement>(null);
+   139→
+   140→  const selected = materials.find((m) => m.id === selectedId) ?? null;
+   141→
+   142→  // Focus search input when opened
+   143→  useEffect(() => {
+   144→    if (searchOpen && searchInputRef.current) {
+   145→      searchInputRef.current.focus();
+   146→    }
+   147→  }, [searchOpen]);
+   148→
+   149→  // Filter materials by search
+   150→  const filteredMaterials = useMemo(() => {
+   151→    if (!search.trim()) return materials;
+   152→    const q = search.toLowerCase();
+   153→    return materials.filter(
+   154→      (m) => m.name.toLowerCase().includes(q) || m.meshNames.some((n) => n.toLowerCase().includes(q)),
+   155→    );
+   156→  }, [materials, search]);
+   157→
+   158→  // Physical keys that auto-set isPhysical
+   159→  const physicalKeys = useMemo(() => new Set<string>([
+   160→    'clearcoat', 'clearcoatRoughness', 'transmission', 'transmissionRoughness',
+   161→    'thickness', 'ior', 'sheen', 'sheenRoughness', 'sheenColor',
+   162→    'iridescence', 'iridescenceIOR', 'iridescenceThicknessRange',
+   163→    'attenuationColor', 'attenuationDistance', 'specularIntensity', 'specularColor',
+   164→  ]), []);
+   165→
+   166→  const handlePropChange = useCallback(
+   167→    (key: keyof PBRMaterialState, value: number | string | boolean, iridTupleIndex?: 0 | 1) => {
+   168→      if (!selectedId) return;
+   169→
+   170→      const updates: Partial<PBRMaterialState> = {};
+   171→
+   172→      // Handle iridescence thickness range tuple specially
+   173→      if (key === 'iridescenceThicknessRange' && iridTupleIndex !== undefined) {
+   174→        const cur = useMaterialEditorStore.getState().materials.find((m) => m.id === selectedId);
+   175→        const existing: [number, number] = cur?.iridescenceThicknessRange ?? [100, 400];
+   176→        if (iridTupleIndex === 0) {
+   177→          updates.iridescenceThicknessRange = [value as number, existing[1]];
+   178→        } else {
+   179→          updates.iridescenceThicknessRange = [existing[0], value as number];
+   180→        }
+   181→      } else {
+   182→        (updates as any)[key] = value;
+   183→      }
+   184→
+   185→      // Auto-set isPhysical for physical keys
+   186→      if (physicalKeys.has(key as string)) {
+   187→        updates.isPhysical = true;
+   188→      }
+   189→      // Auto-enable transparent when transmission > 0
+   190→      if (key === 'transmission' && typeof value === 'number' && value > 0) {
+   191→        updates.transparent = true;
+   192→      }
+   193→
+   194→      updateMaterial(selectedId, updates);
+   195→
+   196→      const mm = materialManagerRef.current;
+   197→      const scene = sceneRef.current;
+   198→      if (mm && scene) {
+   199→        const updated = useMaterialEditorStore.getState().materials.find((m) => m.id === selectedId);
+   200→        if (updated) mm.applyMaterialState(updated, scene);
+   201→      }
+   202→    },
+   203→    [selectedId, updateMaterial, materialManagerRef, sceneRef, physicalKeys],
+   204→  );
+   205→
+   206→  const handleTextureUpload = useCallback((slotKey: TextureSlotKey) => {
+   207→    textureInputRefs.current[slotKey]?.click();
+   208→  }, []);
+   209→
+   210→  const handleTextureFileChange = useCallback(
+   211→    (slotKey: TextureSlotKey, e: React.ChangeEvent<HTMLInputElement>) => {
+   212→      const file = e.target.files?.[0];
+   213→      if (!file || !selectedId) return;
+   214→
+   215→      const reader = new FileReader();
+   216→      reader.onload = () => {
+   217→        const dataUrl = reader.result as string;
+   218→        updateTextureSlot(selectedId, slotKey, dataUrl, file.name);
+   219→
+   220→        const mm = materialManagerRef.current;
+   221→        const scene = sceneRef.current;
+   222→        if (mm && scene) {
+   223→          const updated = useMaterialEditorStore.getState().materials.find((m) => m.id === selectedId);
+   224→          if (updated) mm.applyMaterialState(updated, scene);
+   225→        }
+   226→      };
+   227→      reader.readAsDataURL(file);
+   228→      e.target.value = '';
+   229→    },
+   230→    [selectedId, updateTextureSlot, materialManagerRef, sceneRef],
+   231→  );
+   232→
+   233→  const handleRemoveTexture = useCallback(
+   234→    (slotKey: TextureSlotKey) => {
+   235→      if (!selectedId) return;
+   236→      removeTextureSlot(selectedId, slotKey);
+   237→    },
+   238→    [selectedId, removeTextureSlot],
+   239→  );
+   240→
+   241→  const toggleSection = useCallback((section: string) => {
+   242→    setCollapsedSections((prev) => {
+   243→      const next = new Set(prev);
+   244→      if (next.has(section)) next.delete(section);
+   245→      else next.add(section);
+   246→      return next;
+   247→    });
+   248→  }, []);
+   249→
+   250→  const handleSearchSelect = useCallback(
+   251→    (id: string) => {
+   252→      selectMaterial(id);
+   253→      setSearch('');
+   254→      setSearchOpen(false);
+   255→    },
+   256→    [selectMaterial],
+   257→  );
+   258→
+   259→  // Group props by section
+   260→  const propsBySection = useMemo(() => {
+   261→    const map: Record<string, PropRow[]> = {};
+   262→    for (const row of PROP_ROWS) {
+   263→      if (!map[row.section]) map[row.section] = [];
+   264→      map[row.section].push(row);
+   265→    }
+   266→    return map;
+   267→  }, []);
+   268→
+   269→  // Determine visible sections based on physical mode
+   270→  const visibleSections = useMemo(() => {
+   271→    if (!selected) return SECTIONS;
+   272→    const phys = selected.isPhysical;
+   273→    return SECTIONS.filter((s) => {
+   274→      if (s.name === 'Texture Maps') return true;
+   275→      if (s.physicalOnly) return phys;
+   276→      return true;
+   277→    });
+   278→  }, [selected]);
+   279→
+   280→  /** Format numeric value for display: 3 decimal places, ∞ for Infinity, integer for irid */
+   281→  const formatNumValue = useCallback((rawVal: number | undefined, row: PropRow): string => {
+   282→    if (rawVal == null || Number.isNaN(rawVal)) return '0.000';
+   283→    if (row.infinityKey && (rawVal === Infinity || rawVal >= 20)) return '\u221e';
+   284→    if (row.integerOnly) return Math.round(rawVal).toString();
+   285→    return rawVal.toFixed(3);
+   286→  }, []);
+   287→
+   288→  /** Get safe numeric value for slider */
+   289→  const getSafeNum = (rawVal: number | undefined, min: number): number => {
+   290→    if (rawVal != null && !Number.isNaN(rawVal)) return rawVal;
+   291→    return min;
+   292→  };
+   293→
+   294→  /** Handle numeric input blur: clamp and handle NaN */
+   295→  const handleNumBlur = useCallback(
+   296→    (row: PropRow, inputValue: string) => {
+   297→      const v = parseFloat(inputValue);
+   298→      if (isNaN(v) || v == null) {
+   299→        handlePropChange(row.key, row.min, row.iridTupleIndex);
+   300→        return;
+   301→      }
+   302→      const clamped = Math.max(row.min, Math.min(row.max, v));
+   303→      handlePropChange(row.key, clamped, row.iridTupleIndex);
+   304→    },
+   305→    [handlePropChange],
+   306→  );
+   307→
+   308→  /** Handle numeric input change: live update */
+   309→  const handleNumChange = useCallback(
+   310→    (row: PropRow, inputValue: string) => {
+   311→      const v = parseFloat(inputValue);
+   312→      if (!isNaN(v)) {
+   313→        handlePropChange(row.key, v, row.iridTupleIndex);
+   314→      }
+   315→    },
+   316→    [handlePropChange],
+   317→  );
+   318→
+   319→  // Chevron SVG (8x8)
+   320→  const chevronSvg = (expanded: boolean) => (
+   321→    <svg
+   322→      width="8" height="8" viewBox="0 0 8 8" fill="var(--text-dim)"
+   323→      style={{ transform: expanded ? 'rotate(0)' : 'rotate(-90deg)', transition: 'transform 0.15s ease', flexShrink: 0 }}
+   324→    >
+   325→      <path d="M1 1l6 3-6 3z" />
+   326→    </svg>
+   327→  );
+   328→
+   329→  // PHYSICAL badge
+   330→  const physicalBadge = (
+   331→    <span style={{
+   332→      fontSize: 7, padding: '0 4px', borderRadius: 2, marginLeft: 'auto',
+   333→      background: 'rgba(167, 139, 250, 0.12)', color: 'var(--accent-bright)',
+   334→      letterSpacing: '0.4px', fontWeight: 600,
+   335→    }}>
+   336→      PHYSICAL
+   337→    </span>
+   338→  );
+   339→
+   340→  // Render a slider property row (Blender-style: label | slider | numeric input)
+   341→  const renderSliderRow = (row: PropRow) => {
+   342→    if (!selected) return null;
+   343→
+   344→    const inputId = `${row.key}-${row.iridTupleIndex ?? ''}`;
+   345→
+   346→    // For iridescence thickness, extract the tuple element
+   347→    let rawVal: number;
+   348→    if (row.iridTupleIndex !== undefined) {
+   349→      rawVal = (selected.iridescenceThicknessRange?.[row.iridTupleIndex]) ?? row.min;
+   350→    } else {
+   351→      rawVal = selected[row.key] as number;
+   352→    }
+   353→
+   354→    const safeVal = getSafeNum(rawVal, row.min);
+   355→    const displayVal = formatNumValue(rawVal, row);
+   356→
+   357→    // For infinity key, slider value is clamped to 20
+   358→    const sliderVal = row.infinityKey && (rawVal === Infinity || rawVal >= 20) ? row.max : safeVal;
+   359→
+   360→    return (
+   361→      <div key={inputId} className="mat-param-row">
+   362→        <label className="mat-param-label">{row.label}</label>
+   363→        <input
+   364→          type="range"
+   365→          min={row.min}
+   366→          max={row.max}
+   367→          step={row.step}
+   368→          value={sliderVal}
+   369→          onChange={(e) => handlePropChange(row.key, parseFloat(e.target.value), row.iridTupleIndex)}
+   370→          style={{ flex: 1, height: 4, cursor: 'pointer', accentColor: 'var(--accent)' }}
+   371→        />
+   372→        <input
+   373→          type="number"
+   374→          min={row.min}
+   375→          max={row.max}
+   376→          step={row.step}
+   377→          value={displayVal}
+   378→          onChange={(e) => handleNumChange(row, e.target.value)}
+   379→          onBlur={(e) => handleNumBlur(row, e.target.value)}
+   380→          onFocus={() => setFocusedNumInput(inputId)}
+   381→          onMouseEnter={(e) => {
+   382→            (e.currentTarget as HTMLInputElement).style.borderColor = 'var(--accent)';
+   383→          }}
+   384→          onMouseLeave={(e) => {
+   385→            if (focusedNumInput !== inputId) {
+   386→              (e.currentTarget as HTMLInputElement).style.borderColor = 'var(--border)';
+   387→            }
+   388→          }}
+   389→          style={focusedNumInput === inputId ? NUM_INPUT_FOCUS_STYLE : NUM_INPUT_STYLE}
+   390→        />
+   391→      </div>
+   392→    );
+   393→  };
+   394→
+   395→  // Render a color property row (Blender-style: label | color swatch | hex display)
+   396→  const renderColorRow = (row: PropRow) => {
+   397→    if (!selected || !row.colorKey) return null;
+   398→    const hexVal = (selected[row.colorKey] as string) ?? '#000000';
+   399→
+   400→    return (
+   401→      <div key={row.colorKey} className="mat-param-row">
+   402→        <label className="mat-param-label">{row.label}</label>
+   403→        <input
+   404→          type="color"
+   405→          value={hexVal}
+   406→          onChange={(e) => handlePropChange(row.key, e.target.value)}
+   407→          style={{
+   408→            width: 32, height: 18, border: '1px solid var(--border)',
+   409→            borderRadius: 3, cursor: 'pointer', padding: 0, flexShrink: 0,
+   410→          }}
+   411→        />
+   412→        <span style={{
+   413→          fontSize: 9, color: 'var(--text-dim)', fontFamily: 'var(--font-mono)', flex: 1,
+   414→        }}>
+   415→          {hexVal}
+   416→        </span>
+   417→      </div>
+   418→    );
+   419→  };
+   420→
+   421→  // Render a section header
+   422→  const renderSectionHeader = (sectionName: string, isPhysical?: boolean) => {
+   423→    const expanded = !collapsedSections.has(sectionName);
+   424→    return (
+   425→      <div
+   426→        className="mat-section-title"
+   427→        style={{ cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4, marginBottom: 0 }}
+   428→        onClick={() => toggleSection(sectionName)}
+   429→      >
+   430→        {chevronSvg(expanded)}
+   431→        {sectionName}
+   432→        {isPhysical && physicalBadge}
+   433→      </div>
+   434→    );
+   435→  };
+   436→
+   437→  return (
+   438→    <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+   439→      {/* ── Header with search toggle ──────────────────────────── */}
+   440→      <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 8px', borderBottom: '1px solid var(--border)' }}>
+   441→        <span style={{ fontSize: 9, fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.8, color: 'var(--text-dim)', flex: 1 }}>
+   442→          Materials ({materials.length})
+   443→        </span>
+   444→        {selected && (
+   445→          <div
+   446→            style={{
+   447→              fontSize: 8,
+   448→              padding: '1px 5px',
+   449→              borderRadius: 3,
+   450→              background: selected.isPhysical ? 'rgba(167, 139, 250, 0.15)' : 'var(--bg-input)',
+   451→              color: selected.isPhysical ? 'var(--accent-bright)' : 'var(--text-dim)',
+   452→              border: `1px solid ${selected.isPhysical ? 'rgba(167, 139, 250, 0.3)' : 'var(--border)'}`,
+   453→              letterSpacing: '0.3px',
+   454→            }}
+   455→          >
+   456→            {selected.isPhysical ? 'PHYSICAL' : 'STANDARD'}
+   457→          </div>
+   458→        )}
+   459→        <button
+   460→          className={`btn-icon btn-glow ${searchOpen ? 'active' : ''}`}
+   461→          style={{ width: 22, height: 22 }}
+   462→          onClick={() => setSearchOpen(!searchOpen)}
+   463→          title="Search materials"
+   464→          aria-label="Search materials"
+   465→        >
+   466→          <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
+   467→            <circle cx="6.5" cy="6.5" r="5" />
+   468→            <path d="M10.5 10.5L15 15" />
+   469→          </svg>
+   470→        </button>
+   471→      </div>
+   472→
+   473→      {/* ── Search bar ─────────────────────────────────────────── */}
+   474→      {searchOpen && (
+   475→        <div style={{ padding: '4px 8px', borderBottom: '1px solid var(--border)' }}>
+   476→          <div style={{ position: 'relative' }}>
+   477→            <svg
+   478→              width="11" height="11" viewBox="0 0 16 16" fill="none" stroke="var(--text-dim)" strokeWidth="1.5"
+   479→              style={{ position: 'absolute', left: 7, top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none' }}
+   480→            >
+   481→              <circle cx="6.5" cy="6.5" r="5" />
+   482→              <path d="M10.5 10.5L15 15" />
+   483→            </svg>
+   484→            <input
+   485→              ref={searchInputRef}
+   486→              className="mat-search-input"
+   487→              type="text"
+   488→              placeholder="Search materials..."
+   489→              value={search}
+   490→              onChange={(e) => setSearch(e.target.value)}
+   491→            />
+   492→          </div>
+   493→          {search && (
+   494→            <div className="mat-search-results">
+   495→              {filteredMaterials.length === 0 && (
+   496→                <div style={{ padding: '8px 10px', fontSize: 10, color: 'var(--text-dim)' }}>
+   497→                  No materials found
+   498→                </div>
+   499→              )}
+   500→              {filteredMaterials.map((mat) => (
+   501→                <button
+   502→                  key={mat.id}
+   503→                  className="mat-search-result-item"
+   504→                  onClick={() => handleSearchSelect(mat.id)}
+   505→                >
+   506→                  <div
+   507→                    style={{
+   508→                      width: 14, height: 14, borderRadius: 2,
+   509→                      background: mat.color, flexShrink: 0,
+   510→                      border: '1px solid var(--border)',
+   511→                    }}
+   512→                  />
+   513→                  <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+   514→                    {mat.name}
+   515→                  </span>
+   516→                  <span style={{ fontSize: 9, color: 'var(--text-dim)', flexShrink: 0 }}>
+   517→                    {mat.meshNames[0] ?? ''}
+   518→                  </span>
+   519→                </button>
+   520→              ))}
+   521→            </div>
+   522→          )}
+   523→        </div>
+   524→      )}
+   525→
+   526→      {/* ── Selected material chip ─────────────────────────────── */}
+   527→      {selected && (
+   528→        <div className="mat-selected-chip">
+   529→          <div
+   530→            style={{
+   531→              width: 12, height: 12, borderRadius: 2,
+   532→              background: selected.color, flexShrink: 0,
+   533→              border: '1px solid var(--border)',
+   534→            }}
+   535→          />
+   536→          <span className="mat-selected-chip-name">{selected.name}</span>
+   537→          <button
+   538→            className="panel-close-btn"
+   539→            onClick={() => selectMaterial(null)}
+   540→            title="Deselect material"
+   541→            aria-label="Deselect material"
+   542→          >
+   543→            <svg width="8" height="8" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="2">
+   544→              <path d="M2 2l8 8M10 2L2 10" />
+   545→            </svg>
+   546→          </button>
+   547→        </div>
+   548→      )}
+   549→
+   550→      {/* ── Empty state ────────────────────────────────────────── */}
+   551→      {!selected && (
+   552→        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: 24, textAlign: 'center' }}>
+   553→          <div style={{
+   554→            width: 36, height: 36, borderRadius: '50%',
+   555→            background: 'var(--bg-card)', border: '1px solid var(--border)',
+   556→            display: 'flex', alignItems: 'center', justifyContent: 'center',
+   557→            marginBottom: 10,
+   558→          }}>
+   559→            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="var(--text-dim)" strokeWidth="1.2">
+   560→              <path d="M8 1v5M8 10v5M1 8h5M10 8h5" />
+   561→              <circle cx="8" cy="8" r="2" />
+   562→            </svg>
+   563→          </div>
+   564→          <p style={{ fontSize: 10, color: 'var(--text-dim)', lineHeight: 1.5 }}>
+   565→            Click on the model surface to select a material, or use search above
+   566→          </p>
+   567→        </div>
+   568→      )}
+   569→
+   570→      {/* ── Material properties ────────────────────────────────── */}
+   571→      {selected && (
+   572→        <div style={{ flex: 1, overflowY: 'auto', padding: '8px 10px' }}>
+   573→          {/* Material name + meshes */}
+   574→          <div style={{ marginBottom: 10 }}>
+   575→            <input
+   576→              type="text"
+   577→              value={selected.name}
+   578→              onChange={(e) => handlePropChange('name', e.target.value)}
+   579→              style={{
+   580→                fontSize: 11, fontWeight: 600, color: 'var(--text)',
+   581→                background: 'transparent', border: '1px solid transparent',
+   582→                borderRadius: 3, padding: '1px 4px', width: '100%',
+   583→                outline: 'none', fontFamily: 'inherit',
+   584→              }}
+   585→              onMouseEnter={(e) => { (e.currentTarget as HTMLInputElement).style.borderColor = 'var(--border)'; }}
+   586→              onMouseLeave={(e) => { (e.currentTarget as HTMLInputElement).style.borderColor = 'transparent'; }}
+   587→            />
+   588→            <div style={{ fontSize: 9, color: 'var(--text-dim)', marginTop: 1, paddingLeft: 4 }}>
+   589→              {selected.meshNames.join(', ')}
+   590→            </div>
+   591→          </div>
+   592→
+   593→          {/* ── Property sections ─────────────────────────────── */}
+   594→          {visibleSections.map((section) => {
+   595→            const sectionName = section.name;
+   596→
+   597→            // ── Texture Maps (special rendering) ──────────────
+   598→            if (sectionName === 'Texture Maps') {
+   599→              const expanded = !collapsedSections.has(sectionName);
+   600→              return (
+   601→                <div key={sectionName} style={{ marginBottom: 8 }}>
+   602→                  {renderSectionHeader(sectionName, false)}
+   603→                  {expanded && (
+   604→                    <div style={{ display: 'flex', flexDirection: 'column', gap: 3, marginTop: 4 }}>
+   605→                      {TEXTURE_SLOTS.map((slotKey) => {
+   606→                        const slot = selected[slotKey];
+   607→                        return (
+   608→                          <div
+   609→                            key={slotKey}
+   610→                            style={{
+   611→                              display: 'flex', alignItems: 'center', gap: 4,
+   612→                              padding: '3px 4px', borderRadius: 'var(--radius-sm)',
+   613→                              background: slot.enabled ? 'var(--bg-card)' : 'transparent',
+   614→                              border: `1px solid ${slot.enabled ? 'var(--border-light)' : 'var(--border)'}`,
+   615→                            }}
+   616→                          >
+   617→                            <label className="mat-param-label" style={{ fontSize: 9 }}>
+   618→                              {TEXTURE_SLOT_LABELS[slotKey]}
+   619→                            </label>
+   620→                            {slot.enabled && slot.dataUrl ? (
+   621→                              <>
+   622→                                <div
+   623→                                  style={{
+   624→                                    width: 22, height: 22, borderRadius: 3,
+   625→                                    background: `url(${slot.dataUrl}) center/cover`,
+   626→                                    border: '1px solid var(--border)', flexShrink: 0,
+   627→                                  }}
+   628→                                />
+   629→                                <span
+   630→                                  style={{
+   631→                                    flex: 1, fontSize: 8, color: 'var(--text-dim)',
+   632→                                    overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+   633→                                  }}
+   634→                                  title={slot.fileName}
+   635→                                >
+   636→                                  {slot.fileName}
+   637→                                </span>
+   638→                                <button
+   639→                                  onClick={() => handleRemoveTexture(slotKey)}
+   640→                                  style={{
+   641→                                    fontSize: 8, color: 'var(--danger)', background: 'none',
+   642→                                    border: 'none', cursor: 'pointer', padding: '1px 3px', flexShrink: 0,
+   643→                                  }}
+   644→                                >
+   645→                                  <svg width="8" height="8" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="2">
+   646→                                    <path d="M2 2l8 8M10 2L2 10" />
+   647→                                  </svg>
+   648→                                </button>
+   649→                              </>
+   650→                            ) : (
+   651→                              <>
+   652→                                <button
+   653→                                  onClick={() => handleTextureUpload(slotKey)}
+   654→                                  style={{
+   655→                                    fontSize: 8, color: 'var(--text-dim)', background: 'var(--bg-input)',
+   656→                                    border: '1px solid var(--border)', borderRadius: 3, cursor: 'pointer',
+   657→                                    padding: '2px 6px', flexShrink: 0,
+   658→                                  }}
+   659→                                >
+   660→                                  + Load
+   661→                                </button>
+   662→                                <span style={{ fontSize: 8, color: 'var(--text-dim)' }}>None</span>
+   663→                              </>
+   664→                            )}
+   665→                            <input
+   666→                              ref={(el) => { textureInputRefs.current[slotKey] = el; }}
+   667→                              type="file" accept="image/*"
+   668→                              style={{ display: 'none' }}
+   669→                              onChange={(e) => handleTextureFileChange(slotKey, e)}
+   670→                            />
+   671→                          </div>
+   672→                        );
+   673→                      })}
+   674→                    </div>
+   675→                  )}
+   676→                </div>
+   677→              );
+   678→            }
+   679→
+   680→            // ── Settings section (sliders + checkboxes) ────────
+   681→            if (sectionName === 'Settings') {
+   682→              const rows = propsBySection[sectionName];
+   683→              if (!rows) return null;
+   684→              const expanded = !collapsedSections.has(sectionName);
+   685→              return (
+   686→                <div key={sectionName} style={{ marginBottom: 8 }}>
+   687→                  {renderSectionHeader(sectionName, false)}
+   688→                  {expanded && (
+   689→                    <div style={{ display: 'flex', flexDirection: 'column', gap: 4, marginTop: 4 }}>
+   690→                      {rows.map((row) => {
+   691→                        if (row.isColor) return renderColorRow(row);
+   692→                        return renderSliderRow(row);
+   693→                      })}
+   694→                      {/* Checkboxes */}
+   695→                      {(['transparent', 'doubleSided', 'flatShading'] as const).map((key) => (
+   696→                        <div key={key} className="mat-param-row">
+   697→                          <label className="mat-param-label" style={{ flex: 1 }}>
+   698→                            {key === 'doubleSided' ? 'Double Sided' : key === 'flatShading' ? 'Flat Shading' : 'Transparent'}
+   699→                          </label>
+   700→                          <input
+   701→                            type="checkbox"
+   702→                            checked={selected[key] as boolean}
+   703→                            onChange={(e) => handlePropChange(key, e.target.checked)}
+   704→                            style={{ width: 14, height: 14, cursor: 'pointer', flexShrink: 0, accentColor: 'var(--accent)' }}
+   705→                          />
+   706→                        </div>
+   707→                      ))}
+   708→                    </div>
+   709→                  )}
+   710→                </div>
+   711→              );
+   712→            }
+   713→
+   714→            // ── Standard property sections ────────────────────
+   715→            const rows = propsBySection[sectionName];
+   716→            if (!rows || rows.length === 0) return null;
+   717→            const expanded = !collapsedSections.has(sectionName);
+   718→
+   719→            return (
+   720→              <div key={sectionName} style={{ marginBottom: 8 }}>
+   721→                {renderSectionHeader(sectionName, section.physicalOnly)}
+   722→                {expanded && (
+   723→                  <div style={{ display: 'flex', flexDirection: 'column', gap: 4, marginTop: 4 }}>
+   724→                    {rows.map((row) => {
+   725→                      if (row.isColor) return renderColorRow(row);
+   726→                      return renderSliderRow(row);
+   727→                    })}
+   728→                  </div>
+   729→                )}
+   730→              </div>
+   731→            );
+   732→          })}
+   733→        </div>
+   734→      )}
+   735→    </div>
+   736→  );
+   737→};
+   738→
+   739→export { MaterialEditorPanel };

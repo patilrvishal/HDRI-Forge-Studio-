@@ -13,7 +13,7 @@ interface MaterialEditorPanelProps {
 
 const TEXTURE_SLOTS: TextureSlotKey[] = [
   'map', 'normalMap', 'roughnessMap', 'metalnessMap',
-  'emissiveMap', 'aoMap', 'bumpMap', 'alphaMap',
+  'emissiveMap', 'aoMap', 'bumpMap', 'alphaMap', 'displacementMap',
 ];
 
 interface PropRow {
@@ -59,10 +59,10 @@ const PROP_ROWS: PropRow[] = [
   { label: 'Clearcoat', key: 'clearcoat', min: 0, max: 1, step: 0.001, section: 'Coat', physicalOnly: true },
   { label: 'Clearcoat Rough.', key: 'clearcoatRoughness', min: 0, max: 1, step: 0.001, section: 'Coat', physicalOnly: true },
 
-  // ── Sheen ────────────────────────────────────────────────────
-  { label: 'Sheen', key: 'sheen', min: 0, max: 1, step: 0.001, section: 'Sheen', physicalOnly: true },
-  { label: 'Sheen Rough.', key: 'sheenRoughness', min: 0, max: 1, step: 0.001, section: 'Sheen', physicalOnly: true },
-  { label: 'Sheen Color', key: 'sheenColor', min: 0, max: 0, step: 0, section: 'Sheen', physicalOnly: true, isColor: true, colorKey: 'sheenColor' },
+  // ── Fabric / Carpet ─────────────────────────────────────────
+  { label: 'Sheen', key: 'sheen', min: 0, max: 1, step: 0.001, section: 'Fabric / Carpet', physicalOnly: true },
+  { label: 'Sheen Rough.', key: 'sheenRoughness', min: 0, max: 1, step: 0.001, section: 'Fabric / Carpet', physicalOnly: true },
+  { label: 'Sheen Color', key: 'sheenColor', min: 0, max: 0, step: 0, section: 'Fabric / Carpet', physicalOnly: true, isColor: true, colorKey: 'sheenColor' },
 
   // ── Iridescence ──────────────────────────────────────────────
   { label: 'Iridescence', key: 'iridescence', min: 0, max: 1, step: 0.001, section: 'Iridescence', physicalOnly: true },
@@ -74,8 +74,16 @@ const PROP_ROWS: PropRow[] = [
   { label: 'Emissive Color', key: 'emissive', min: 0, max: 0, step: 0, section: 'Emission', isColor: true, colorKey: 'emissive' },
   { label: 'Emissive Int.', key: 'emissiveIntensity', min: 0, max: 5, step: 0.001, section: 'Emission' },
 
+  // ── Displacement ───────────────────────────────────────────────
+  { label: 'Displace Scale', key: 'displacementScale', min: 0, max: 5, step: 0.001, section: 'Displacement' },
+  { label: 'Displace Bias', key: 'displacementBias', min: -1, max: 1, step: 0.001, section: 'Displacement' },
+
+  // ── Environment ────────────────────────────────────────────────
+  { label: 'Env Map Int.', key: 'envMapIntensity', min: 0, max: 5, step: 0.001, section: 'Environment' },
+
   // ── Settings ─────────────────────────────────────────────────
   { label: 'Opacity', key: 'opacity', min: 0, max: 1, step: 0.001, section: 'Settings' },
+  { label: 'Alpha Test', key: 'alphaTest', min: 0, max: 1, step: 0.001, section: 'Settings' },
 ];
 
 interface SectionDef {
@@ -89,9 +97,11 @@ const SECTIONS: SectionDef[] = [
   { name: 'Specular', physicalOnly: true },
   { name: 'Transmission', physicalOnly: true },
   { name: 'Coat', physicalOnly: true },
-  { name: 'Sheen', physicalOnly: true },
+  { name: 'Fabric / Carpet', physicalOnly: true, defaultExpanded: false },
   { name: 'Iridescence', physicalOnly: true },
   { name: 'Emission' },
+  { name: 'Displacement', defaultExpanded: false },
+  { name: 'Environment', defaultExpanded: false },
   { name: 'Settings' },
   { name: 'Texture Maps' },
 ];
@@ -692,10 +702,10 @@ const MaterialEditorPanel: React.FC<MaterialEditorPanelProps> = ({ materialManag
                         return renderSliderRow(row);
                       })}
                       {/* Checkboxes */}
-                      {(['transparent', 'doubleSided', 'flatShading'] as const).map((key) => (
+                      {(['transparent', 'doubleSided', 'flatShading', 'depthWrite', 'colorWrite'] as const).map((key) => (
                         <div key={key} className="mat-param-row">
                           <label className="mat-param-label" style={{ flex: 1 }}>
-                            {key === 'doubleSided' ? 'Double Sided' : key === 'flatShading' ? 'Flat Shading' : 'Transparent'}
+                            {key === 'doubleSided' ? 'Double Sided' : key === 'flatShading' ? 'Flat Shading' : key === 'depthWrite' ? 'Depth Write' : key === 'colorWrite' ? 'Color Write' : 'Transparent'}
                           </label>
                           <input
                             type="checkbox"
