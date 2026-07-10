@@ -113,6 +113,14 @@ export const AppLayout: React.FC = () => {
   const redoCount = useHistoryStore((s) => s.redoStack.length);
 
   const [rightTab, setRightTab] = useState<'properties' | 'preview' | 'material' | 'matEdit'>('properties');
+  const storeRightTab = useUIStore((s) => s.rightPanelTab);
+
+  // Sync right tab from store (e.g. viewport click sets it to 'matEdit')
+  useEffect(() => {
+    if (storeRightTab && storeRightTab !== rightTab) {
+      setRightTab(storeRightTab);
+    }
+  }, [storeRightTab]);
   const [, setScreenshotUrl] = useState<string | null>(null);
   const [exportDialogOpen, setExportDialogOpen] = useState(false);
   const [finalRenderOpen, setFinalRenderOpen] = useState(false);

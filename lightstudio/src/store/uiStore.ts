@@ -3,6 +3,7 @@ import { create } from 'zustand';
 import type { MaterialPresetKey, PreviewBackground } from '../types/Preset';
 
 export type ActiveTool = 'select' | 'move' | 'rotate' | 'scale' | 'isolate' | 'bookmark' | 'gridSnap' | 'measure';
+export type RightPanelTab = 'properties' | 'preview' | 'material' | 'matEdit';
 export type PanelLayout = 'default' | 'lighting' | 'fullPreview';
 
 /** Granular panel visibility keys */
@@ -57,6 +58,10 @@ interface UIState {
   // Material preview
   materialPreset: MaterialPresetKey;
   previewBackground: PreviewBackground;
+
+  // Right panel tab
+  rightPanelTab: RightPanelTab;
+  setRightPanelTab: (tab: RightPanelTab) => void;
 
   // Frame range
   frameStart: number;
@@ -143,6 +148,7 @@ export const useUIStore = create<UIState>((set, get) => ({
   isLooping: true,
   materialPreset: 'metal' as MaterialPresetKey,
   previewBackground: 'grey' as PreviewBackground,
+  rightPanelTab: 'properties' as RightPanelTab,
 
   // ── Legacy toggles ────────────────────────────────────────────
   toggleLeftPanel: () => {
@@ -380,4 +386,5 @@ export const useUIStore = create<UIState>((set, get) => ({
   // ── Material preview ──────────────────────────────────────────
   setMaterialPreset: (preset) => set({ materialPreset: preset }),
   setPreviewBackground: (bg) => set({ previewBackground: bg }),
+  setRightPanelTab: (tab) => set({ rightPanelTab: tab }),
 }));

@@ -197,3 +197,40 @@ Stage Summary:
 - 7 comprehensive sections covering all studio features
 - tsc --noEmit = 0 errors, vite build passes
 
+---
+Task ID: 3
+Agent: MaterialEditorPanel subagent
+Task: Rewrite MaterialEditorPanel.tsx with Blender-style property rows
+
+Work Log:
+- Read all 6 reference files: MaterialEditor.ts types, materialEditorStore.ts, MaterialManager.ts, current MaterialEditorPanel.tsx, globals.css (material CSS classes), uiStore.ts
+- Redesigned PropRow interface with isColor, colorKey, iridTupleIndex, integerOnly fields
+- Reorganized 9 collapsible sections matching Blender's Principled BSDF: Surface (expanded default), Specular, Transmission, Coat, Sheen, Iridescence, Emission, Settings, Texture Maps
+- Implemented Blender-style property rows: label (72px) | color swatch (32x18) OR range slider (flex:1) | editable numeric input (52px, 3 decimal places)
+- Color properties (Base Color, Specular Color, Atten. Color, Sheen Color, Emissive Color) render inline with color swatch + hex display
+- Special handling for iridescenceThicknessRange tuple (min/max as separate rows with integer display)
+- Infinity display for attenuationDistance when ≥ 20
+- Editable material name input at top
+- Settings section includes Opacity slider + Transparent/Double Sided/Flat Shading checkboxes
+- Numeric inputs use actual <input type="number"> with blur-to-clamp and focus border highlight
+- Reused existing CSS classes: .mat-search-input, .mat-search-results, .mat-search-result-item, .mat-section-title, .mat-selected-chip, .mat-selected-chip-name, .mat-param-row, .mat-param-label
+- PHYSICAL badge on physical-only section headers
+- Build verified: esbuild bundle completed in 86ms with 0 errors
+
+Stage Summary:
+- MaterialEditorPanel.tsx fully rewritten with Blender-style layout
+- Build verified (0 errors)
+---
+Task ID: 2
+Agent: SceneHierarchy subagent
+Task: Rewrite SceneHierarchy.tsx with Blender Outliner features
+
+Work Log:
+- Created complete Blender-style outliner component
+- Implemented collections, context menu, properties panel
+- Added filter toolbar, search, inline rename
+- Real-time transform editing
+
+Stage Summary:
+- SceneHierarchy.tsx fully rewritten with all Blender-style features
+- Build verified

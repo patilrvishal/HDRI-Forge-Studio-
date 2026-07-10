@@ -550,9 +550,10 @@ export const Viewport: React.FC<ViewportProps> = ({ sceneManagerRef, onScreensho
       if (match) {
         useMaterialEditorStore.getState().selectMaterial(match.id);
 
-        // Open right panel and switch to matEdit tab if needed
+        // Open right panel and switch to matEdit tab
         const ui = useUIStore.getState();
         if (!ui.rightPanelOpen) ui.showPanel('rightPanel');
+        ui.setRightPanelTab('matEdit');
 
         // Visual feedback: brief emissive flash on the mesh
         if (material && 'emissive' in material) {

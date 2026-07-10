@@ -99,12 +99,28 @@ export const useMaterialEditorStore = create<MaterialEditorStore>((set, get) => 
   },
 
   importMaterials: (materials) => {
-    // Restore Infinity from -1 sentinel
-    const restored = materials.map((m) => ({
-      ...m,
-      attenuationDistance: m.attenuationDistance === -1 ? Infinity : m.attenuationDistance,
-      iridescenceThicknessRange: m.iridescenceThicknessRange ?? [100, 400],
-    }));
+    // Restore each material by merging with a fresh default, ensuring no missing properties
+    const restored = materials.map((m, idx) => {
+      const base = createPBRMaterialState(idx, m.name || `Material ${idx + 1}`, m.meshNames || []);
+      return {
+        ...base,
+        ...m,
+        // Ensure texture slots are properly structured (not plain objects from JSON)
+        map: (m.map && typeof m.map === 'object' && 'enabled' in m.map) ? m.map : base.map,
+        normalMap: (m.normalMap && typeof m.normalMap === 'object' && 'enabled' in m.normalMap) ? m.normalMap : base.normalMap,
+        roughnessMap: (m.roughnessMap && typeof m.roughnessMap === 'object' && 'enabled' in m.roughnessMap) ? m.roughnessMap : base.roughnessMap,
+        metalnessMap: (m.metalnessMap && typeof m.metalnessMap === 'object' && 'enabled' in m.metalnessMap) ? m.metalnessMap : base.metalnessMap,
+        emissiveMap: (m.emissiveMap && typeof m.emissiveMap === 'object' && 'enabled' in m.emissiveMap) ? m.emissiveMap : base.emissiveMap,
+        aoMap: (m.aoMap && typeof m.aoMap === 'object' && 'enabled' in m.aoMap) ? m.aoMap : base.aoMap,
+        bumpMap: (m.bumpMap && typeof m.bumpMap === 'object' && 'enabled' in m.bumpMap) ? m.bumpMap : base.bumpMap,
+        alphaMap: (m.alphaMap && typeof m.alphaMap === 'object' && 'enabled' in m.alphaMap) ? m.alphaMap : base.alphaMap,
+        // Restore Infinity from -1 sentinel
+        attenuationDistance: m.attenuationDistance === -1 ? Infinity : (m.attenuationDistance ?? Infinity),
+        iridescenceThicknessRange: m.iridescenceThicknessRange ?? [100, 400],
+        // Ensure id is preserved (not overwritten by base)
+        id: m.id || base.id,
+      };
+    });
     set({
       materials: restored,
       selectedMaterialId: restored.length > 0 ? restored[0].id : null,

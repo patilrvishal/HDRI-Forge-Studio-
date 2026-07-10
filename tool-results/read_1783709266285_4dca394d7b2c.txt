@@ -1,0 +1,561 @@
+     1→     1→import React, { useCallback, useRef, useState, useMemo, useEffect } from 'react';
+     2→     2→import * as THREE from 'three';
+     3→     3→import { useMaterialEditorStore } from '../../store/materialEditorStore';
+     4→     4→import { useUIStore } from '../../store/uiStore';
+     5→     5→import type { PBRMaterialState, TextureSlotKey } from '../../types/MaterialEditor';
+     6→     6→import { TEXTURE_SLOT_LABELS } from '../../types/MaterialEditor';
+     7→     7→import type { MaterialManager } from '../../three/MaterialManager';
+     8→     8→
+     9→     9→interface MaterialEditorPanelProps {
+    10→    10→  materialManagerRef: React.MutableRefObject<MaterialManager | null>;
+    11→    11→  sceneRef: React.MutableRefObject<THREE.Scene | null>;
+    12→    12→}
+    13→    13→
+    14→    14→const TEXTURE_SLOTS: TextureSlotKey[] = [
+    15→    15→  'map', 'normalMap', 'roughnessMap', 'metalnessMap',
+    16→    16→  'emissiveMap', 'aoMap', 'bumpMap', 'alphaMap',
+    17→    17→];
+    18→    18→
+    19→    19→interface PropRow {
+    20→    20→  label: string;
+    21→    21→  key: keyof PBRMaterialState;
+    22→    22→  min: number;
+    23→    23→  max: number;
+    24→    24→  step: number;
+    25→    25→  section: string;
+    26→    26→  unit?: string;
+    27→    27→  /** Show only when isPhysical is true */
+    28→    28→  physicalOnly?: boolean;
+    29→    29→  /** Infinity-safe: clamp display */
+    30→    30→  infinityKey?: boolean;
+    31→    31→}
+    32→    32→
+    33→    33→const PROP_ROWS: PropRow[] = [
+    34→    34→  // Base
+    35→    35→  { label: 'Opacity', key: 'opacity', min: 0, max: 1, step: 0.01, section: 'Base' },
+    36→    36→  // Surface
+    37→    37→  { label: 'Roughness', key: 'roughness', min: 0, max: 1, step: 0.01, section: 'Surface' },
+    38→    38→  { label: 'Metalness', key: 'metalness', min: 0, max: 1, step: 0.01, section: 'Surface' },
+    39→    39→  { label: 'Normal Scale', key: 'normalScale', min: 0, max: 2, step: 0.05, section: 'Surface' },
+    40→    40→  { label: 'Bump Scale', key: 'bumpScale', min: 0, max: 2, step: 0.05, section: 'Surface' },
+    41→    41→  { label: 'AO Intensity', key: 'aoMapIntensity', min: 0, max: 3, step: 0.05, section: 'Surface' },
+    42→    42→  // Emission
+    43→    43→  { label: 'Emissive Int.', key: 'emissiveIntensity', min: 0, max: 5, step: 0.1, section: 'Emission' },
+    44→    44→  // Clearcoat
+    45→    45→  { label: 'Clearcoat', key: 'clearcoat', min: 0, max: 1, step: 0.01, section: 'Clearcoat', physicalOnly: true },
+    46→    46→  { label: 'Clearcoat Rough.', key: 'clearcoatRoughness', min: 0, max: 1, step: 0.01, section: 'Clearcoat', physicalOnly: true },
+    47→    47→  // Transmission
+    48→    48→  { label: 'Transmission', key: 'transmission', min: 0, max: 1, step: 0.01, section: 'Transmission', physicalOnly: true },
+    49→    49→  { label: 'Trans. Rough.', key: 'transmissionRoughness', min: 0, max: 1, step: 0.01, section: 'Transmission', physicalOnly: true },
+    50→    50→  { label: 'Thickness', key: 'thickness', min: 0, max: 10, step: 0.1, section: 'Transmission', physicalOnly: true },
+    51→    51→  { label: 'IOR', key: 'ior', min: 1, max: 2.5, step: 0.01, section: 'Transmission', physicalOnly: true },
+    52→    52→  { label: 'Atten. Distance', key: 'attenuationDistance', min: 0, max: 20, step: 0.1, section: 'Transmission', physicalOnly: true, infinityKey: true },
+    53→    53→  // Sheen
+    54→    54→  { label: 'Sheen', key: 'sheen', min: 0, max: 1, step: 0.01, section: 'Sheen', physicalOnly: true },
+    55→    55→  { label: 'Sheen Rough.', key: 'sheenRoughness', min: 0, max: 1, step: 0.01, section: 'Sheen', physicalOnly: true },
+    56→    56→  // Iridescence
+    57→    57→  { label: 'Iridescence', key: 'iridescence', min: 0, max: 1, step: 0.01, section: 'Iridescence', physicalOnly: true },
+    58→    58→  { label: 'Irid. IOR', key: 'iridescenceIOR', min: 1, max: 2.333, step: 0.01, section: 'Iridescence', physicalOnly: true },
+    59→    59→  // Specular
+    60→    60→  { label: 'Specular Int.', key: 'specularIntensity', min: 0, max: 1, step: 0.01, section: 'Specular', physicalOnly: true },
+    61→    61→];
+    62→    62→
+    63→    63→const SECTIONS = ['Base', 'Surface', 'Emission', 'Clearcoat', 'Transmission', 'Sheen', 'Iridescence', 'Specular', 'Texture Maps'] as const;
+    64→    64→
+    65→    65→const MaterialEditorPanel: React.FC<MaterialEditorPanelProps> = ({ materialManagerRef, sceneRef }) => {
+    66→    66→  const materials = useMaterialEditorStore((s) => s.materials);
+    67→    67→  const selectedId = useMaterialEditorStore((s) => s.selectedMaterialId);
+    68→    68→  const selectMaterial = useMaterialEditorStore((s) => s.selectMaterial);
+    69→    69→  const updateMaterial = useMaterialEditorStore((s) => s.updateMaterial);
+    70→    70→  const updateTextureSlot = useMaterialEditorStore((s) => s.updateTextureSlot);
+    71→    71→  const removeTextureSlot = useMaterialEditorStore((s) => s.removeTextureSlot);
+    72→    72→
+    73→    73→  const [searchOpen, setSearchOpen] = useState(false);
+    74→    74→  const [search, setSearch] = useState('');
+    75→    75→  const [collapsedSections, setCollapsedSections] = useState<Set<string>>(new Set(['Sheen', 'Iridescence', 'Specular']));
+    76→    76→  const textureInputRefs = useRef<Record<string, HTMLInputElement | null>>({});
+    77→    77→  const searchInputRef = useRef<HTMLInputElement>(null);
+    78→    78→
+    79→    79→  const selected = materials.find((m) => m.id === selectedId) ?? null;
+    80→    80→
+    81→    81→  // Focus search input when opened
+    82→    82→  useEffect(() => {
+    83→    83→    if (searchOpen && searchInputRef.current) {
+    84→    84→      searchInputRef.current.focus();
+    85→    85→    }
+    86→    86→  }, [searchOpen]);
+    87→    87→
+    88→    88→  // Filter materials by search
+    89→    89→  const filteredMaterials = useMemo(() => {
+    90→    90→    if (!search.trim()) return materials;
+    91→    91→    const q = search.toLowerCase();
+    92→    92→    return materials.filter(
+    93→    93→      (m) => m.name.toLowerCase().includes(q) || m.meshNames.some((n) => n.toLowerCase().includes(q)),
+    94→    94→    );
+    95→    95→  }, [materials, search]);
+    96→    96→
+    97→    97→  const handlePropChange = useCallback(
+    98→    98→    (key: keyof PBRMaterialState, value: number | string | boolean) => {
+    99→    99→      if (!selectedId) return;
+   100→   100→
+   101→   101→      // If changing a physical property, mark isPhysical = true
+   102→   102→      const updates: Partial<PBRMaterialState> = { [key]: value } as Partial<PBRMaterialState>;
+   103→   103→      const physicalKeys = new Set<string>([
+   104→   104→        'clearcoat', 'clearcoatRoughness', 'transmission', 'transmissionRoughness',
+   105→   105→        'thickness', 'ior', 'sheen', 'sheenRoughness', 'sheenColor',
+   106→   106→        'iridescence', 'iridescenceIOR', 'iridescenceThicknessRange',
+   107→   107→        'attenuationColor', 'attenuationDistance', 'specularIntensity', 'specularColor',
+   108→   108→      ]);
+   109→   109→      if (physicalKeys.has(key as string)) {
+   110→   110→        updates.isPhysical = true;
+   111→   111→      }
+   112→   112→      // Auto-enable transparent when transmission > 0
+   113→   113→      if (key === 'transmission' && typeof value === 'number' && value > 0) {
+   114→   114→        updates.transparent = true;
+   115→   115→      }
+   116→   116→
+   117→   117→      updateMaterial(selectedId, updates);
+   118→   118→
+   119→   119→      const mm = materialManagerRef.current;
+   120→   120→      const scene = sceneRef.current;
+   121→   121→      if (mm && scene) {
+   122→   122→        const updated = useMaterialEditorStore.getState().materials.find((m) => m.id === selectedId);
+   123→   123→        if (updated) mm.applyMaterialState(updated, scene);
+   124→   124→      }
+   125→   125→    },
+   126→   126→    [selectedId, updateMaterial, materialManagerRef, sceneRef],
+   127→   127→  );
+   128→   128→
+   129→   129→  const handleTextureUpload = useCallback((slotKey: TextureSlotKey) => {
+   130→   130→    textureInputRefs.current[slotKey]?.click();
+   131→   131→  }, []);
+   132→   132→
+   133→   133→  const handleTextureFileChange = useCallback(
+   134→   134→    (slotKey: TextureSlotKey, e: React.ChangeEvent<HTMLInputElement>) => {
+   135→   135→      const file = e.target.files?.[0];
+   136→   136→      if (!file || !selectedId) return;
+   137→   137→
+   138→   138→      const reader = new FileReader();
+   139→   139→      reader.onload = () => {
+   140→   140→        const dataUrl = reader.result as string;
+   141→   141→        updateTextureSlot(selectedId, slotKey, dataUrl, file.name);
+   142→   142→
+   143→   143→        const mm = materialManagerRef.current;
+   144→   144→        const scene = sceneRef.current;
+   145→   145→        if (mm && scene) {
+   146→   146→          const updated = useMaterialEditorStore.getState().materials.find((m) => m.id === selectedId);
+   147→   147→          if (updated) mm.applyMaterialState(updated, scene);
+   148→   148→        }
+   149→   149→      };
+   150→   150→      reader.readAsDataURL(file);
+   151→   151→      e.target.value = '';
+   152→   152→    },
+   153→   153→    [selectedId, updateTextureSlot, materialManagerRef, sceneRef],
+   154→   154→  );
+   155→   155→
+   156→   156→  const handleRemoveTexture = useCallback(
+   157→   157→    (slotKey: TextureSlotKey) => {
+   158→   158→      if (!selectedId) return;
+   159→   159→      removeTextureSlot(selectedId, slotKey);
+   160→   160→    },
+   161→   161→    [selectedId, removeTextureSlot],
+   162→   162→  );
+   163→   163→
+   164→   164→  const toggleSection = useCallback((section: string) => {
+   165→   165→    setCollapsedSections((prev) => {
+   166→   166→      const next = new Set(prev);
+   167→   167→      if (next.has(section)) next.delete(section);
+   168→   168→      else next.add(section);
+   169→   169→      return next;
+   170→   170→    });
+   171→   171→  }, []);
+   172→   172→
+   173→   173→  const handleSearchSelect = useCallback(
+   174→   174→    (id: string) => {
+   175→   175→      selectMaterial(id);
+   176→   176→      setSearch('');
+   177→   177→      setSearchOpen(false);
+   178→   178→    },
+   179→   179→    [selectMaterial],
+   180→   180→  );
+   181→   181→
+   182→   182→  // Group props by section
+   183→   183→  const propsBySection = useMemo(() => {
+   184→   184→    const map: Record<string, PropRow[]> = {};
+   185→   185→    for (const row of PROP_ROWS) {
+   186→   186→      if (!map[row.section]) map[row.section] = [];
+   187→   187→      map[row.section].push(row);
+   188→   188→    }
+   189→   189→    return map;
+   190→   190→  }, []);
+   191→   191→
+   192→   192→  // Filter out physical-only sections when not in physical mode
+   193→   193→  const visibleSections = useMemo(() => {
+   194→   194→    if (!selected) return SECTIONS;
+   195→   195→    const phys = selected.isPhysical;
+   196→   196→    return SECTIONS.filter((s) => {
+   197→   197→      if (s === 'Texture Maps') return true;
+   198→   198→      const rows = propsBySection[s];
+   199→   199→      if (!rows) return true;
+   200→   200→      if (s === 'Base' || s === 'Surface' || s === 'Emission') return true;
+   201→   201→      return phys;
+   202→   202→    });
+   203→   203→  }, [selected, propsBySection]);
+   204→   204→
+   205→   205→  const formatValue = (val: number, step: number, infinityKey?: boolean): string => {
+   206→   206→    if (val == null || Number.isNaN(val)) return '—';
+   207→   207→    if (infinityKey && (val === Infinity || val >= 20)) return '\u221e';
+   208→   208→    if (step >= 1) return Math.round(val).toString();
+   209→   209→    return val.toFixed(2);
+   210→   210→  };
+   211→   211→
+   212→   212→  return (
+   213→   213→    <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+   214→   214→      {/* Header with search toggle */}
+   215→   215→      <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 8px', borderBottom: '1px solid var(--border)' }}>
+   216→   216→        <span style={{ fontSize: 9, fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.8, color: 'var(--text-dim)', flex: 1 }}>
+   217→   217→          Materials ({materials.length})
+   218→   218→        </span>
+   219→   219→        {selected && (
+   220→   220→          <div
+   221→   221→            style={{
+   222→   222→              fontSize: 8,
+   223→   223→              padding: '1px 5px',
+   224→   224→              borderRadius: 3,
+   225→   225→              background: selected.isPhysical ? 'rgba(167, 139, 250, 0.15)' : 'var(--bg-input)',
+   226→   226→              color: selected.isPhysical ? 'var(--accent-bright)' : 'var(--text-dim)',
+   227→   227→              border: `1px solid ${selected.isPhysical ? 'rgba(167, 139, 250, 0.3)' : 'var(--border)'}`,
+   228→   228→              letterSpacing: '0.3px',
+   229→   229→            }}
+   230→   230→          >
+   231→   231→            {selected.isPhysical ? 'PHYSICAL' : 'STANDARD'}
+   232→   232→          </div>
+   233→   233→        )}
+   234→   234→        <button
+   235→   235→          className={`btn-icon btn-glow ${searchOpen ? 'active' : ''}`}
+   236→   236→          style={{ width: 22, height: 22 }}
+   237→   237→          onClick={() => setSearchOpen(!searchOpen)}
+   238→   238→          title="Search materials"
+   239→   239→          aria-label="Search materials"
+   240→   240→        >
+   241→   241→          <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
+   242→   242→            <circle cx="6.5" cy="6.5" r="5" />
+   243→   243→            <path d="M10.5 10.5L15 15" />
+   244→   244→          </svg>
+   245→   245→        </button>
+   246→   246→      </div>
+   247→   247→
+   248→   248→      {/* Search bar */}
+   249→   249→      {searchOpen && (
+   250→   250→        <div style={{ padding: '4px 8px', borderBottom: '1px solid var(--border)' }}>
+   251→   251→          <div style={{ position: 'relative' }}>
+   252→   252→            <svg
+   253→   253→              width="11" height="11" viewBox="0 0 16 16" fill="none" stroke="var(--text-dim)" strokeWidth="1.5"
+   254→   254→              style={{ position: 'absolute', left: 7, top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none' }}
+   255→   255→            >
+   256→   256→              <circle cx="6.5" cy="6.5" r="5" />
+   257→   257→              <path d="M10.5 10.5L15 15" />
+   258→   258→            </svg>
+   259→   259→            <input
+   260→   260→              ref={searchInputRef}
+   261→   261→              className="mat-search-input"
+   262→   262→              type="text"
+   263→   263→              placeholder="Search materials..."
+   264→   264→              value={search}
+   265→   265→              onChange={(e) => setSearch(e.target.value)}
+   266→   266→            />
+   267→   267→          </div>
+   268→   268→          {search && (
+   269→   269→            <div className="mat-search-results">
+   270→   270→              {filteredMaterials.length === 0 && (
+   271→   271→                <div style={{ padding: '8px 10px', fontSize: 10, color: 'var(--text-dim)' }}>
+   272→   272→                  No materials found
+   273→   273→                </div>
+   274→   274→              )}
+   275→   275→              {filteredMaterials.map((mat) => (
+   276→   276→                <button
+   277→   277→                  key={mat.id}
+   278→   278→                  className="mat-search-result-item"
+   279→   279→                  onClick={() => handleSearchSelect(mat.id)}
+   280→   280→                >
+   281→   281→                  <div
+   282→   282→                    style={{
+   283→   283→                      width: 14, height: 14, borderRadius: 2,
+   284→   284→                      background: mat.color, flexShrink: 0,
+   285→   285→                      border: '1px solid var(--border)',
+   286→   286→                    }}
+   287→   287→                  />
+   288→   288→                  <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+   289→   289→                    {mat.name}
+   290→   290→                  </span>
+   291→   291→                  <span style={{ fontSize: 9, color: 'var(--text-dim)', flexShrink: 0 }}>
+   292→   292→                    {mat.meshNames[0] ?? ''}
+   293→   293→                  </span>
+   294→   294→                </button>
+   295→   295→              ))}
+   296→   296→            </div>
+   297→   297→          )}
+   298→   298→        </div>
+   299→   299→      )}
+   300→   300→
+   301→   301→      {/* Selected material chip */}
+   302→   302→      {selected && (
+   303→   303→        <div className="mat-selected-chip">
+   304→   304→          <div
+   305→   305→            style={{
+   306→   306→              width: 12, height: 12, borderRadius: 2,
+   307→   307→              background: selected.color, flexShrink: 0,
+   308→   308→              border: '1px solid var(--border)',
+   309→   309→            }}
+   310→   310→          />
+   311→   311→          <span className="mat-selected-chip-name">{selected.name}</span>
+   312→   312→          <button
+   313→   313→            className="panel-close-btn"
+   314→   314→            onClick={() => selectMaterial(null)}
+   315→   315→            title="Deselect material"
+   316→   316→            aria-label="Deselect material"
+   317→   317→          >
+   318→   318→            <svg width="8" height="8" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="2">
+   319→   319→              <path d="M2 2l8 8M10 2L2 10" />
+   320→   320→            </svg>
+   321→   321→          </button>
+   322→   322→        </div>
+   323→   323→      )}
+   324→   324→
+   325→   325→      {/* Empty state */}
+   326→   326→      {!selected && (
+   327→   327→        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: 24, textAlign: 'center' }}>
+   328→   328→          <div style={{
+   329→   329→            width: 36, height: 36, borderRadius: '50%',
+   330→   330→            background: 'var(--bg-card)', border: '1px solid var(--border)',
+   331→   331→            display: 'flex', alignItems: 'center', justifyContent: 'center',
+   332→   332→            marginBottom: 10,
+   333→   333→          }}>
+   334→   334→            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="var(--text-dim)" strokeWidth="1.2">
+   335→   335→              <path d="M8 1v5M8 10v5M1 8h5M10 8h5" />
+   336→   336→              <circle cx="8" cy="8" r="2" />
+   337→   337→            </svg>
+   338→   338→          </div>
+   339→   339→          <p style={{ fontSize: 10, color: 'var(--text-dim)', lineHeight: 1.5 }}>
+   340→   340→            Click on the model surface to select a material, or use search above
+   341→   341→          </p>
+   342→   342→        </div>
+   343→   343→      )}
+   344→   344→
+   345→   345→      {/* Material properties */}
+   346→   346→      {selected && (
+   347→   347→        <div style={{ flex: 1, overflowY: 'auto', padding: '8px 10px' }}>
+   348→   348→          {/* Material name + meshes */}
+   349→   349→          <div style={{ marginBottom: 8 }}>
+   350→   350→            <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--text)' }}>{selected.name}</div>
+   351→   351→            <div style={{ fontSize: 9, color: 'var(--text-dim)', marginTop: 1 }}>
+   352→   352→              {selected.meshNames.join(', ')}
+   353→   353→            </div>
+   354→   354→          </div>
+   355→   355→
+   356→   356→          {/* Color pickers */}
+   357→   357→          <div style={{ display: 'flex', gap: 10, marginBottom: 8, alignItems: 'flex-start', flexWrap: 'wrap' }}>
+   358→   358→            <div>
+   359→   359→              <div className="mat-section-title" style={{ marginBottom: 3 }}>Base Color</div>
+   360→   360→              <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+   361→   361→                <input type="color" value={selected.color} onChange={(e) => handlePropChange('color', e.target.value)}
+   362→   362→                  style={{ width: 28, height: 20, border: '1px solid var(--border)', borderRadius: 3, cursor: 'pointer', padding: 0 }} />
+   363→   363→                <span style={{ fontSize: 9, color: 'var(--text-dim)', fontFamily: 'var(--font-mono)' }}>{selected.color}</span>
+   364→   364→              </div>
+   365→   365→            </div>
+   366→   366→            <div>
+   367→   367→              <div className="mat-section-title" style={{ marginBottom: 3 }}>Emissive</div>
+   368→   368→              <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+   369→   369→                <input type="color" value={selected.emissive} onChange={(e) => handlePropChange('emissive', e.target.value)}
+   370→   370→                  style={{ width: 28, height: 20, border: '1px solid var(--border)', borderRadius: 3, cursor: 'pointer', padding: 0 }} />
+   371→   371→                <span style={{ fontSize: 9, color: 'var(--text-dim)', fontFamily: 'var(--font-mono)' }}>{selected.emissive}</span>
+   372→   372→              </div>
+   373→   373→            </div>
+   374→   374→            {selected.isPhysical && (
+   375→   375→              <>
+   376→   376→                <div>
+   377→   377→                  <div className="mat-section-title" style={{ marginBottom: 3 }}>Sheen Color</div>
+   378→   378→                  <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+   379→   379→                    <input type="color" value={selected.sheenColor} onChange={(e) => handlePropChange('sheenColor', e.target.value)}
+   380→   380→                      style={{ width: 28, height: 20, border: '1px solid var(--border)', borderRadius: 3, cursor: 'pointer', padding: 0 }} />
+   381→   381→                    <span style={{ fontSize: 9, color: 'var(--text-dim)', fontFamily: 'var(--font-mono)' }}>{selected.sheenColor}</span>
+   382→   382→                  </div>
+   383→   383→                </div>
+   384→   384→                <div>
+   385→   385→                  <div className="mat-section-title" style={{ marginBottom: 3 }}>Specular Color</div>
+   386→   386→                  <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+   387→   387→                    <input type="color" value={selected.specularColor} onChange={(e) => handlePropChange('specularColor', e.target.value)}
+   388→   388→                      style={{ width: 28, height: 20, border: '1px solid var(--border)', borderRadius: 3, cursor: 'pointer', padding: 0 }} />
+   389→   389→                    <span style={{ fontSize: 9, color: 'var(--text-dim)', fontFamily: 'var(--font-mono)' }}>{selected.specularColor}</span>
+   390→   390→                  </div>
+   391→   391→                </div>
+   392→   392→                <div>
+   393→   393→                  <div className="mat-section-title" style={{ marginBottom: 3 }}>Atten. Color</div>
+   394→   394→                  <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+   395→   395→                    <input type="color" value={selected.attenuationColor} onChange={(e) => handlePropChange('attenuationColor', e.target.value)}
+   396→   396→                      style={{ width: 28, height: 20, border: '1px solid var(--border)', borderRadius: 3, cursor: 'pointer', padding: 0 }} />
+   397→   397→                    <span style={{ fontSize: 9, color: 'var(--text-dim)', fontFamily: 'var(--font-mono)' }}>{selected.attenuationColor}</span>
+   398→   398→                  </div>
+   399→   399→                </div>
+   400→   400→              </>
+   401→   401→            )}
+   402→   402→          </div>
+   403→   403→
+   404→   404→          {/* Toggles */}
+   405→   405→          <div style={{ display: 'flex', gap: 10, marginBottom: 10, flexWrap: 'wrap' }}>
+   406→   406→            {(['transparent', 'doubleSided', 'flatShading'] as const).map((key) => (
+   407→   407→              <label
+   408→   408→                key={key}
+   409→   409→                style={{ fontSize: 10, color: 'var(--text-sec)', display: 'flex', alignItems: 'center', gap: 4, cursor: 'pointer' }}
+   410→   410→              >
+   411→   411→                <input
+   412→   412→                  type="checkbox"
+   413→   413→                  checked={selected[key] as boolean}
+   414→   414→                  onChange={(e) => handlePropChange(key, e.target.checked)}
+   415→   415→                  style={{ width: 12, height: 12 }}
+   416→   416→                />
+   417→   417→                {key === 'doubleSided' ? 'Double Sided' : key === 'flatShading' ? 'Flat Shading' : 'Transparent'}
+   418→   418→              </label>
+   419→   419→            ))}
+   420→   420→          </div>
+   421→   421→
+   422→   422→          {/* Property sections */}
+   423→   423→          {visibleSections.map((section) => {
+   424→   424→            if (section === 'Texture Maps') {
+   425→   425→              return (
+   426→   426→                <div key={section} style={{ marginBottom: 8 }}>
+   427→   427→                  <div
+   428→   428→                    className="mat-section-title"
+   429→   429→                    style={{ cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4 }}
+   430→   430→                    onClick={() => toggleSection(section)}
+   431→   431→                  >
+   432→   432→                    <svg
+   433→   433→                      width="8" height="8" viewBox="0 0 8 8" fill="var(--text-dim)"
+   434→   434→                      style={{ transform: collapsedSections.has(section) ? 'rotate(-90deg)' : 'rotate(0)', transition: 'transform 0.15s ease', flexShrink: 0 }}
+   435→   435→                    >
+   436→   436→                      <path d="M1 1l6 3-6 3z" />
+   437→   437→                    </svg>
+   438→   438→                    {section}
+   439→   439→                  </div>
+   440→   440→                  {!collapsedSections.has(section) && (
+   441→   441→                    <div style={{ display: 'flex', flexDirection: 'column', gap: 3, marginTop: 4 }}>
+   442→   442→                      {TEXTURE_SLOTS.map((slotKey) => {
+   443→   443→                        const slot = selected[slotKey];
+   444→   444→                        return (
+   445→   445→                          <div
+   446→   446→                            key={slotKey}
+   447→   447→                            style={{
+   448→   448→                              display: 'flex', alignItems: 'center', gap: 4,
+   449→   449→                              padding: '3px 4px', borderRadius: 'var(--radius-sm)',
+   450→   450→                              background: slot.enabled ? 'var(--bg-card)' : 'transparent',
+   451→   451→                              border: `1px solid ${slot.enabled ? 'var(--border-light)' : 'var(--border)'}`,
+   452→   452→                            }}
+   453→   453→                          >
+   454→   454→                            <label className="mat-param-label" style={{ fontSize: 9 }}>{TEXTURE_SLOT_LABELS[slotKey]}</label>
+   455→   455→                            {slot.enabled && slot.dataUrl ? (
+   456→   456→                              <>
+   457→   457→                                <div
+   458→   458→                                  style={{
+   459→   459→                                    width: 22, height: 22, borderRadius: 3,
+   460→   460→                                    background: `url(${slot.dataUrl}) center/cover`,
+   461→   461→                                    border: '1px solid var(--border)', flexShrink: 0,
+   462→   462→                                  }}
+   463→   463→                                />
+   464→   464→                                <span style={{ flex: 1, fontSize: 8, color: 'var(--text-dim)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={slot.fileName}>
+   465→   465→                                  {slot.fileName}
+   466→   466→                                </span>
+   467→   467→                                <button
+   468→   468→                                  onClick={() => handleRemoveTexture(slotKey)}
+   469→   469→                                  style={{ fontSize: 8, color: 'var(--danger)', background: 'none', border: 'none', cursor: 'pointer', padding: '1px 3px', flexShrink: 0 }}
+   470→   470→                                >
+   471→   471→                                  <svg width="8" height="8" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="2"><path d="M2 2l8 8M10 2L2 10" /></svg>
+   472→   472→                                </button>
+   473→   473→                              </>
+   474→   474→                            ) : (
+   475→   475→                              <>
+   476→   476→                                <button
+   477→   477→                                  onClick={() => handleTextureUpload(slotKey)}
+   478→   478→                                  style={{ fontSize: 8, color: 'var(--text-dim)', background: 'var(--bg-input)', border: '1px solid var(--border)', borderRadius: 3, cursor: 'pointer', padding: '2px 6px', flexShrink: 0 }}
+   479→   479→                                >
+   480→   480→                                  + Load
+   481→   481→                                </button>
+   482→   482→                                <span style={{ fontSize: 8, color: 'var(--text-dim)' }}>None</span>
+   483→   483→                              </>
+   484→   484→                            )}
+   485→   485→                            <input
+   486→   486→                              ref={(el) => { textureInputRefs.current[slotKey] = el; }}
+   487→   487→                              type="file" accept="image/*"
+   488→   488→                              style={{ display: 'none' }}
+   489→   489→                              onChange={(e) => handleTextureFileChange(slotKey, e)}
+   490→   490→                            />
+   491→   491→                          </div>
+   492→   492→                        );
+   493→   493→                      })}
+   494→   494→                    </div>
+   495→   495→                  )}
+   496→   496→                </div>
+   497→   497→              );
+   498→   498→            }
+   499→   499→
+   500→   500→            const rows = propsBySection[section];
+   501→   501→            if (!rows || rows.length === 0) return null;
+   502→   502→
+   503→   503→            return (
+   504→   504→              <div key={section} style={{ marginBottom: 8 }}>
+   505→   505→                <div
+   506→   506→                  className="mat-section-title"
+   507→   507→                  style={{ cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4 }}
+   508→   508→                  onClick={() => toggleSection(section)}
+   509→   509→                >
+   510→   510→                  <svg
+   511→   511→                    width="8" height="8" viewBox="0 0 8 8" fill="var(--text-dim)"
+   512→   512→                    style={{ transform: collapsedSections.has(section) ? 'rotate(-90deg)' : 'rotate(0)', transition: 'transform 0.15s ease', flexShrink: 0 }}
+   513→   513→                  >
+   514→   514→                    <path d="M1 1l6 3-6 3z" />
+   515→   515→                  </svg>
+   516→   516→                  {section}
+   517→   517→                  {rows[0]?.physicalOnly && (
+   518→   518→                    <span style={{
+   519→   519→                      fontSize: 7, padding: '0 4px', borderRadius: 2, marginLeft: 'auto',
+   520→   520→                      background: 'rgba(167, 139, 250, 0.12)', color: 'var(--accent-bright)',
+   521→   521→                      letterSpacing: '0.4px', fontWeight: 600,
+   522→   522→                    }}>
+   523→   523→                      PHYSICAL
+   524→   524→                    </span>
+   525→   525→                  )}
+   526→   526→                </div>
+   527→   527→                {!collapsedSections.has(section) && (
+   528→   528→                  <div style={{ display: 'flex', flexDirection: 'column', gap: 4, marginTop: 4 }}>
+   529→   529→                    {rows.map((row) => {
+   530→   530→                      const rawVal = selected[row.key] as number | undefined;
+   531→   531→                      const safeVal = (rawVal != null && !Number.isNaN(rawVal)) ? rawVal : row.min;
+   532→   532→                      return (
+   533→   533→                        <div key={row.key} className="mat-param-row">
+   534→   534→                          <label className="mat-param-label">{row.label}</label>
+   535→   535→                          <input
+   536→   536→                            type="range"
+   537→   537→                            min={row.min}
+   538→   538→                            max={row.max}
+   539→   539→                            step={row.step}
+   540→   540→                            value={safeVal}
+   541→   541→                            onChange={(e) => handlePropChange(row.key, parseFloat(e.target.value))}
+   542→   542→                            style={{ flex: 1, height: 4, cursor: 'pointer', accentColor: 'var(--accent)' }}
+   543→   543→                          />
+   544→   544→                          <span className="mat-param-value">
+   545→   545→                            {formatValue(rawVal as number, row.step, row.infinityKey)}{row.unit || ''}
+   546→   546→                          </span>
+   547→   547→                        </div>
+   548→   548→                      );
+   549→   549→                    })}
+   550→   550→                  </div>
+   551→   551→                )}
+   552→   552→              </div>
+   553→   553→            );
+   554→   554→          })}
+   555→   555→        </div>
+   556→   556→      )}
+   557→   557→    </div>
+   558→   558→  );
+   559→   559→};
+   560→   560→
+   561→   561→export { MaterialEditorPanel };

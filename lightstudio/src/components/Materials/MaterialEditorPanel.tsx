@@ -24,43 +24,97 @@ interface PropRow {
   step: number;
   section: string;
   unit?: string;
-  /** Show only when isPhysical is true */
   physicalOnly?: boolean;
-  /** Infinity-safe: clamp display */
   infinityKey?: boolean;
+  isColor?: boolean;
+  colorKey?: string;
+  /** For iridescence thickness: 0 = min, 1 = max */
+  iridTupleIndex?: 0 | 1;
+  /** Show as integer (no decimals) */
+  integerOnly?: boolean;
 }
 
 const PROP_ROWS: PropRow[] = [
-  // Base
-  { label: 'Opacity', key: 'opacity', min: 0, max: 1, step: 0.01, section: 'Base' },
-  // Surface
-  { label: 'Roughness', key: 'roughness', min: 0, max: 1, step: 0.01, section: 'Surface' },
-  { label: 'Metalness', key: 'metalness', min: 0, max: 1, step: 0.01, section: 'Surface' },
-  { label: 'Normal Scale', key: 'normalScale', min: 0, max: 2, step: 0.05, section: 'Surface' },
-  { label: 'Bump Scale', key: 'bumpScale', min: 0, max: 2, step: 0.05, section: 'Surface' },
-  { label: 'AO Intensity', key: 'aoMapIntensity', min: 0, max: 3, step: 0.05, section: 'Surface' },
-  // Emission
-  { label: 'Emissive Int.', key: 'emissiveIntensity', min: 0, max: 5, step: 0.1, section: 'Emission' },
-  // Clearcoat
-  { label: 'Clearcoat', key: 'clearcoat', min: 0, max: 1, step: 0.01, section: 'Clearcoat', physicalOnly: true },
-  { label: 'Clearcoat Rough.', key: 'clearcoatRoughness', min: 0, max: 1, step: 0.01, section: 'Clearcoat', physicalOnly: true },
-  // Transmission
-  { label: 'Transmission', key: 'transmission', min: 0, max: 1, step: 0.01, section: 'Transmission', physicalOnly: true },
-  { label: 'Trans. Rough.', key: 'transmissionRoughness', min: 0, max: 1, step: 0.01, section: 'Transmission', physicalOnly: true },
-  { label: 'Thickness', key: 'thickness', min: 0, max: 10, step: 0.1, section: 'Transmission', physicalOnly: true },
-  { label: 'IOR', key: 'ior', min: 1, max: 2.5, step: 0.01, section: 'Transmission', physicalOnly: true },
-  { label: 'Atten. Distance', key: 'attenuationDistance', min: 0, max: 20, step: 0.1, section: 'Transmission', physicalOnly: true, infinityKey: true },
-  // Sheen
-  { label: 'Sheen', key: 'sheen', min: 0, max: 1, step: 0.01, section: 'Sheen', physicalOnly: true },
-  { label: 'Sheen Rough.', key: 'sheenRoughness', min: 0, max: 1, step: 0.01, section: 'Sheen', physicalOnly: true },
-  // Iridescence
-  { label: 'Iridescence', key: 'iridescence', min: 0, max: 1, step: 0.01, section: 'Iridescence', physicalOnly: true },
-  { label: 'Irid. IOR', key: 'iridescenceIOR', min: 1, max: 2.333, step: 0.01, section: 'Iridescence', physicalOnly: true },
-  // Specular
-  { label: 'Specular Int.', key: 'specularIntensity', min: 0, max: 1, step: 0.01, section: 'Specular', physicalOnly: true },
+  // ── Surface ──────────────────────────────────────────────────
+  { label: 'Base Color', key: 'color', min: 0, max: 0, step: 0, section: 'Surface', isColor: true, colorKey: 'color' },
+  { label: 'Metallic', key: 'metalness', min: 0, max: 1, step: 0.001, section: 'Surface' },
+  { label: 'Roughness', key: 'roughness', min: 0, max: 1, step: 0.001, section: 'Surface' },
+  { label: 'Normal Scale', key: 'normalScale', min: 0, max: 2, step: 0.001, section: 'Surface' },
+  { label: 'Bump Scale', key: 'bumpScale', min: 0, max: 2, step: 0.001, section: 'Surface' },
+  { label: 'AO Intensity', key: 'aoMapIntensity', min: 0, max: 3, step: 0.001, section: 'Surface' },
+
+  // ── Specular ─────────────────────────────────────────────────
+  { label: 'Specular Int.', key: 'specularIntensity', min: 0, max: 1, step: 0.001, section: 'Specular', physicalOnly: true },
+  { label: 'Specular Color', key: 'specularColor', min: 0, max: 0, step: 0, section: 'Specular', physicalOnly: true, isColor: true, colorKey: 'specularColor' },
+
+  // ── Transmission ─────────────────────────────────────────────
+  { label: 'Transmission', key: 'transmission', min: 0, max: 1, step: 0.001, section: 'Transmission', physicalOnly: true },
+  { label: 'Trans. Rough.', key: 'transmissionRoughness', min: 0, max: 1, step: 0.001, section: 'Transmission', physicalOnly: true },
+  { label: 'Thickness', key: 'thickness', min: 0, max: 10, step: 0.001, section: 'Transmission', physicalOnly: true },
+  { label: 'IOR', key: 'ior', min: 1, max: 2.5, step: 0.001, section: 'Transmission', physicalOnly: true },
+  { label: 'Atten. Color', key: 'attenuationColor', min: 0, max: 0, step: 0, section: 'Transmission', physicalOnly: true, isColor: true, colorKey: 'attenuationColor' },
+  { label: 'Atten. Dist.', key: 'attenuationDistance', min: 0, max: 20, step: 0.001, section: 'Transmission', physicalOnly: true, infinityKey: true },
+
+  // ── Coat ─────────────────────────────────────────────────────
+  { label: 'Clearcoat', key: 'clearcoat', min: 0, max: 1, step: 0.001, section: 'Coat', physicalOnly: true },
+  { label: 'Clearcoat Rough.', key: 'clearcoatRoughness', min: 0, max: 1, step: 0.001, section: 'Coat', physicalOnly: true },
+
+  // ── Sheen ────────────────────────────────────────────────────
+  { label: 'Sheen', key: 'sheen', min: 0, max: 1, step: 0.001, section: 'Sheen', physicalOnly: true },
+  { label: 'Sheen Rough.', key: 'sheenRoughness', min: 0, max: 1, step: 0.001, section: 'Sheen', physicalOnly: true },
+  { label: 'Sheen Color', key: 'sheenColor', min: 0, max: 0, step: 0, section: 'Sheen', physicalOnly: true, isColor: true, colorKey: 'sheenColor' },
+
+  // ── Iridescence ──────────────────────────────────────────────
+  { label: 'Iridescence', key: 'iridescence', min: 0, max: 1, step: 0.001, section: 'Iridescence', physicalOnly: true },
+  { label: 'Irid. IOR', key: 'iridescenceIOR', min: 1, max: 2.333, step: 0.001, section: 'Iridescence', physicalOnly: true },
+  { label: 'Irid. Thick. Min', key: 'iridescenceThicknessRange', min: 100, max: 800, step: 1, section: 'Iridescence', physicalOnly: true, iridTupleIndex: 0, integerOnly: true },
+  { label: 'Irid. Thick. Max', key: 'iridescenceThicknessRange', min: 100, max: 800, step: 1, section: 'Iridescence', physicalOnly: true, iridTupleIndex: 1, integerOnly: true },
+
+  // ── Emission ─────────────────────────────────────────────────
+  { label: 'Emissive Color', key: 'emissive', min: 0, max: 0, step: 0, section: 'Emission', isColor: true, colorKey: 'emissive' },
+  { label: 'Emissive Int.', key: 'emissiveIntensity', min: 0, max: 5, step: 0.001, section: 'Emission' },
+
+  // ── Settings ─────────────────────────────────────────────────
+  { label: 'Opacity', key: 'opacity', min: 0, max: 1, step: 0.001, section: 'Settings' },
 ];
 
-const SECTIONS = ['Base', 'Surface', 'Emission', 'Clearcoat', 'Transmission', 'Sheen', 'Iridescence', 'Specular', 'Texture Maps'] as const;
+interface SectionDef {
+  name: string;
+  physicalOnly?: boolean;
+  defaultExpanded?: boolean;
+}
+
+const SECTIONS: SectionDef[] = [
+  { name: 'Surface', defaultExpanded: true },
+  { name: 'Specular', physicalOnly: true },
+  { name: 'Transmission', physicalOnly: true },
+  { name: 'Coat', physicalOnly: true },
+  { name: 'Sheen', physicalOnly: true },
+  { name: 'Iridescence', physicalOnly: true },
+  { name: 'Emission' },
+  { name: 'Settings' },
+  { name: 'Texture Maps' },
+];
+
+const NUM_INPUT_STYLE: React.CSSProperties = {
+  width: 52,
+  height: 20,
+  background: 'var(--bg-input)',
+  border: '1px solid var(--border)',
+  borderRadius: 3,
+  color: 'var(--text-sec)',
+  fontSize: 9,
+  fontFamily: 'var(--font-mono)',
+  padding: '0 4px',
+  outline: 'none',
+  flexShrink: 0,
+  textAlign: 'right' as const,
+};
+
+const NUM_INPUT_FOCUS_STYLE: React.CSSProperties = {
+  ...NUM_INPUT_STYLE,
+  borderColor: 'var(--accent)',
+};
 
 const MaterialEditorPanel: React.FC<MaterialEditorPanelProps> = ({ materialManagerRef, sceneRef }) => {
   const materials = useMaterialEditorStore((s) => s.materials);
@@ -72,7 +126,14 @@ const MaterialEditorPanel: React.FC<MaterialEditorPanelProps> = ({ materialManag
 
   const [searchOpen, setSearchOpen] = useState(false);
   const [search, setSearch] = useState('');
-  const [collapsedSections, setCollapsedSections] = useState<Set<string>>(new Set(['Sheen', 'Iridescence', 'Specular']));
+  const [focusedNumInput, setFocusedNumInput] = useState<string | null>(null);
+  const [collapsedSections, setCollapsedSections] = useState<Set<string>>(() => {
+    const set = new Set<string>();
+    for (const s of SECTIONS) {
+      if (!s.defaultExpanded) set.add(s.name);
+    }
+    return set;
+  });
   const textureInputRefs = useRef<Record<string, HTMLInputElement | null>>({});
   const searchInputRef = useRef<HTMLInputElement>(null);
 
@@ -94,18 +155,34 @@ const MaterialEditorPanel: React.FC<MaterialEditorPanelProps> = ({ materialManag
     );
   }, [materials, search]);
 
+  // Physical keys that auto-set isPhysical
+  const physicalKeys = useMemo(() => new Set<string>([
+    'clearcoat', 'clearcoatRoughness', 'transmission', 'transmissionRoughness',
+    'thickness', 'ior', 'sheen', 'sheenRoughness', 'sheenColor',
+    'iridescence', 'iridescenceIOR', 'iridescenceThicknessRange',
+    'attenuationColor', 'attenuationDistance', 'specularIntensity', 'specularColor',
+  ]), []);
+
   const handlePropChange = useCallback(
-    (key: keyof PBRMaterialState, value: number | string | boolean) => {
+    (key: keyof PBRMaterialState, value: number | string | boolean, iridTupleIndex?: 0 | 1) => {
       if (!selectedId) return;
 
-      // If changing a physical property, mark isPhysical = true
-      const updates: Partial<PBRMaterialState> = { [key]: value } as Partial<PBRMaterialState>;
-      const physicalKeys = new Set<string>([
-        'clearcoat', 'clearcoatRoughness', 'transmission', 'transmissionRoughness',
-        'thickness', 'ior', 'sheen', 'sheenRoughness', 'sheenColor',
-        'iridescence', 'iridescenceIOR', 'iridescenceThicknessRange',
-        'attenuationColor', 'attenuationDistance', 'specularIntensity', 'specularColor',
-      ]);
+      const updates: Partial<PBRMaterialState> = {};
+
+      // Handle iridescence thickness range tuple specially
+      if (key === 'iridescenceThicknessRange' && iridTupleIndex !== undefined) {
+        const cur = useMaterialEditorStore.getState().materials.find((m) => m.id === selectedId);
+        const existing: [number, number] = cur?.iridescenceThicknessRange ?? [100, 400];
+        if (iridTupleIndex === 0) {
+          updates.iridescenceThicknessRange = [value as number, existing[1]];
+        } else {
+          updates.iridescenceThicknessRange = [existing[0], value as number];
+        }
+      } else {
+        (updates as any)[key] = value;
+      }
+
+      // Auto-set isPhysical for physical keys
       if (physicalKeys.has(key as string)) {
         updates.isPhysical = true;
       }
@@ -123,7 +200,7 @@ const MaterialEditorPanel: React.FC<MaterialEditorPanelProps> = ({ materialManag
         if (updated) mm.applyMaterialState(updated, scene);
       }
     },
-    [selectedId, updateMaterial, materialManagerRef, sceneRef],
+    [selectedId, updateMaterial, materialManagerRef, sceneRef, physicalKeys],
   );
 
   const handleTextureUpload = useCallback((slotKey: TextureSlotKey) => {
@@ -189,28 +266,177 @@ const MaterialEditorPanel: React.FC<MaterialEditorPanelProps> = ({ materialManag
     return map;
   }, []);
 
-  // Filter out physical-only sections when not in physical mode
+  // Determine visible sections based on physical mode
   const visibleSections = useMemo(() => {
     if (!selected) return SECTIONS;
     const phys = selected.isPhysical;
     return SECTIONS.filter((s) => {
-      if (s === 'Texture Maps') return true;
-      const rows = propsBySection[s];
-      if (!rows) return true;
-      if (s === 'Base' || s === 'Surface' || s === 'Emission') return true;
-      return phys;
+      if (s.name === 'Texture Maps') return true;
+      if (s.physicalOnly) return phys;
+      return true;
     });
-  }, [selected, propsBySection]);
+  }, [selected]);
 
-  const formatValue = (val: number, step: number, infinityKey?: boolean): string => {
-    if (infinityKey && (val === Infinity || val >= 20)) return '\u221e';
-    if (step >= 1) return Math.round(val).toString();
-    return val.toFixed(2);
+  /** Format numeric value for display: 3 decimal places, ∞ for Infinity, integer for irid */
+  const formatNumValue = useCallback((rawVal: number | undefined, row: PropRow): string => {
+    if (rawVal == null || Number.isNaN(rawVal)) return '0.000';
+    if (row.infinityKey && (rawVal === Infinity || rawVal >= 20)) return '\u221e';
+    if (row.integerOnly) return Math.round(rawVal).toString();
+    return rawVal.toFixed(3);
+  }, []);
+
+  /** Get safe numeric value for slider */
+  const getSafeNum = (rawVal: number | undefined, min: number): number => {
+    if (rawVal != null && !Number.isNaN(rawVal)) return rawVal;
+    return min;
+  };
+
+  /** Handle numeric input blur: clamp and handle NaN */
+  const handleNumBlur = useCallback(
+    (row: PropRow, inputValue: string) => {
+      const v = parseFloat(inputValue);
+      if (isNaN(v) || v == null) {
+        handlePropChange(row.key, row.min, row.iridTupleIndex);
+        return;
+      }
+      const clamped = Math.max(row.min, Math.min(row.max, v));
+      handlePropChange(row.key, clamped, row.iridTupleIndex);
+    },
+    [handlePropChange],
+  );
+
+  /** Handle numeric input change: live update */
+  const handleNumChange = useCallback(
+    (row: PropRow, inputValue: string) => {
+      const v = parseFloat(inputValue);
+      if (!isNaN(v)) {
+        handlePropChange(row.key, v, row.iridTupleIndex);
+      }
+    },
+    [handlePropChange],
+  );
+
+  // Chevron SVG (8x8)
+  const chevronSvg = (expanded: boolean) => (
+    <svg
+      width="8" height="8" viewBox="0 0 8 8" fill="var(--text-dim)"
+      style={{ transform: expanded ? 'rotate(0)' : 'rotate(-90deg)', transition: 'transform 0.15s ease', flexShrink: 0 }}
+    >
+      <path d="M1 1l6 3-6 3z" />
+    </svg>
+  );
+
+  // PHYSICAL badge
+  const physicalBadge = (
+    <span style={{
+      fontSize: 7, padding: '0 4px', borderRadius: 2, marginLeft: 'auto',
+      background: 'rgba(167, 139, 250, 0.12)', color: 'var(--accent-bright)',
+      letterSpacing: '0.4px', fontWeight: 600,
+    }}>
+      PHYSICAL
+    </span>
+  );
+
+  // Render a slider property row (Blender-style: label | slider | numeric input)
+  const renderSliderRow = (row: PropRow) => {
+    if (!selected) return null;
+
+    const inputId = `${row.key}-${row.iridTupleIndex ?? ''}`;
+
+    // For iridescence thickness, extract the tuple element
+    let rawVal: number;
+    if (row.iridTupleIndex !== undefined) {
+      rawVal = (selected.iridescenceThicknessRange?.[row.iridTupleIndex]) ?? row.min;
+    } else {
+      rawVal = selected[row.key] as number;
+    }
+
+    const safeVal = getSafeNum(rawVal, row.min);
+    const displayVal = formatNumValue(rawVal, row);
+
+    // For infinity key, slider value is clamped to 20
+    const sliderVal = row.infinityKey && (rawVal === Infinity || rawVal >= 20) ? row.max : safeVal;
+
+    return (
+      <div key={inputId} className="mat-param-row">
+        <label className="mat-param-label">{row.label}</label>
+        <input
+          type="range"
+          min={row.min}
+          max={row.max}
+          step={row.step}
+          value={sliderVal}
+          onChange={(e) => handlePropChange(row.key, parseFloat(e.target.value), row.iridTupleIndex)}
+          style={{ flex: 1, height: 4, cursor: 'pointer', accentColor: 'var(--accent)' }}
+        />
+        <input
+          type="number"
+          min={row.min}
+          max={row.max}
+          step={row.step}
+          value={displayVal}
+          onChange={(e) => handleNumChange(row, e.target.value)}
+          onBlur={(e) => handleNumBlur(row, e.target.value)}
+          onFocus={() => setFocusedNumInput(inputId)}
+          onMouseEnter={(e) => {
+            (e.currentTarget as HTMLInputElement).style.borderColor = 'var(--accent)';
+          }}
+          onMouseLeave={(e) => {
+            if (focusedNumInput !== inputId) {
+              (e.currentTarget as HTMLInputElement).style.borderColor = 'var(--border)';
+            }
+          }}
+          style={focusedNumInput === inputId ? NUM_INPUT_FOCUS_STYLE : NUM_INPUT_STYLE}
+        />
+      </div>
+    );
+  };
+
+  // Render a color property row (Blender-style: label | color swatch | hex display)
+  const renderColorRow = (row: PropRow) => {
+    if (!selected || !row.colorKey) return null;
+    const hexVal = (selected[row.colorKey] as string) ?? '#000000';
+
+    return (
+      <div key={row.colorKey} className="mat-param-row">
+        <label className="mat-param-label">{row.label}</label>
+        <input
+          type="color"
+          value={hexVal}
+          onChange={(e) => handlePropChange(row.key, e.target.value)}
+          style={{
+            width: 32, height: 18, border: '1px solid var(--border)',
+            borderRadius: 3, cursor: 'pointer', padding: 0, flexShrink: 0,
+          }}
+        />
+        <span style={{
+          fontSize: 9, color: 'var(--text-dim)', fontFamily: 'var(--font-mono)', flex: 1,
+        }}>
+          {hexVal}
+        </span>
+      </div>
+    );
+  };
+
+  // Render a section header
+  const renderSectionHeader = (sectionName: string, isPhysical?: boolean) => {
+    const expanded = !collapsedSections.has(sectionName);
+    return (
+      <div
+        className="mat-section-title"
+        style={{ cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4, marginBottom: 0 }}
+        onClick={() => toggleSection(sectionName)}
+      >
+        {chevronSvg(expanded)}
+        {sectionName}
+        {isPhysical && physicalBadge}
+      </div>
+    );
   };
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-      {/* Header with search toggle */}
+      {/* ── Header with search toggle ──────────────────────────── */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 8px', borderBottom: '1px solid var(--border)' }}>
         <span style={{ fontSize: 9, fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.8, color: 'var(--text-dim)', flex: 1 }}>
           Materials ({materials.length})
@@ -244,7 +470,7 @@ const MaterialEditorPanel: React.FC<MaterialEditorPanelProps> = ({ materialManag
         </button>
       </div>
 
-      {/* Search bar */}
+      {/* ── Search bar ─────────────────────────────────────────── */}
       {searchOpen && (
         <div style={{ padding: '4px 8px', borderBottom: '1px solid var(--border)' }}>
           <div style={{ position: 'relative' }}>
@@ -297,7 +523,7 @@ const MaterialEditorPanel: React.FC<MaterialEditorPanelProps> = ({ materialManag
         </div>
       )}
 
-      {/* Selected material chip */}
+      {/* ── Selected material chip ─────────────────────────────── */}
       {selected && (
         <div className="mat-selected-chip">
           <div
@@ -321,7 +547,7 @@ const MaterialEditorPanel: React.FC<MaterialEditorPanelProps> = ({ materialManag
         </div>
       )}
 
-      {/* Empty state */}
+      {/* ── Empty state ────────────────────────────────────────── */}
       {!selected && (
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: 24, textAlign: 'center' }}>
           <div style={{
@@ -341,102 +567,40 @@ const MaterialEditorPanel: React.FC<MaterialEditorPanelProps> = ({ materialManag
         </div>
       )}
 
-      {/* Material properties */}
+      {/* ── Material properties ────────────────────────────────── */}
       {selected && (
         <div style={{ flex: 1, overflowY: 'auto', padding: '8px 10px' }}>
           {/* Material name + meshes */}
-          <div style={{ marginBottom: 8 }}>
-            <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--text)' }}>{selected.name}</div>
-            <div style={{ fontSize: 9, color: 'var(--text-dim)', marginTop: 1 }}>
+          <div style={{ marginBottom: 10 }}>
+            <input
+              type="text"
+              value={selected.name}
+              onChange={(e) => handlePropChange('name', e.target.value)}
+              style={{
+                fontSize: 11, fontWeight: 600, color: 'var(--text)',
+                background: 'transparent', border: '1px solid transparent',
+                borderRadius: 3, padding: '1px 4px', width: '100%',
+                outline: 'none', fontFamily: 'inherit',
+              }}
+              onMouseEnter={(e) => { (e.currentTarget as HTMLInputElement).style.borderColor = 'var(--border)'; }}
+              onMouseLeave={(e) => { (e.currentTarget as HTMLInputElement).style.borderColor = 'transparent'; }}
+            />
+            <div style={{ fontSize: 9, color: 'var(--text-dim)', marginTop: 1, paddingLeft: 4 }}>
               {selected.meshNames.join(', ')}
             </div>
           </div>
 
-          {/* Color pickers */}
-          <div style={{ display: 'flex', gap: 10, marginBottom: 8, alignItems: 'flex-start', flexWrap: 'wrap' }}>
-            <div>
-              <div className="mat-section-title" style={{ marginBottom: 3 }}>Base Color</div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-                <input type="color" value={selected.color} onChange={(e) => handlePropChange('color', e.target.value)}
-                  style={{ width: 28, height: 20, border: '1px solid var(--border)', borderRadius: 3, cursor: 'pointer', padding: 0 }} />
-                <span style={{ fontSize: 9, color: 'var(--text-dim)', fontFamily: 'var(--font-mono)' }}>{selected.color}</span>
-              </div>
-            </div>
-            <div>
-              <div className="mat-section-title" style={{ marginBottom: 3 }}>Emissive</div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-                <input type="color" value={selected.emissive} onChange={(e) => handlePropChange('emissive', e.target.value)}
-                  style={{ width: 28, height: 20, border: '1px solid var(--border)', borderRadius: 3, cursor: 'pointer', padding: 0 }} />
-                <span style={{ fontSize: 9, color: 'var(--text-dim)', fontFamily: 'var(--font-mono)' }}>{selected.emissive}</span>
-              </div>
-            </div>
-            {selected.isPhysical && (
-              <>
-                <div>
-                  <div className="mat-section-title" style={{ marginBottom: 3 }}>Sheen Color</div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-                    <input type="color" value={selected.sheenColor} onChange={(e) => handlePropChange('sheenColor', e.target.value)}
-                      style={{ width: 28, height: 20, border: '1px solid var(--border)', borderRadius: 3, cursor: 'pointer', padding: 0 }} />
-                    <span style={{ fontSize: 9, color: 'var(--text-dim)', fontFamily: 'var(--font-mono)' }}>{selected.sheenColor}</span>
-                  </div>
-                </div>
-                <div>
-                  <div className="mat-section-title" style={{ marginBottom: 3 }}>Specular Color</div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-                    <input type="color" value={selected.specularColor} onChange={(e) => handlePropChange('specularColor', e.target.value)}
-                      style={{ width: 28, height: 20, border: '1px solid var(--border)', borderRadius: 3, cursor: 'pointer', padding: 0 }} />
-                    <span style={{ fontSize: 9, color: 'var(--text-dim)', fontFamily: 'var(--font-mono)' }}>{selected.specularColor}</span>
-                  </div>
-                </div>
-                <div>
-                  <div className="mat-section-title" style={{ marginBottom: 3 }}>Atten. Color</div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-                    <input type="color" value={selected.attenuationColor} onChange={(e) => handlePropChange('attenuationColor', e.target.value)}
-                      style={{ width: 28, height: 20, border: '1px solid var(--border)', borderRadius: 3, cursor: 'pointer', padding: 0 }} />
-                    <span style={{ fontSize: 9, color: 'var(--text-dim)', fontFamily: 'var(--font-mono)' }}>{selected.attenuationColor}</span>
-                  </div>
-                </div>
-              </>
-            )}
-          </div>
-
-          {/* Toggles */}
-          <div style={{ display: 'flex', gap: 10, marginBottom: 10, flexWrap: 'wrap' }}>
-            {(['transparent', 'doubleSided', 'flatShading'] as const).map((key) => (
-              <label
-                key={key}
-                style={{ fontSize: 10, color: 'var(--text-sec)', display: 'flex', alignItems: 'center', gap: 4, cursor: 'pointer' }}
-              >
-                <input
-                  type="checkbox"
-                  checked={selected[key] as boolean}
-                  onChange={(e) => handlePropChange(key, e.target.checked)}
-                  style={{ width: 12, height: 12 }}
-                />
-                {key === 'doubleSided' ? 'Double Sided' : key === 'flatShading' ? 'Flat Shading' : 'Transparent'}
-              </label>
-            ))}
-          </div>
-
-          {/* Property sections */}
+          {/* ── Property sections ─────────────────────────────── */}
           {visibleSections.map((section) => {
-            if (section === 'Texture Maps') {
+            const sectionName = section.name;
+
+            // ── Texture Maps (special rendering) ──────────────
+            if (sectionName === 'Texture Maps') {
+              const expanded = !collapsedSections.has(sectionName);
               return (
-                <div key={section} style={{ marginBottom: 8 }}>
-                  <div
-                    className="mat-section-title"
-                    style={{ cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4 }}
-                    onClick={() => toggleSection(section)}
-                  >
-                    <svg
-                      width="8" height="8" viewBox="0 0 8 8" fill="var(--text-dim)"
-                      style={{ transform: collapsedSections.has(section) ? 'rotate(-90deg)' : 'rotate(0)', transition: 'transform 0.15s ease', flexShrink: 0 }}
-                    >
-                      <path d="M1 1l6 3-6 3z" />
-                    </svg>
-                    {section}
-                  </div>
-                  {!collapsedSections.has(section) && (
+                <div key={sectionName} style={{ marginBottom: 8 }}>
+                  {renderSectionHeader(sectionName, false)}
+                  {expanded && (
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 3, marginTop: 4 }}>
                       {TEXTURE_SLOTS.map((slotKey) => {
                         const slot = selected[slotKey];
@@ -450,7 +614,9 @@ const MaterialEditorPanel: React.FC<MaterialEditorPanelProps> = ({ materialManag
                               border: `1px solid ${slot.enabled ? 'var(--border-light)' : 'var(--border)'}`,
                             }}
                           >
-                            <label className="mat-param-label" style={{ fontSize: 9 }}>{TEXTURE_SLOT_LABELS[slotKey]}</label>
+                            <label className="mat-param-label" style={{ fontSize: 9 }}>
+                              {TEXTURE_SLOT_LABELS[slotKey]}
+                            </label>
                             {slot.enabled && slot.dataUrl ? (
                               <>
                                 <div
@@ -460,21 +626,36 @@ const MaterialEditorPanel: React.FC<MaterialEditorPanelProps> = ({ materialManag
                                     border: '1px solid var(--border)', flexShrink: 0,
                                   }}
                                 />
-                                <span style={{ flex: 1, fontSize: 8, color: 'var(--text-dim)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={slot.fileName}>
+                                <span
+                                  style={{
+                                    flex: 1, fontSize: 8, color: 'var(--text-dim)',
+                                    overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                                  }}
+                                  title={slot.fileName}
+                                >
                                   {slot.fileName}
                                 </span>
                                 <button
                                   onClick={() => handleRemoveTexture(slotKey)}
-                                  style={{ fontSize: 8, color: 'var(--danger)', background: 'none', border: 'none', cursor: 'pointer', padding: '1px 3px', flexShrink: 0 }}
+                                  style={{
+                                    fontSize: 8, color: 'var(--danger)', background: 'none',
+                                    border: 'none', cursor: 'pointer', padding: '1px 3px', flexShrink: 0,
+                                  }}
                                 >
-                                  <svg width="8" height="8" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="2"><path d="M2 2l8 8M10 2L2 10" /></svg>
+                                  <svg width="8" height="8" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="2">
+                                    <path d="M2 2l8 8M10 2L2 10" />
+                                  </svg>
                                 </button>
                               </>
                             ) : (
                               <>
                                 <button
                                   onClick={() => handleTextureUpload(slotKey)}
-                                  style={{ fontSize: 8, color: 'var(--text-dim)', background: 'var(--bg-input)', border: '1px solid var(--border)', borderRadius: 3, cursor: 'pointer', padding: '2px 6px', flexShrink: 0 }}
+                                  style={{
+                                    fontSize: 8, color: 'var(--text-dim)', background: 'var(--bg-input)',
+                                    border: '1px solid var(--border)', borderRadius: 3, cursor: 'pointer',
+                                    padding: '2px 6px', flexShrink: 0,
+                                  }}
                                 >
                                   + Load
                                 </button>
@@ -496,52 +677,54 @@ const MaterialEditorPanel: React.FC<MaterialEditorPanelProps> = ({ materialManag
               );
             }
 
-            const rows = propsBySection[section];
-            if (!rows || rows.length === 0) return null;
-
-            return (
-              <div key={section} style={{ marginBottom: 8 }}>
-                <div
-                  className="mat-section-title"
-                  style={{ cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4 }}
-                  onClick={() => toggleSection(section)}
-                >
-                  <svg
-                    width="8" height="8" viewBox="0 0 8 8" fill="var(--text-dim)"
-                    style={{ transform: collapsedSections.has(section) ? 'rotate(-90deg)' : 'rotate(0)', transition: 'transform 0.15s ease', flexShrink: 0 }}
-                  >
-                    <path d="M1 1l6 3-6 3z" />
-                  </svg>
-                  {section}
-                  {rows[0]?.physicalOnly && (
-                    <span style={{
-                      fontSize: 7, padding: '0 4px', borderRadius: 2, marginLeft: 'auto',
-                      background: 'rgba(167, 139, 250, 0.12)', color: 'var(--accent-bright)',
-                      letterSpacing: '0.4px', fontWeight: 600,
-                    }}>
-                      PHYSICAL
-                    </span>
+            // ── Settings section (sliders + checkboxes) ────────
+            if (sectionName === 'Settings') {
+              const rows = propsBySection[sectionName];
+              if (!rows) return null;
+              const expanded = !collapsedSections.has(sectionName);
+              return (
+                <div key={sectionName} style={{ marginBottom: 8 }}>
+                  {renderSectionHeader(sectionName, false)}
+                  {expanded && (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 4, marginTop: 4 }}>
+                      {rows.map((row) => {
+                        if (row.isColor) return renderColorRow(row);
+                        return renderSliderRow(row);
+                      })}
+                      {/* Checkboxes */}
+                      {(['transparent', 'doubleSided', 'flatShading'] as const).map((key) => (
+                        <div key={key} className="mat-param-row">
+                          <label className="mat-param-label" style={{ flex: 1 }}>
+                            {key === 'doubleSided' ? 'Double Sided' : key === 'flatShading' ? 'Flat Shading' : 'Transparent'}
+                          </label>
+                          <input
+                            type="checkbox"
+                            checked={selected[key] as boolean}
+                            onChange={(e) => handlePropChange(key, e.target.checked)}
+                            style={{ width: 14, height: 14, cursor: 'pointer', flexShrink: 0, accentColor: 'var(--accent)' }}
+                          />
+                        </div>
+                      ))}
+                    </div>
                   )}
                 </div>
-                {!collapsedSections.has(section) && (
+              );
+            }
+
+            // ── Standard property sections ────────────────────
+            const rows = propsBySection[sectionName];
+            if (!rows || rows.length === 0) return null;
+            const expanded = !collapsedSections.has(sectionName);
+
+            return (
+              <div key={sectionName} style={{ marginBottom: 8 }}>
+                {renderSectionHeader(sectionName, section.physicalOnly)}
+                {expanded && (
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 4, marginTop: 4 }}>
-                    {rows.map((row) => (
-                      <div key={row.key} className="mat-param-row">
-                        <label className="mat-param-label">{row.label}</label>
-                        <input
-                          type="range"
-                          min={row.min}
-                          max={row.max}
-                          step={row.step}
-                          value={selected[row.key] as number}
-                          onChange={(e) => handlePropChange(row.key, parseFloat(e.target.value))}
-                          style={{ flex: 1, height: 4, cursor: 'pointer', accentColor: 'var(--accent)' }}
-                        />
-                        <span className="mat-param-value">
-                          {formatValue(selected[row.key] as number, row.step, row.infinityKey)}{row.unit || ''}
-                        </span>
-                      </div>
-                    ))}
+                    {rows.map((row) => {
+                      if (row.isColor) return renderColorRow(row);
+                      return renderSliderRow(row);
+                    })}
                   </div>
                 )}
               </div>
