@@ -858,37 +858,43 @@ const TreeNode: React.FC<{
    Number Input
    ═══════════════════════════════════════════════════════════════════ */
 
+const AXIS_COLORS = ['#f87171', '#4ade80', '#60a5fa'];
+const AXIS_LABELS = ['X', 'Y', 'Z'];
+
 const Vec3Input: React.FC<{
   label: string;
-  labelColor: string;
   values: [number, number, number];
   onChange: (idx: number, value: number) => void;
   decimals?: number;
-}> = ({ label, labelColor, values, onChange, decimals = 3 }) => (
+}> = ({ label, values, onChange, decimals = 3 }) => (
   <div style={{ display: 'flex', alignItems: 'center', gap: 3 }}>
-    <span style={{ fontSize: 9, color: labelColor, width: 10, textAlign: 'center', fontFamily: 'var(--font-mono)', flexShrink: 0 }}>
+    <span style={{ fontSize: 9, color: 'var(--text-dim)', width: 28, flexShrink: 0, fontFamily: 'var(--font-mono)' }}>
       {label}
     </span>
     {[0, 1, 2].map((idx) => (
-      <input
-        key={idx}
-        type="number"
-        step="any"
-        value={values[idx]}
-        onChange={(e) => onChange(idx, parseFloat(e.target.value) || 0)}
-        style={{
-          width: 55,
-          fontSize: 9,
-          fontFamily: 'var(--font-mono)',
-          background: 'var(--bg-input)',
-          border: '1px solid var(--border)',
-          borderRadius: 2,
-          color: 'var(--text-sec)',
-          padding: '1px 3px',
-          outline: 'none',
-          flexShrink: 0,
-        }}
-      />
+      <div key={idx} style={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+        <span style={{ fontSize: 8, color: AXIS_COLORS[idx], width: 8, textAlign: 'center', fontFamily: 'var(--font-mono)', flexShrink: 0 }}>
+          {AXIS_LABELS[idx]}
+        </span>
+        <input
+          type="number"
+          step="any"
+          value={parseFloat(values[idx].toFixed(decimals))}
+          onChange={(e) => onChange(idx, parseFloat(e.target.value) || 0)}
+          style={{
+            width: 52,
+            fontSize: 9,
+            fontFamily: 'var(--font-mono)',
+            background: 'var(--bg-input)',
+            border: '1px solid var(--border)',
+            borderRadius: 2,
+            color: 'var(--text-sec)',
+            padding: '1px 3px',
+            outline: 'none',
+            flexShrink: 0,
+          }}
+        />
+      </div>
     ))}
   </div>
 );
@@ -1099,24 +1105,21 @@ const ObjectPropertiesPanel: React.FC<{
       {/* Transform */}
       <CollapsibleSection title="Transform" defaultOpen={true}>
         <Vec3Input
-          label="X"
-          labelColor="#f87171"
+          label="Pos"
           values={[selectedObj.position.x, selectedObj.position.y, selectedObj.position.z]}
           onChange={handlePositionChange}
         />
         <Vec3Input
-          label="Y"
-          labelColor="#4ade80"
+          label="Rot"
           values={[
-            parseFloat(toDeg(selectedObj.rotation.x).toFixed(3)),
-            parseFloat(toDeg(selectedObj.rotation.y).toFixed(3)),
-            parseFloat(toDeg(selectedObj.rotation.z).toFixed(3)),
+            toDeg(selectedObj.rotation.x),
+            toDeg(selectedObj.rotation.y),
+            toDeg(selectedObj.rotation.z),
           ]}
           onChange={handleRotationChange}
         />
         <Vec3Input
-          label="Z"
-          labelColor="#60a5fa"
+          label="Scale"
           values={[selectedObj.scale.x, selectedObj.scale.y, selectedObj.scale.z]}
           onChange={handleScaleChange}
         />

@@ -234,3 +234,33 @@ Work Log:
 Stage Summary:
 - SceneHierarchy.tsx fully rewritten with all Blender-style features
 - Build verified
+
+---
+Task ID: 1-5
+Agent: Main Agent + Subagents
+Task: Blender-style Scene Hierarchy + Material Editor Panel rewrite
+
+Work Log:
+- Created sceneHierarchyStore.ts with selection, visibility, isolation, expanded, filter state
+- Rewrote SceneHierarchy.tsx (1426 lines) with full Blender Outliner features:
+  - Filter toolbar (All/Mesh/Light/Camera/Group), New Collection, Show All, Refresh
+  - Tree view with type-specific SVG icons (cube, sun, camera, folder)
+  - Right-click context menu with Select Hierarchy, Duplicate (Shift+D), Delete (Del), Hide (H), Show, Isolate, Move to Collection submenu, New Collection Here
+  - Move to Collection submenu showing all THREE.Group objects for reparenting
+  - Double-click inline rename
+  - Object Properties Panel at bottom with Transform (Pos/Rot/Scale with X/Y/Z color-coded inputs), Info (vertices, triangles, material, type, visible toggle)
+  - Material selection integration (auto-switches to matEdit tab)
+- Rewrote MaterialEditorPanel.tsx (739 lines) with Blender-style property rows:
+  - Each property: Label | Slider | Editable numeric input (3 decimal places)
+  - Color properties: Label | Color swatch | Hex display
+  - 9 sections: Surface, Specular, Transmission, Coat, Sheen, Iridescence, Emission, Settings, Texture Maps
+  - Iridescence thickness range as separate min/max rows with integer display
+  - Infinity display for attenuation distance
+  - Blur-to-clamp on numeric inputs
+  - All properties functional in real-time
+
+Stage Summary:
+- SceneHierarchy.tsx: 1426 lines, full Blender Outliner with collections, context menu, properties panel
+- MaterialEditorPanel.tsx: 739 lines, Blender Material Properties layout with editable numeric inputs
+- sceneHierarchyStore.ts: New store for hierarchy state management
+- Build verified: 0 errors, 110ms
