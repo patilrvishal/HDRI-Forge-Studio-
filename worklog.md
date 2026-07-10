@@ -82,3 +82,28 @@ Stage Summary:
 - HDR encoder confirmed OK — no changes needed
 - Reference pixel value ranges: max ~1000, median ~0.07, 20 stops dynamic range
 
+---
+Task ID: 2
+Agent: Main Agent
+Task: Viewport Design Panel — cinematic 3-light controls overlay
+
+Work Log:
+- Created ViewportDesignPanel.tsx (280px floating overlay, backdrop blur, 5 collapsible sections)
+- Section 1: Quick Presets — 4 cinematic presets (Cinematic 3-Light, Neon Noir, Golden Hour, Arctic Cool) with one-click apply
+- Section 2: 3-Light Setup — Key/Fill/Ambient lights with color pickers, brightness, lat/lng/height sliders
+- Section 3: Background — color picker, env intensity, HDRI rotation
+- Section 4: Post-Processing — exposure, bloom, bloom threshold, vignette, AO strength/radius
+- Section 5: Color Grading — brightness, contrast, saturation
+- Section 6: Grid & Ground — grid toggle, ground color, reflection sharpness, fade radius, roughness
+- Added CSS for .vp-design-panel (glassmorphism overlay), .vp-design-preset-btn, custom range slider thumbs
+- Extended uiStore PanelKey with 'viewportDesign', added to DEFAULT_PANEL_VISIBILITY (default off), focus mode, full preview
+- Added toggle button in ViewportToolbar (3-dots icon, highlighted when active)
+- Integrated into AppLayout as absolute-positioned overlay within viewport area
+- All controls bind to existing stores (sceneStore, lightsStore) — changes persist via existing scene save/load
+
+Stage Summary:
+- Files created: ViewportDesignPanel.tsx
+- Files modified: globals.css, uiStore.ts, AppLayout.tsx, ViewportToolbar.tsx
+- 4 cinematic presets: each sets 3 lights (color, position, brightness) + background + bloom + vignette + AO + color grading + exposure
+- Panel toggle: toolbar icon in viewport toolbar (next to settings button)
+- All changes save/load with .lightscene files automatically (no exporter changes needed)

@@ -9,6 +9,7 @@ import { PresetBrowser } from '../Presets/PresetBrowser';
 import { LightPreview } from '../Previews/LightPreview';
 import { MaterialPreviewTab, getMaterialPreviewThumbnail } from '../Previews/MaterialPreviewTab';
 import { MaterialEditorPanel } from '../Materials/MaterialEditorPanel';
+import { ViewportDesignPanel } from '../Viewport/ViewportDesignPanel';
 import { RenderSettingsPanel } from '../Settings/RenderSettingsPanel';
 import { ResizeHandle } from '../UI/ResizeHandle';
 import { useUIStore, type PanelKey } from '../../store/uiStore';
@@ -98,6 +99,7 @@ export const AppLayout: React.FC = () => {
   // Bottom panel section visibility
   const timelineVisible = panelVisibility.timelineSection;
   const presetsVisible = panelVisibility.presetsSection;
+  const viewportDesignVisible = panelVisibility.viewportDesign;
 
   // History state for status bar
   const undoCount = useHistoryStore((s) => s.undoStack.length);
@@ -360,6 +362,9 @@ export const AppLayout: React.FC = () => {
             }}
           >
             <Viewport sceneManagerRef={sceneManagerRef} onScreenshot={handleScreenshot} onReady={handleViewportReady} />
+
+            {/* Viewport Design Panel — floating overlay */}
+            {viewportDesignVisible && !focusMode && <ViewportDesignPanel />}
 
             {/* Focus mode hint overlay */}
             {focusMode && (

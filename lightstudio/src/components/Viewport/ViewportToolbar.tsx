@@ -271,6 +271,21 @@ export const ViewportToolbar: React.FC<ViewportToolbarProps> = ({
           </svg>
         </button>
 
+        {/* Viewport Design panel toggle */}
+        <button
+          className={`btn-icon ${useUIStore.getState().panelVisibility.viewportDesign ? 'active' : ''}`}
+          onClick={() => useUIStore.getState().togglePanel('viewportDesign')}
+          title="Viewport Design"
+          aria-label="Toggle Viewport Design"
+        >
+          <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.2">
+            <rect x="1.5" y="2" width="11" height="10" rx="1.5" />
+            <circle cx="5" cy="5.5" r="1.5" />
+            <circle cx="9" cy="5.5" r="1.5" />
+            <circle cx="7" cy="8.5" r="1.5" />
+          </svg>
+        </button>
+
         {/* Settings button */}
         <button
           className="btn-icon"

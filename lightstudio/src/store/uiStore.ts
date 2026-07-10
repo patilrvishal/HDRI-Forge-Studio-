@@ -13,7 +13,8 @@ export type PanelKey =
   | 'timelineSection'
   | 'presetsSection'
   | 'materialPanel'
-  | 'historyPanel';
+  | 'historyPanel'
+  | 'viewportDesign';
 
 export interface PanelVisibilityState {
   [K in PanelKey]: boolean;
@@ -112,6 +113,7 @@ const DEFAULT_PANEL_VISIBILITY: PanelVisibilityState = {
   presetsSection: true,
   materialPanel: true,
   historyPanel: false,
+  viewportDesign: false,
 };
 
 export const useUIStore = create<UIState>((set, get) => ({
@@ -273,6 +275,7 @@ export const useUIStore = create<UIState>((set, get) => ({
         presetsSection: false,
         materialPanel: false,
         historyPanel: false,
+        viewportDesign: false,
       });
       set({ focusMode: true });
     }
@@ -319,6 +322,7 @@ export const useUIStore = create<UIState>((set, get) => ({
             presetsSection: false,
             materialPanel: false,
             historyPanel: false,
+            viewportDesign: false,
           },
           leftPanelOpen: false,
           rightPanelOpen: false,
