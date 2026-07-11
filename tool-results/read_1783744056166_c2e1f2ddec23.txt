@@ -1,0 +1,1039 @@
+     1→/**
+     2→ * HDRIExporter — Analytical HDRI generation for LightForge Studio.
+     3→ *
+     4→ * Generates true HDR (.hdr / .exr) equirectangular images from scene lights
+     5→ * using PURE MATHEMATICS — no CubeCamera, no proxy meshes, no WebGL rendering.
+     6→ *
+     7→ * For every pixel in the output image:
+     8→ *   1. Convert pixel position → world direction vector (equirectangular mapping)
+     9→ *   2. For each light in scene → calculate radiance mathematically from that direction
+    10→ *   3. Write the raw float value directly to pixel array
+    11→ *   4. Encode as RGBE (.hdr) or float32 (.exr)
+    12→ *
+    13→ * This is how Blender, Maya, and HDRI Light Studio generate light-studio HDRIs.
+    14→ * No CubeCamera. No proxy meshes. Pure math.
+    15→ *
+    16→ * Supported light types:
+    17→ *   - PointLight, SpotLight, DirectionalLight, RectAreaLight, HemisphereLight
+    18→ *
+    19→ * No external libraries — pure Three.js + TypeScript.
+    20→ */
+    21→import * as THREE from 'three';
+    22→import { getRawHDRIData } from '../store/hdriDataStore';
+    23→import { RGBELoader } from 'three/addons/loaders/RGBELoader.js';
+    24→
+    25→// ─── Types ────────────────────────────────────────────────────────────────────
+    26→
+    27→/** Normalized light data extracted from a THREE.Scene. */
+    28→interface ExtractedLight {
+    29→  type: 'point' | 'spot' | 'directional' | 'area' | 'hemisphere';
+    30→  color: THREE.Color;
+    31→  intensity: number;
+    32→  position: THREE.Vector3;
+    33→  /** SpotLight only */
+    34→  direction?: THREE.Vector3;
+    35→  angle?: number;
+    36→  penumbra?: number;
+    37→  decay?: number;
+    38→  /** RectAreaLight only */
+    39→  width?: number;
+    40→  height?: number;
+    41→  right?: THREE.Vector3;
+    42→  up?: THREE.Vector3;
+    43→  normal?: THREE.Vector3;
+    44→  /** HemisphereLight only */
+    45→  groundColor?: THREE.Color;
+    46→}
+    47→
+    48→/** Options for the main downloadHDRI() entry point. */
+    49→export interface HDRIExportOptions {
+    50→  /** Equirectangular width: 512 | 1024 | 2048 | 4096 */
+    51→  width: 512 | 1024 | 2048 | 4096;
+    52→  /** Equirectangular height: 256 | 512 | 1024 | 2048 */
+    53→  height: 256 | 512 | 1024 | 2048;
+    54→  /** Output format */
+    55→  format: 'hdr' | 'exr';
+    56→  /** Include loaded environment texture in export */
+    57→  includeEnvironment: boolean;
+    58→  /** User-loaded environment texture (equirectangular) */
+    59→  environmentTexture: THREE.Texture | null;
+    60→  /** Environment brightness multiplier */
+    61→  environmentIntensity: number;
+    62→  /** Environment rotation in radians (around Y axis) */
+    63→  environmentRotation: number;
+    64→  /** World-space capture point (default: origin) */
+    65→  capturePoint?: THREE.Vector3;
+    66→  /** Optional filename (without extension) */
+    67→  filename?: string;
+    68→}
+    69→
+    70→// ─── FUNCTION 1: pixelToDirection ────────────────────────────────────────────
+    71→
+    72→/**
+    73→ * Convert an output image pixel (x, y) to a 3D world direction vector
+    74→ * using equirectangular (latitude-longitude) projection.
+    75→ *
+    76→ * @param x      - Horizontal pixel coordinate (0 = left edge).
+    77→ * @param y      - Vertical pixel coordinate (0 = top edge).
+    78→ * @param width  - Image width in pixels.
+    79→ * @param height - Image height in pixels.
+    80→ * @returns Normalized direction vector in world space.
+    81→ */
+    82→function pixelToDirection(
+    83→  x: number,
+    84→  y: number,
+    85→  width: number,
+    86→  height: number,
+    87→): THREE.Vector3 {
+    88→  const u = (x + 0.5) / width;
+    89→  const v = (y + 0.5) / height;
+    90→  const theta = u * 2 * Math.PI; // azimuth 0→2PI
+    91→  const phi = v * Math.PI;        // elevation 0→PI
+    92→
+    93→  return new THREE.Vector3(
+    94→    Math.sin(phi) * Math.sin(theta), // X
+    95→    Math.cos(phi),                   // Y (up)
+    96→    Math.sin(phi) * Math.cos(theta), // Z
+    97→  ).normalize();
+    98→}
+    99→
+   100→// ─── FUNCTION 2: evaluateLightRadiance ───────────────────────────────────────
+   101→
+   102→/**
+   103→ * For a given light and view direction, calculate the radiance arriving from
+   104→ * that direction at the capture point.
+   105→ *
+   106→ * @param light       - Extracted light data.
+   107→ * @param dir         - Normalized world direction being evaluated.
+   108→ * @param capturePoint - World-space capture position.
+   109→ * @returns Radiance color (linear, can be >> 1.0 for true HDR).
+   110→ */
+   111→function evaluateLightRadiance(
+   112→  light: ExtractedLight,
+   113→  dir: THREE.Vector3,
+   114→  capturePoint: THREE.Vector3,
+   115→): THREE.Color {
+   116→  const result = { r: 0, g: 0, b: 0 };
+   117→
+   118→  switch (light.type) {
+   119→    // ── Point Light ────────────────────────────────────────────────────────
+   120→    case 'point': {
+   121→      const toLight = new THREE.Vector3().subVectors(light.position, capturePoint);
+   122→      const dist = Math.max(0.01, toLight.length());
+   123→      toLight.normalize();
+   124→
+   125→      // Treat point light as a tiny sphere (radius = 0.05)
+   126→      const angularRadius = Math.atan2(0.05, dist);
+   127→      const cosAngle = dir.dot(toLight);
+   128→      const angle = Math.acos(Math.max(-1, Math.min(1, cosAngle)));
+   129→
+   130→      if (angle < angularRadius) {
+   131→        const decay = light.decay ?? 2;
+   132→        const falloff = Math.pow(dist, -decay);
+   133→        const radiance = light.intensity * falloff * 500;
+   134→        result.r = light.color.r * radiance;
+   135→        result.g = light.color.g * radiance;
+   136→        result.b = light.color.b * radiance;
+   137→      }
+   138→      break;
+   139→    }
+   140→
+   141→    // ── Spot Light ─────────────────────────────────────────────────────────
+   142→    case 'spot': {
+   143→      const toLight = new THREE.Vector3().subVectors(light.position, capturePoint);
+   144→      const dist = Math.max(0.01, toLight.length());
+   145→      toLight.normalize();
+   146→
+   147→      const angularRadius = Math.atan2(0.05, dist);
+   148→      const cosAngle = dir.dot(toLight);
+   149→      const angleToLight = Math.acos(Math.max(-1, Math.min(1, cosAngle)));
+   150→
+   151→      if (angleToLight < angularRadius) {
+   152→        // Check if capture point is inside the spot cone
+   153→        const toCaptureDir = new THREE.Vector3()
+   154→          .subVectors(capturePoint, light.position)
+   155→          .normalize();
+   156→        const lightDir = light.direction ?? new THREE.Vector3(0, -1, 0);
+   157→        const spotAngle = Math.acos(
+   158→          Math.max(-1, Math.min(1, toCaptureDir.dot(lightDir.normalize()))),
+   159→        );
+   160→        const halfAngle = light.angle ?? Math.PI / 4;
+   161→        const penumbra = light.penumbra ?? 0.1;
+   162→
+   163→        if (spotAngle < halfAngle) {
+   164→          const t = Math.max(0, Math.min(1, (halfAngle - spotAngle) / Math.max(0.001, penumbra)));
+   165→          // Smoothstep-like falloff within penumbra
+   166→          const falloff = t * t * (3 - 2 * t);
+   167→          const decay = light.decay ?? 2;
+   168→          const distFalloff = Math.pow(dist, -decay);
+   169→          const radiance = light.intensity * distFalloff * falloff * 500;
+   170→          result.r = light.color.r * radiance;
+   171→          result.g = light.color.g * radiance;
+   172→          result.b = light.color.b * radiance;
+   173→        }
+   174→      }
+   175→      break;
+   176→    }
+   177→
+   178→    // ── Directional Light (Sun) ────────────────────────────────────────────
+   179→    case 'directional': {
+   180→      const lightDir = light.direction ?? new THREE.Vector3(0, -1, 0).normalize();
+   181→      const toSun = lightDir.clone().negate().normalize();
+   182→      const sunAngRad = 0.004635; // real sun angular radius ~0.2657°
+   183→      const cosAngle = dir.dot(toSun);
+   184→      const angleToSun = Math.acos(Math.max(-1, Math.min(1, cosAngle)));
+   185→
+   186→      if (angleToSun < sunAngRad) {
+   187→        // Sun disk — extremely bright
+   188→        const radiance = light.intensity * 80000;
+   189→        result.r = light.color.r * radiance;
+   190→        result.g = light.color.g * radiance;
+   191→        result.b = light.color.b * radiance;
+   192→      } else {
+   193→        // Soft sky gradient contribution around the sun
+   194→        const skyFactor = Math.max(0, dir.y) * 0.3;
+   195→        const radiance = light.intensity * skyFactor;
+   196→        result.r = light.color.r * radiance;
+   197→        result.g = light.color.g * radiance;
+   198→        result.b = light.color.b * radiance;
+   199→      }
+   200→      break;
+   201→    }
+   202→
+   203→    // ── Rect Area Light ────────────────────────────────────────────────────
+   204→    case 'area': {
+   205→      const lightNormal = light.normal ?? new THREE.Vector3(0, 0, 1);
+   206→      const facingDir = new THREE.Vector3()
+   207→        .subVectors(capturePoint, light.position)
+   208→        .normalize();
+   209→
+   210→      // Only contribute if capture point faces the front of the rect
+   211→      if (facingDir.dot(lightNormal) < 0) break;
+   212→
+   213→      const lightRight = light.right ?? new THREE.Vector3(1, 0, 0);
+   214→      const lightUp = light.up ?? new THREE.Vector3(0, 1, 0);
+   215→      const rectW = light.width ?? 2;
+   216→      const rectH = light.height ?? 2;
+   217→      const samples = 16;
+   218→
+   219→      let accR = 0, accG = 0, accB = 0;
+   220→      let contribCount = 0;
+   221→
+   222→      for (let sy = 0; sy < samples; sy++) {
+   223→        for (let sx = 0; sx < samples; sx++) {
+   224→          const su = (sx + 0.5) / samples;
+   225→          const sv = (sy + 0.5) / samples;
+   226→
+   227→          // Sample point on rectangle surface
+   228→          const p = new THREE.Vector3()
+   229→            .copy(light.position)
+   230→            .addScaledVector(lightRight, (su - 0.5) * rectW)
+   231→            .addScaledVector(lightUp, (sv - 0.5) * rectH);
+   232→
+   233→          const toP = new THREE.Vector3().subVectors(p, capturePoint);
+   234→          const dist = Math.max(0.01, toP.length());
+   235→          toP.normalize();
+   236→
+   237→          const cosA = dir.dot(toP);
+   238→          const angle = Math.acos(Math.max(-1, Math.min(1, cosA)));
+   239→
+   240→          const srcRadius = Math.min(rectW, rectH) / 32;
+   241→          const angRadius = Math.atan2(srcRadius, dist);
+   242→
+   243→          if (angle < angRadius) {
+   244→            const cosEmit = Math.max(0, toP.clone().negate().dot(lightNormal));
+   245→            const radiance = light.intensity * cosEmit * 200 / (dist * dist + 0.1);
+   246→            accR += light.color.r * radiance;
+   247→            accG += light.color.g * radiance;
+   248→            accB += light.color.b * radiance;
+   249→            contribCount++;
+   250→          }
+   251→        }
+   252→      }
+   253→
+   254→      if (contribCount > 0) {
+   255→        result.r = accR / (samples * samples);
+   256→        result.g = accG / (samples * samples);
+   257→        result.b = accB / (samples * samples);
+   258→      }
+   259→      break;
+   260→    }
+   261→
+   262→    // ── Hemisphere Light ───────────────────────────────────────────────────
+   263→    case 'hemisphere': {
+   264→      const t = (dir.y + 1) / 2; // 0 = ground, 1 = sky
+   265→      const skyCol = light.color;
+   266→      const gndCol = light.groundColor ?? new THREE.Color(0, 0, 0);
+   267→      result.r = (gndCol.r * (1 - t) + skyCol.r * t) * light.intensity;
+   268→      result.g = (gndCol.g * (1 - t) + skyCol.g * t) * light.intensity;
+   269→      result.b = (gndCol.b * (1 - t) + skyCol.b * t) * light.intensity;
+   270→      break;
+   271→    }
+   272→  }
+   273→
+   274→  return new THREE.Color(result.r, result.g, result.b);
+   275→}
+   276→
+   277→// ─── FUNCTION 3: generateAnalyticalHDRI ──────────────────────────────────────
+   278→
+   279→/**
+   280→ * Generate a true HDR equirectangular image analytically from scene lights.
+   281→ *
+   282→ * For every pixel in the output:
+   283→ *   1. Convert pixel → world direction (equirectangular projection)
+   284→ *   2. Sum radiance contributions from all lights
+   285→ *   3. Optionally add environment map contribution
+   286→ *   4. Write raw float values directly
+   287→ *
+   288→ * @param scene           - The THREE.Scene containing lights.
+   289→ * @param width           - Output width in pixels.
+   290→ * @param height          - Output height in pixels.
+   291→ * @param capturePoint    - World-space capture position (default: origin).
+   292→ * @param includeEnv      - Whether to include loaded environment texture.
+   293→ * @param envTexture      - User-loaded equirectangular environment texture.
+   294→ * @param envIntensity    - Environment brightness multiplier.
+   295→ * @param envRotation     - Environment rotation in radians (around Y axis).
+   296→ * @returns Float32Array of RGBA (4 floats per pixel, linear, top-to-bottom).
+   297→ */
+   298→export async function generateAnalyticalHDRI(
+   299→  scene: THREE.Scene,
+   300→  width: number,
+   301→  height: number,
+   302→  capturePoint: THREE.Vector3,
+   303→  includeEnv: boolean,
+   304→  envTexture: THREE.Texture | null,
+   305→  envIntensity: number,
+   306→  envRotation: number,
+   307→): Promise<Float32Array> {
+   308→  const pixels = new Float32Array(width * height * 4);
+   309→
+   310→  // Extract all lights from scene
+   311→  const lights = extractLightsFromScene(scene);
+   312→  console.log('[LightForge] Found lights:', lights.length);
+   313→
+   314→  // For each pixel, calculate analytical radiance
+   315→  for (let y = 0; y < height; y++) {
+   316→    for (let x = 0; x < width; x++) {
+   317→      const dir = pixelToDirection(x, y, width, height);
+   318→
+   319→      let r = 0, g = 0, b = 0;
+   320→
+   321→      // Sum all light contributions
+   322→      for (let i = 0; i < lights.length; i++) {
+   323→        const c = evaluateLightRadiance(lights[i], dir, capturePoint);
+   324→        r += c.r;
+   325→        g += c.g;
+   326→        b += c.b;
+   327→      }
+   328→
+   329→      // Add environment map contribution if provided
+   330→      if (includeEnv && envTexture) {
+   331→        const e = sampleEnvTexture(envTexture, dir, envRotation, envIntensity);
+   332→        r += e.r;
+   333→        g += e.g;
+   334→        b += e.b;
+   335→      }
+   336→
+   337→      const idx = (y * width + x) * 4;
+   338→      pixels[idx] = r;
+   339→      pixels[idx + 1] = g;
+   340→      pixels[idx + 2] = b;
+   341→      pixels[idx + 3] = 1.0;
+   342→    }
+   343→
+   344→    // Log progress every 100 rows
+   345→    if (y % 100 === 0) {
+   346→      const pct = Math.round((y / height) * 100);
+   347→      console.log(`[LightForge HDRI] ${pct}% complete`);
+   348→      // Yield to the event loop so the UI stays responsive
+   349→      await new Promise<void>((resolve) => setTimeout(resolve, 0));
+   350→    }
+   351→  }
+   352→
+   353→  // VERIFY — this MUST print > 1.0 for true HDR
+   354→  let maxVal = 0;
+   355→  for (let i = 0; i < pixels.length; i += 4) {
+   356→    const m = Math.max(pixels[i], pixels[i + 1], pixels[i + 2]);
+   357→    if (m > maxVal) maxVal = m;
+   358→  }
+   359→  console.log('[LightForge HDRI] Max pixel value:', maxVal);
+   360→  console.log('[LightForge HDRI] True HDR:', maxVal > 1.0);
+   361→
+   362→  return pixels;
+   363→}
+   364→
+   365→// ─── FUNCTION 4: extractLightsFromScene ──────────────────────────────────────
+   366→
+   367→/**
+   368→ * Traverse a THREE.Scene and extract all physical lights into a
+   369→ * plain-data format suitable for analytical radiance evaluation.
+   370→ *
+   371→ * Skips objects where:
+   372→ *   - obj.userData.isLightHelper === true
+   373→ *   - obj.userData.isProxy === true
+   374→ *   - obj.userData.isGrid === true
+   375→ *   - obj.visible === false
+   376→ *
+   377→ * @param scene - The THREE.Scene to traverse.
+   378→ * @returns Array of extracted light data objects.
+   379→ */
+   380→function extractLightsFromScene(scene: THREE.Scene): ExtractedLight[] {
+   381→  const lights: ExtractedLight[] = [];
+   382→  const worldPos = new THREE.Vector3();
+   383→  const worldQuat = new THREE.Quaternion();
+   384→
+   385→  scene.traverse((child) => {
+   386→    // Skip non-lights
+   387→    if (!(child instanceof THREE.Light)) return;
+   388→
+   389→    // Skip hidden / helper / proxy objects
+   390→    if (!child.visible) return;
+   391→    if (child.userData.isLightHelper === true) return;
+   392→    if (child.userData.isProxy === true) return;
+   393→    if (child.userData.isGrid === true) return;
+   394→
+   395→    child.getWorldPosition(worldPos);
+   396→
+   397→    // ── PointLight ─────────────────────────────────────────────────────────
+   398→    if (child instanceof THREE.PointLight) {
+   399→      lights.push({
+   400→        type: 'point',
+   401→        color: child.color.clone(),
+   402→        intensity: child.intensity,
+   403→        position: worldPos.clone(),
+   404→        decay: child.decay,
+   405→      });
+   406→      return;
+   407→    }
+   408→
+   409→    // ── SpotLight ──────────────────────────────────────────────────────────
+   410→    if (child instanceof THREE.SpotLight) {
+   411→      const dir = new THREE.Vector3();
+   412→      child.getWorldDirection(dir);
+   413→      lights.push({
+   414→        type: 'spot',
+   415→        color: child.color.clone(),
+   416→        intensity: child.intensity,
+   417→        position: worldPos.clone(),
+   418→        direction: dir.clone(),
+   419→        angle: child.angle,
+   420→        penumbra: child.penumbra,
+   421→        decay: child.decay,
+   422→      });
+   423→      return;
+   424→    }
+   425→
+   426→    // ── DirectionalLight ───────────────────────────────────────────────────
+   427→    if (child instanceof THREE.DirectionalLight) {
+   428→      const dir = new THREE.Vector3();
+   429→      child.getWorldDirection(dir);
+   430→      lights.push({
+   431→        type: 'directional',
+   432→        color: child.color.clone(),
+   433→        intensity: child.intensity,
+   434→        position: worldPos.clone(),
+   435→        direction: dir.clone(),
+   436→      });
+   437→      return;
+   438→    }
+   439→
+   440→    // ── RectAreaLight ──────────────────────────────────────────────────────
+   441→    if (child instanceof THREE.RectAreaLight) {
+   442→      child.getWorldQuaternion(worldQuat);
+   443→      const right = new THREE.Vector3(1, 0, 0).applyQuaternion(worldQuat);
+   444→      const up = new THREE.Vector3(0, 1, 0).applyQuaternion(worldQuat);
+   445→      const normal = new THREE.Vector3(0, 0, -1).applyQuaternion(worldQuat);
+   446→      lights.push({
+   447→        type: 'area',
+   448→        color: child.color.clone(),
+   449→        intensity: child.intensity,
+   450→        position: worldPos.clone(),
+   451→        width: child.width,
+   452→        height: child.height,
+   453→        right: right.clone(),
+   454→        up: up.clone(),
+   455→        normal: normal.clone(),
+   456→      });
+   457→      return;
+   458→    }
+   459→
+   460→    // ── HemisphereLight ────────────────────────────────────────────────────
+   461→    if (child instanceof THREE.HemisphereLight) {
+   462→      lights.push({
+   463→        type: 'hemisphere',
+   464→        color: child.color.clone(),
+   465→        intensity: child.intensity,
+   466→        position: worldPos.clone(),
+   467→        groundColor: child.groundColor?.clone() ?? new THREE.Color(0, 0, 0),
+   468→      });
+   469→      return;
+   470→    }
+   471→  });
+   472→
+   473→  return lights;
+   474→}
+   475→
+   476→// ─── FUNCTION 5: sampleEnvTexture ────────────────────────────────────────────
+   477→
+   478→/**
+   479→ * Sample a loaded HDRI environment texture for a given world direction.
+   480→ *
+   481→ * Applies envRotation (rotation around Y axis), converts direction to UV
+   482→ * via equirectangular projection, then bilinear-samples the texture.
+   483→ *
+   484→ * @param texture     - Equirectangular environment texture.
+   485→ * @param dir         - Normalized world direction to sample.
+   486→ * @param rotation    - Rotation in radians around Y axis.
+   487→ * @param intensity   - Brightness multiplier.
+   488→ * @returns Sampled color (linear, scaled by intensity).
+   489→ */
+   490→function sampleEnvTexture(
+   491→  texture: THREE.Texture,
+   492→  dir: THREE.Vector3,
+   493→  rotation: number,
+   494→  intensity: number,
+   495→): THREE.Color {
+   496→  // Apply Y-axis rotation to the direction
+   497→  const cosR = Math.cos(rotation);
+   498→  const sinR = Math.sin(rotation);
+   499→  const rx = dir.x * cosR + dir.z * sinR;
+   500→  const rz = -dir.x * sinR + dir.z * cosR;
+   501→  const ry = dir.y;
+   502→
+   503→  // Convert direction to equirectangular UV
+   504→  const phi = Math.acos(Math.max(-1, Math.min(1, ry)));
+   505→  let theta = Math.atan2(rx, rz);
+   506→  if (theta < 0) theta += 2 * Math.PI;
+   507→
+   508→  const u = theta / (2 * Math.PI);
+   509→  const v = 1 - phi / Math.PI;
+   510→
+   511→  // Get texture image data
+   512→  const img = texture.image;
+   513→  if (!img || !('width' in img) || !('height' in img)) {
+   514→    return new THREE.Color(0, 0, 0);
+   515→  }
+   516→
+   517→  const texW = img.width as number;
+   518→  const texH = img.height as number;
+   519→
+   520→  let data: Uint8Array | Float32Array;
+   521→  let isFloat = false;
+   522→
+   523→  if (img instanceof HTMLCanvasElement) {
+   524→    const ctx = img.getContext('2d');
+   525→    if (!ctx) return new THREE.Color(0, 0, 0);
+   526→    const imgData = ctx.getImageData(0, 0, texW, texH);
+   527→    data = imgData.data;
+   528→  } else if (img instanceof ImageData) {
+   529→    data = img.data;
+   530→  } else if (texture.isDataTexture && (img as any).data) {
+   531→    const d = (img as any).data;
+   532→    if (d instanceof Float32Array) {
+   533→      data = d;
+   534→      isFloat = true;
+   535→    } else {
+   536→      data = d;
+   537→    }
+   538→  } else {
+   539→    // Unsupported texture source
+   540→    return new THREE.Color(0, 0, 0);
+   541→  }
+   542→
+   543→  // Bilinear sampling
+   544→  const px = u * texW - 0.5;
+   545→  const py = v * texH - 0.5;
+   546→  const x0 = Math.floor(px) % texW;
+   547→  const y0 = Math.floor(py) % texH;
+   548→  const x1 = (x0 + 1) % texW;
+   549→  const y1 = (y0 + 1) % texH;
+   550→  const fx = px - Math.floor(px);
+   551→  const fy = py - Math.floor(py);
+   552→
+   553→  const channels = isFloat ? 4 : 4; // both RGBA
+   554→  const getPixel = (xi: number, yi: number): [number, number, number] => {
+   555→    const idx = (yi * texW + xi) * channels;
+   556→    if (idx < 0 || idx + 2 >= data.length) return [0, 0, 0];
+   557→    if (isFloat) {
+   558→      const f = data as Float32Array;
+   559→      return [f[idx], f[idx + 1], f[idx + 2]];
+   560→    }
+   561→    // Uint8 — convert from sRGB to linear
+   562→    return [
+   563→      sRGBToLinear((data[idx] ?? 0) / 255),
+   564→      sRGBToLinear((data[idx + 1] ?? 0) / 255),
+   565→      sRGBToLinear((data[idx + 2] ?? 0) / 255),
+   566→    ];
+   567→  };
+   568→
+   569→  const c00 = getPixel(x0, y0);
+   570→  const c10 = getPixel(x1, y0);
+   571→  const c01 = getPixel(x0, y1);
+   572→  const c11 = getPixel(x1, y1);
+   573→
+   574→  const r = (c00[0] * (1 - fx) * (1 - fy) + c10[0] * fx * (1 - fy) +
+   575→             c01[0] * (1 - fx) * fy + c11[0] * fx * fy) * intensity;
+   576→  const g = (c00[1] * (1 - fx) * (1 - fy) + c10[1] * fx * (1 - fy) +
+   577→             c01[1] * (1 - fx) * fy + c11[1] * fx * fy) * intensity;
+   578→  const b = (c00[2] * (1 - fx) * (1 - fy) + c10[2] * fx * (1 - fy) +
+   579→             c01[2] * (1 - fx) * fy + c11[2] * fx * fy) * intensity;
+   580→
+   581→  return new THREE.Color(r, g, b);
+   582→}
+   583→
+   584→/**
+   585→ * Convert sRGB gamma value to linear.
+   586→ */
+   587→function sRGBToLinear(c: number): number {
+   588→  if (c <= 0.04045) return c / 12.92;
+   589→  return Math.pow((c + 0.055) / 1.055, 2.4);
+   590→}
+   591→
+   592→// ─── FUNCTION 6: encodeHDR — Radiance RGBE ───────────────────────────────────
+   593→
+   594→/**
+   595→ * Encode HDR pixel data into a Radiance RGBE .hdr file (ArrayBuffer).
+   596→ *
+   597→ * Uses uncompressed (flat) RGBE encoding for maximum compatibility.
+   598→ * Input is RGBA Float32Array (4 floats per pixel, top-to-bottom, linear).
+   599→ *
+   600→ * @param pixels - Float32Array of RGBA (4 floats/pixel, linear).
+   601→ * @param width  - Image width in pixels.
+   602→ * @param height - Image height in pixels.
+   603→ * @returns Complete .hdr file as ArrayBuffer.
+   604→ */
+   605→export function encodeHDR(
+   606→  pixels: Float32Array,
+   607→  width: number,
+   608→  height: number,
+   609→): ArrayBuffer {
+   610→  const headerText =
+   611→    '#?RADIANCE\n' +
+   612→    'SOFTWARE=LightForge Studio\n' +
+   613→    'FORMAT=32-bit_rle_rgbe\n' +
+   614→    'EXPOSURE=1.0\n' +
+   615→    `\n-Y ${height} +X ${width}\n`;
+   616→  const headerBytes = new TextEncoder().encode(headerText);
+   617→
+   618→  const pixelDataSize = width * height * 4;
+   619→  const pixelData = new Uint8Array(pixelDataSize);
+   620→
+   621→  for (let i = 0; i < width * height; i++) {
+   622→    const r = pixels[i * 4];
+   623→    const g = pixels[i * 4 + 1];
+   624→    const b = pixels[i * 4 + 2];
+   625→    rgbFloatToRGBE(r, g, b, pixelData, i * 4);
+   626→  }
+   627→
+   628→  const buffer = new ArrayBuffer(headerBytes.length + pixelDataSize);
+   629→  const view = new Uint8Array(buffer);
+   630→  view.set(headerBytes, 0);
+   631→  view.set(pixelData, headerBytes.length);
+   632→  return buffer;
+   633→}
+   634→
+   635→/**
+   636→ * Convert a single RGB float triplet to Radiance RGBE (4 bytes).
+   637→ *
+   638→ * RGBE encoding with shared exponent:
+   639→ *   maxVal = max(r, g, b)
+   640→ *   if maxVal < 1e-32: output [0,0,0,0]
+   641→ *   else:
+   642→ *     exp = floor(log2(maxVal)) + 1
+   643→ *     correction pass: adjust if needed
+   644→ *     scale = 2^(-exp) * 256
+   645→ *     R/G/B = clamp(floor(component * scale), 0, 255)
+   646→ *     E = clamp(exp + 128, 0, 255)
+   647→ */
+   648→function rgbFloatToRGBE(
+   649→  r: number,
+   650→  g: number,
+   651→  b: number,
+   652→  out: Uint8Array,
+   653→  off: number,
+   654→): void {
+   655→  const maxVal = Math.max(r, g, b);
+   656→
+   657→  if (maxVal < 1e-32) {
+   658→    out[off] = 0;
+   659→    out[off + 1] = 0;
+   660→    out[off + 2] = 0;
+   661→    out[off + 3] = 0;
+   662→    return;
+   663→  }
+   664→
+   665→  let exp = Math.floor(Math.log2(maxVal)) + 1;
+   666→
+   667→  // Correction pass: ensure mantissa is in [0.5, 1.0)
+   668→  const scaled = maxVal * Math.pow(2, -exp);
+   669→  if (scaled < 0.5) {
+   670→    exp--;
+   671→  } else if (scaled >= 1.0) {
+   672→    exp++;
+   673→  }
+   674→
+   675→  const scale = Math.pow(2, -exp) * 256.0;
+   676→  out[off] = Math.max(0, Math.min(255, Math.floor(r * scale)));
+   677→  out[off + 1] = Math.max(0, Math.min(255, Math.floor(g * scale)));
+   678→  out[off + 2] = Math.max(0, Math.min(255, Math.floor(b * scale)));
+   679→  out[off + 3] = Math.max(0, Math.min(255, exp + 128));
+   680→}
+   681→
+   682→// ─── FUNCTION 7: encodeEXR — OpenEXR ────────────────────────────────────────
+   683→
+   684→/**
+   685→ * Encode HDR pixel data into an OpenEXR .exr file (ArrayBuffer).
+   686→ *
+   687→ * Channels: B, G, R (alphabetical, float32) — standard HDRI EXR convention.
+   688→ * Compression: NO_COMPRESSION (0).
+   689→ * Alpha is set to 1.0 for all pixels.
+   690→ *
+   691→ * Input is RGBA Float32Array (4 floats per pixel, top-to-bottom, linear).
+   692→ * The alpha channel in the input is ignored; alpha in EXR is always 1.0.
+   693→ *
+   694→ * @param pixels - Float32Array of RGBA (4 floats/pixel, linear).
+   695→ * @param width  - Image width in pixels.
+   696→ * @param height - Image height in pixels.
+   697→ * @returns Complete .exr file as ArrayBuffer.
+   698→ */
+   699→export function encodeEXR(
+   700→  pixels: Float32Array,
+   701→  width: number,
+   702→  height: number,
+   703→): ArrayBuffer {
+   704→  const CHANNEL_NAMES = ['B', 'G', 'R'] as const;
+   705→  const PIXEL_TYPE_FLOAT = 2;
+   706→  const NUM_CHANNELS = 3;
+   707→  const BYTES_PER_PIXEL = NUM_CHANNELS * 4;
+   708→  const SCANLINE_DATA_SIZE = width * BYTES_PER_PIXEL;
+   709→
+   710→  // ── Low-level write helpers ──────────────────────────────────────────────
+   711→  const intToBytes = (val: number): number[] => [
+   712→    val & 0xff,
+   713→    (val >>> 8) & 0xff,
+   714→    (val >>> 16) & 0xff,
+   715→    (val >>> 24) & 0xff,
+   716→  ];
+   717→
+   718→  const floatToBytes = (val: number): number[] => {
+   719→    const buf = new ArrayBuffer(4);
+   720→    new DataView(buf).setFloat32(0, val, true);
+   721→    return [...new Uint8Array(buf)];
+   722→  };
+   723→
+   724→  const writeName = (arr: number[], str: string): void => {
+   725→    const bytes = new TextEncoder().encode(str);
+   726→    for (const b of bytes) arr.push(b);
+   727→    arr.push(0);
+   728→  };
+   729→
+   730→  const writeChannelEntry = (arr: number[], name: string): void => {
+   731→    const bytes = new TextEncoder().encode(name);
+   732→    for (const b of bytes) arr.push(b);
+   733→    arr.push(0); // null terminator
+   734→    // Pad name to 4-byte boundary (including null)
+   735→    const nameLen = bytes.length + 1;
+   736→    const pad = (4 - (nameLen % 4)) % 4;
+   737→    for (let i = 0; i < pad; i++) arr.push(0);
+   738→    // Channel properties (16 bytes): pixel_type(i32) + pLinear(u32) + x_sampling(u32) + y_sampling(u32)
+   739→    for (const v of intToBytes(PIXEL_TYPE_FLOAT)) arr.push(v);
+   740→    for (const v of intToBytes(0)) arr.push(v);            // pLinear
+   741→    for (const v of intToBytes(1)) arr.push(v);            // x sampling
+   742→    for (const v of intToBytes(1)) arr.push(v);            // y sampling
+   743→  };
+   744→
+   745→  const writeAttrValue = (arr: number[], valueBytes: number[]): void => {
+   746→    for (const v of intToBytes(valueBytes.length)) arr.push(v);
+   747→    for (const b of valueBytes) arr.push(b);
+   748→    const pad = (4 - (valueBytes.length % 4)) % 4;
+   749→    for (let i = 0; i < pad; i++) arr.push(0);
+   750→  };
+   751→
+   752→  // ── Build header attributes ──────────────────────────────────────────────
+   753→  const hdr: number[] = [];
+   754→
+   755→  // 1) channels (chlist): 3 entries × 20 bytes + 1 terminator byte = 61 bytes
+   756→  writeName(hdr, 'channels');
+   757→  writeName(hdr, 'chlist');
+   758→  const channelData: number[] = [];
+   759→  for (const chName of CHANNEL_NAMES) {
+   760→    writeChannelEntry(channelData, chName);
+   761→  }
+   762→  channelData.push(0); // channel list terminator
+   763→  writeAttrValue(hdr, channelData);
+   764→
+   765→  // 2) compression: 1 byte (0 = NO_COMPRESSION)
+   766→  writeName(hdr, 'compression');
+   767→  writeName(hdr, 'compression');
+   768→  writeAttrValue(hdr, [0]);
+   769→
+   770→  // 3) dataWindow (box2i): 4 × int32 = 16 bytes
+   771→  writeName(hdr, 'dataWindow');
+   772→  writeName(hdr, 'box2i');
+   773→  writeAttrValue(hdr, [
+   774→    ...intToBytes(0),
+   775→    ...intToBytes(0),
+   776→    ...intToBytes(width - 1),
+   777→    ...intToBytes(height - 1),
+   778→  ]);
+   779→
+   780→  // 4) displayWindow (box2i): 4 × int32 = 16 bytes
+   781→  writeName(hdr, 'displayWindow');
+   782→  writeName(hdr, 'box2i');
+   783→  writeAttrValue(hdr, [
+   784→    ...intToBytes(0),
+   785→    ...intToBytes(0),
+   786→    ...intToBytes(width - 1),
+   787→    ...intToBytes(height - 1),
+   788→  ]);
+   789→
+   790→  // 5) lineOrder: 1 byte (0 = INCREASING_Y)
+   791→  writeName(hdr, 'lineOrder');
+   792→  writeName(hdr, 'lineOrder');
+   793→  writeAttrValue(hdr, [0]);
+   794→
+   795→  // 6) pixelAspectRatio (float): 4 bytes
+   796→  writeName(hdr, 'pixelAspectRatio');
+   797→  writeName(hdr, 'float');
+   798→  writeAttrValue(hdr, floatToBytes(1.0));
+   799→
+   800→  // 7) screenWindowCenter (v2f): 8 bytes
+   801→  writeName(hdr, 'screenWindowCenter');
+   802→  writeName(hdr, 'v2f');
+   803→  writeAttrValue(hdr, [...floatToBytes(0.0), ...floatToBytes(0.0)]);
+   804→
+   805→  // 8) screenWindowWidth (float): 4 bytes
+   806→  writeName(hdr, 'screenWindowWidth');
+   807→  writeName(hdr, 'float');
+   808→  writeAttrValue(hdr, floatToBytes(1.0));
+   809→
+   810→  // End of header: empty name (single null byte), then pad to 8-byte boundary
+   811→  hdr.push(0);
+   812→  while (hdr.length % 8 !== 0) hdr.push(0);
+   813→
+   814→  const fileHeaderSize = 8; // magic(4) + version(4)
+   815→  const headerSize = hdr.length;
+   816→  const offsetTableSize = height * 8;
+   817→  const scanlineDataStart = fileHeaderSize + headerSize + offsetTableSize;
+   818→  const scanlineBlockSize = 4 + 4 + SCANLINE_DATA_SIZE;
+   819→
+   820→  // ── Offset table ────────────────────────────────────────────────────────
+   821→  const offsets: number[] = [];
+   822→  for (let y = 0; y < height; y++) {
+   823→    offsets.push(scanlineDataStart + y * scanlineBlockSize);
+   824→  }
+   825→
+   826→  // ── Scanline pixel data ─────────────────────────────────────────────────
+   827→  // Each scanline: [y_coord (u32)] [data_size (u32)] [B(u32) G(u32) R(u32) per pixel]
+   828→  const scanlines: number[] = [];
+   829→  for (let y = 0; y < height; y++) {
+   830→    for (const v of intToBytes(y)) scanlines.push(v);
+   831→    for (const v of intToBytes(SCANLINE_DATA_SIZE)) scanlines.push(v);
+   832→    for (let x = 0; x < width; x++) {
+   833→      const srcIdx = (y * width + x) * 4;
+   834→      for (const b of floatToBytes(pixels[srcIdx + 2])) scanlines.push(b); // B
+   835→      for (const b of floatToBytes(pixels[srcIdx + 1])) scanlines.push(b); // G
+   836→      for (const b of floatToBytes(pixels[srcIdx])) scanlines.push(b);     // R
+   837→    }
+   838→  }
+   839→
+   840→  // ── Assemble file ───────────────────────────────────────────────────────
+   841→  const totalSize = fileHeaderSize + headerSize + offsetTableSize + scanlines.length;
+   842→  const file = new Uint8Array(totalSize);
+   843→  const dv = new DataView(file.buffer);
+   844→
+   845→  // Magic number: 0x762F3101 (20000630 decimal)
+   846→  dv.setUint32(0, 20000630, true);
+   847→  // Version: 2
+   848→  dv.setUint32(4, 2, true);
+   849→
+   850→  file.set(new Uint8Array(hdr), 8);
+   851→
+   852→  // Offset table
+   853→  const offsetBase = fileHeaderSize + headerSize;
+   854→  for (let y = 0; y < height; y++) {
+   855→    const off = offsets[y];
+   856→    dv.setUint32(offsetBase + y * 8, off & 0xffffffff, true);
+   857→    dv.setUint32(offsetBase + y * 8 + 4, Math.floor(off / 0x100000000) & 0xffffffff, true);
+   858→  }
+   859→
+   860→  // Scanline data
+   861→  file.set(new Uint8Array(scanlines), scanlineDataStart);
+   862→
+   863→  return file.buffer;
+   864→}
+   865→
+   866→// ─── FUNCTION 8: downloadHDRI ───────────────────────────────────────────────
+   867→
+   868→/**
+   869→ * Generate and download a true HDR equirectangular image from scene lights.
+   870→ *
+   871→ * This is the main entry point for HDRI export. It analytically computes
+   872→ * radiance for every pixel (no CubeCamera, no WebGL rendering), then
+   873→ * encodes and downloads the result as .hdr or .exr.
+   874→ *
+   875→ * @param scene   - The THREE.Scene containing lights to export.
+   876→ * @param options - Export configuration (resolution, format, env settings).
+   877→ */
+   878→export async function downloadHDRI(
+   879→  scene: THREE.Scene,
+   880→  options: HDRIExportOptions,
+   881→): Promise<void> {
+   882→  const {
+   883→    width,
+   884→    height,
+   885→    format,
+   886→    includeEnvironment,
+   887→    environmentTexture,
+   888→    environmentIntensity,
+   889→    environmentRotation,
+   890→    capturePoint,
+   891→    filename,
+   892→  } = options;
+   893→
+   894→  const cp = capturePoint ?? new THREE.Vector3(0, 0, 0);
+   895→
+   896→  console.log(`[LightForge HDRI] Generating ${width}x${height} ${format.toUpperCase()} analytically...`);
+   897→
+   898→  const pixels = await generateAnalyticalHDRI(
+   899→    scene,
+   900→    width,
+   901→    height,
+   902→    cp,
+   903→    includeEnvironment,
+   904→    environmentTexture,
+   905→    environmentIntensity,
+   906→    environmentRotation,
+   907→  );
+   908→
+   909→  const baseName = filename ?? `lightforge_hdri_${Date.now()}`;
+   910→  const ext = format === 'hdr' ? '.hdr' : '.exr';
+   911→  const mimeType = format === 'hdr' ? 'image/vnd.radiance' : 'image/x-exr';
+   912→
+   913→  const buffer: ArrayBuffer =
+   914→    format === 'hdr'
+   915→      ? encodeHDR(pixels, width, height)
+   916→      : encodeEXR(pixels, width, height);
+   917→
+   918→  const blob = new Blob([buffer], { type: mimeType });
+   919→  const url = URL.createObjectURL(blob);
+   920→  const link = document.createElement('a');
+   921→  link.href = url;
+   922→  link.download = `${baseName}${ext}`;
+   923→  link.style.display = 'none';
+   924→  document.body.appendChild(link);
+   925→  link.click();
+   926→
+   927→  setTimeout(() => {
+   928→    URL.revokeObjectURL(url);
+   929→    if (link.parentNode) link.parentNode.removeChild(link);
+   930→  }, 250);
+   931→
+   932→  console.log(`[LightForge HDRI] Export complete: ${baseName}${ext}`);
+   933→}
+   934→
+   935→// ─── Environment texture loader (for custom .hdr) ───────────────────────────
+   936→
+   937→/**
+   938→ * Load a raw .hdr ArrayBuffer into a THREE.DataTexture via RGBELoader.
+   939→ * Used to prepare the environment texture for analytical sampling.
+   940→ */
+   941→function loadHDRITexture(buffer: ArrayBuffer): Promise<THREE.DataTexture | null> {
+   942→  return new Promise<THREE.DataTexture | null>((resolve) => {
+   943→    const blob = new Blob([buffer], { type: 'application/octet-stream' });
+   944→    const url = URL.createObjectURL(blob);
+   945→    const loader = new RGBELoader();
+   946→    loader.load(
+   947→      url,
+   948→      (texture) => {
+   949→        URL.revokeObjectURL(url);
+   950→        resolve(texture);
+   951→      },
+   952→      undefined,
+   953→      () => {
+   954→        URL.revokeObjectURL(url);
+   955→        resolve(null);
+   956→      },
+   957→    );
+   958→  });
+   959→}
+   960→
+   961→// ─── Convenience wrappers (backward-compatible with TopMenubar) ──────────────
+   962→
+   963→/**
+   964→ * Export the scene as a Radiance .hdr file using analytical generation.
+   965→ *
+   966→ * @deprecated Use downloadHDRI() directly for more control over options.
+   967→ * @param renderer - WebGL renderer (unused in analytical mode, kept for API compat).
+   968→ * @param scene    - The THREE.Scene containing lights.
+   969→ * @param options  - Export size and optional filename.
+   970→ */
+   971→export async function exportSceneAsHDR(
+   972→  renderer: THREE.WebGLRenderer,
+   973→  scene: THREE.Scene,
+   974→  options?: { size?: number; filename?: string },
+   975→): Promise<void> {
+   976→  const resolution = options?.size ?? 2048;
+   977→  const height = Math.floor(resolution / 2);
+   978→
+   979→  // Try to load custom HDRI if available
+   980→  let envTexture: THREE.Texture | null = null;
+   981→  const rawBuffer = getRawHDRIData();
+   982→  if (rawBuffer) {
+   983→    try {
+   984→      envTexture = await loadHDRITexture(rawBuffer);
+   985→    } catch {
+   986→      // Fall back to no environment
+   987→    }
+   988→  }
+   989→
+   990→  await downloadHDRI(scene, {
+   991→    width: resolution as 512 | 1024 | 2048 | 4096,
+   992→    height: height as 256 | 512 | 1024 | 2048,
+   993→    format: 'hdr',
+   994→    includeEnvironment: !!envTexture,
+   995→    environmentTexture: envTexture,
+   996→    environmentIntensity: 1.0,
+   997→    environmentRotation: 0,
+   998→    filename: options?.filename,
+   999→  });
+  1000→}
+  1001→
+  1002→/**
+  1003→ * Export the scene as an OpenEXR .exr file using analytical generation.
+  1004→ *
+  1005→ * @deprecated Use downloadHDRI() directly for more control over options.
+  1006→ * @param renderer - WebGL renderer (unused in analytical mode, kept for API compat).
+  1007→ * @param scene    - The THREE.Scene containing lights.
+  1008→ * @param options  - Export size and optional filename.
+  1009→ */
+  1010→export async function exportSceneAsEXR(
+  1011→  renderer: THREE.WebGLRenderer,
+  1012→  scene: THREE.Scene,
+  1013→  options?: { size?: number; filename?: string },
+  1014→): Promise<void> {
+  1015→  const resolution = options?.size ?? 2048;
+  1016→  const height = Math.floor(resolution / 2);
+  1017→
+  1018→  // Try to load custom HDRI if available
+  1019→  let envTexture: THREE.Texture | null = null;
+  1020→  const rawBuffer = getRawHDRIData();
+  1021→  if (rawBuffer) {
+  1022→    try {
+  1023→      envTexture = await loadHDRITexture(rawBuffer);
+  1024→    } catch {
+  1025→      // Fall back to no environment
+  1026→    }
+  1027→  }
+  1028→
+  1029→  await downloadHDRI(scene, {
+  1030→    width: resolution as 512 | 1024 | 2048 | 4096,
+  1031→    height: height as 256 | 512 | 1024 | 2048,
+  1032→    format: 'exr',
+  1033→    includeEnvironment: !!envTexture,
+  1034→    environmentTexture: envTexture,
+  1035→    environmentIntensity: 1.0,
+  1036→    environmentRotation: 0,
+  1037→    filename: options?.filename,
+  1038→  });
+  1039→}

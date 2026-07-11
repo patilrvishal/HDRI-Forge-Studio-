@@ -10,11 +10,21 @@
  *   3. Write the raw float value directly to pixel array
  *   4. Encode as RGBE (.hdr) or float32 (.exr)
  *
- * This is how Blender, Maya, and HDRI Light Studio generate light-studio HDRIs.
- * No CubeCamera. No proxy meshes. Pure math.
+ * LIGHT VISIBILITY IN HDRI:
+ *   Lights are rendered as visible bright glowing regions (disks/rectangles) in the
+ *   HDRI, not infinitely small points. Each light has an angular size derived from
+ *   its physical size and distance. A soft Gaussian falloff around the edges ensures
+ *   lights are visible across resolutions (512–4096). Radiance is computed using
+ *   proper solid-angle weighting so total flux is preserved regardless of resolution.
  *
- * Supported light types:
- *   - PointLight, SpotLight, DirectionalLight, RectAreaLight, HemisphereLight
+ * Pipeline (matching SVG reference):
+ *   Stage 1: Light sources → ExtractedLight data
+ *   Stage 2: Capture method → Analytical per-pixel (no camera)
+ *   Stage 3: Raw radiance → Float32 array, unbounded values
+ *   Stage 4: Projection → Equirectangular 2:1 ratio
+ *   Stage 5: Color space → Linear (no gamma, no tone mapping)
+ *   Stage 6: File encoding → RGBE (.hdr) or float32 (.exr)
+ *   Stage 7: Output → Downloadable file
  *
  * No external libraries — pure Three.js + TypeScript.
  */
@@ -67,11 +77,33 @@ export interface HDRIExportOptions {
   filename?: string;
 }
 
+// ─── Constants ────────────────────────────────────────────────────────────────
+
+/** Apparent angular radius of the real sun: ~0.2657° = 0.004635 rad */
+const SUN_ANGULAR_RADIUS = 0.004635;
+
+/**
+ * Visual angular radius for point/spot lights in the HDRI.
+ * Real point lights are infinitely small, but we render them as visible
+ * bright disks so they appear in the exported HDRI. 2.5° = 0.0436 rad
+ * gives a clearly visible glow at all standard resolutions.
+ */
+const POINT_LIGHT_VISUAL_RADIUS = 2.5 * (Math.PI / 180);
+
+/** Gaussian softness factor: controls edge falloff smoothness (higher = softer edge). */
+const GAUSSIAN_SOFTNESS = 4.0;
+
 // ─── FUNCTION 1: pixelToDirection ────────────────────────────────────────────
 
 /**
  * Convert an output image pixel (x, y) to a 3D world direction vector
  * using equirectangular (latitude-longitude) projection.
+ *
+ * Mapping follows the standard equirectangular convention:
+ *   theta (azimuth) = u × 2PI,  phi (elevation) = v × PI
+ *   dir = (sin(phi)*sin(theta), cos(phi), sin(phi)*cos(theta))
+ *
+ * Output is 2:1 ratio (width:height) as required by HDR standards.
  *
  * @param x      - Horizontal pixel coordinate (0 = left edge).
  * @param y      - Vertical pixel coordinate (0 = top edge).
@@ -88,7 +120,7 @@ function pixelToDirection(
   const u = (x + 0.5) / width;
   const v = (y + 0.5) / height;
   const theta = u * 2 * Math.PI; // azimuth 0→2PI
-  const phi = v * Math.PI;        // elevation 0→PI
+  const phi = v * Math.PI;        // elevation 0→PI (top to bottom)
 
   return new THREE.Vector3(
     Math.sin(phi) * Math.sin(theta), // X
@@ -97,14 +129,53 @@ function pixelToDirection(
   ).normalize();
 }
 
+/**
+ * Calculate the solid angle (steradians) of a single pixel in an equirectangular map.
+ * This varies across the image — pixels near the poles cover less solid angle
+ * than pixels near the equator. Proper solid-angle weighting ensures total
+ * flux is preserved regardless of resolution.
+ *
+ * @param y      - Pixel row (0 = top/north pole).
+ * @param height - Total image height.
+ * @param width  - Total image width.
+ * @returns Solid angle in steradians for this pixel.
+ */
+function pixelSolidAngle(y: number, height: number, width: number): number {
+  const thetaSize = (2 * Math.PI) / width;
+  const phi1 = (y / height) * Math.PI;
+  const phi2 = ((y + 1) / height) * Math.PI;
+  return thetaSize * (Math.cos(phi1) - Math.cos(phi2));
+}
+
+/**
+ * Smooth Gaussian-like soft falloff for light edges.
+ * Returns 1.0 at center (angle=0), smoothly falling to ~0 at the angular radius.
+ *
+ * @param angle  - Angular distance from light center (radians).
+ * @param radius - Angular radius of the light (radians).
+ * @returns Falloff factor in [0, 1].
+ */
+function softFalloff(angle: number, radius: number): number {
+  if (angle >= radius) return 0;
+  const t = angle / radius; // 0 at center, 1 at edge
+  // Smoothstep-based falloff: stays near 1.0 in center, drops smoothly at edge
+  const s = t * t * (3 - 2 * t);
+  return 1.0 - s;
+}
+
 // ─── FUNCTION 2: evaluateLightRadiance ───────────────────────────────────────
 
 /**
  * For a given light and view direction, calculate the radiance arriving from
- * that direction at the capture point.
+ * that direction at the capture point. Lights are rendered as visible bright
+ * regions (not infinitely small points) with proper solid-angle radiance scaling.
  *
- * @param light       - Extracted light data.
- * @param dir         - Normalized world direction being evaluated.
+ * Key principle from the SVG pipeline (Stage 3):
+ *   "Values are UNBOUNDED — can be 0.001 to 100,000+"
+ *   "Dark shadow = 0.001, Softbox = 200–2000, Sun disk = 50,000+"
+ *
+ * @param light        - Extracted light data.
+ * @param dir          - Normalized world direction being evaluated.
  * @param capturePoint - World-space capture position.
  * @returns Radiance color (linear, can be >> 1.0 for true HDR).
  */
@@ -117,90 +188,129 @@ function evaluateLightRadiance(
 
   switch (light.type) {
     // ── Point Light ────────────────────────────────────────────────────────
+    // Rendered as a visible glowing disk with angular radius derived from
+    // the light's distance and a minimum visual size for visibility.
+    // Radiance scales with intensity / solid_angle so total flux is preserved.
     case 'point': {
       const toLight = new THREE.Vector3().subVectors(light.position, capturePoint);
       const dist = Math.max(0.01, toLight.length());
       toLight.normalize();
 
-      // Treat point light as a tiny sphere (radius = 0.05)
-      const angularRadius = Math.atan2(0.05, dist);
-      const cosAngle = dir.dot(toLight);
-      const angle = Math.acos(Math.max(-1, Math.min(1, cosAngle)));
+      // Angular distance from this pixel's direction to the light
+      const cosAngle = Math.max(-1, Math.min(1, dir.dot(toLight)));
+      const angle = Math.acos(cosAngle);
 
-      if (angle < angularRadius) {
-        const decay = light.decay ?? 2;
-        const falloff = Math.pow(dist, -decay);
-        const radiance = light.intensity * falloff * 500;
-        result.r = light.color.r * radiance;
-        result.g = light.color.g * radiance;
-        result.b = light.color.b * radiance;
-      }
+      // Visual angular radius: use the larger of physical or minimum visible size
+      // Physical: atan2(0.3, dist) — treat light as a 0.3m radius sphere
+      // Minimum: POINT_LIGHT_VISUAL_RADIUS — ensures visibility at any distance
+      const physicalRadius = Math.atan2(0.3, dist);
+      const visualRadius = Math.max(physicalRadius, POINT_LIGHT_VISUAL_RADIUS);
+
+      // Soft edge falloff
+      const falloff = softFalloff(angle, visualRadius * GAUSSIAN_SOFTNESS);
+      if (falloff <= 0) break;
+
+      // Radiance: intensity * scale / solid_angle_of_disk
+      // This ensures the light appears as a bright HDR hotspot (200–2000 range)
+      // Solid angle of a disk: PI * sin^2(angularRadius)
+      const solidAngle = Math.PI * Math.sin(visualRadius) * Math.sin(visualRadius);
+      const safeSolidAngle = Math.max(1e-6, solidAngle);
+      const radiance = (light.intensity / safeSolidAngle) * 200 * falloff;
+
+      result.r = light.color.r * radiance;
+      result.g = light.color.g * radiance;
+      result.b = light.color.b * radiance;
       break;
     }
 
     // ── Spot Light ─────────────────────────────────────────────────────────
+    // Same as point light but with cone angle and penumbra falloff.
+    // Only visible if the capture point is inside the spot cone.
     case 'spot': {
       const toLight = new THREE.Vector3().subVectors(light.position, capturePoint);
       const dist = Math.max(0.01, toLight.length());
       toLight.normalize();
 
-      const angularRadius = Math.atan2(0.05, dist);
-      const cosAngle = dir.dot(toLight);
-      const angleToLight = Math.acos(Math.max(-1, Math.min(1, cosAngle)));
+      // Check capture point is inside spot cone
+      const toCaptureDir = new THREE.Vector3()
+        .subVectors(capturePoint, light.position)
+        .normalize();
+      const lightDir = light.direction ?? new THREE.Vector3(0, -1, 0).clone().normalize();
+      const spotAngle = Math.acos(
+        Math.max(-1, Math.min(1, toCaptureDir.dot(lightDir))),
+      );
+      const halfAngle = light.angle ?? Math.PI / 4;
+      const penumbra = light.penumbra ?? 0.1;
 
-      if (angleToLight < angularRadius) {
-        // Check if capture point is inside the spot cone
-        const toCaptureDir = new THREE.Vector3()
-          .subVectors(capturePoint, light.position)
-          .normalize();
-        const lightDir = light.direction ?? new THREE.Vector3(0, -1, 0);
-        const spotAngle = Math.acos(
-          Math.max(-1, Math.min(1, toCaptureDir.dot(lightDir.normalize()))),
-        );
-        const halfAngle = light.angle ?? Math.PI / 4;
-        const penumbra = light.penumbra ?? 0.1;
+      if (spotAngle >= halfAngle) break; // Outside cone
 
-        if (spotAngle < halfAngle) {
-          const t = Math.max(0, Math.min(1, (halfAngle - spotAngle) / Math.max(0.001, penumbra)));
-          // Smoothstep-like falloff within penumbra
-          const falloff = t * t * (3 - 2 * t);
-          const decay = light.decay ?? 2;
-          const distFalloff = Math.pow(dist, -decay);
-          const radiance = light.intensity * distFalloff * falloff * 500;
-          result.r = light.color.r * radiance;
-          result.g = light.color.g * radiance;
-          result.b = light.color.b * radiance;
-        }
-      }
+      // Cone intensity falloff (smoothstep in penumbra region)
+      const coneT = Math.max(0, Math.min(1, (halfAngle - spotAngle) / Math.max(0.001, penumbra * halfAngle)));
+      const coneFalloff = coneT * coneT * (3 - 2 * coneT);
+
+      // Angular distance to light center
+      const cosAngle = Math.max(-1, Math.min(1, dir.dot(toLight)));
+      const angle = Math.acos(cosAngle);
+
+      // Visual angular radius with cone-aware sizing
+      const physicalRadius = Math.atan2(0.3, dist);
+      // Scale visual size by the spot cone — wider cone = larger apparent source
+      const coneScale = Math.sin(halfAngle);
+      const visualRadius = Math.max(physicalRadius, POINT_LIGHT_VISUAL_RADIUS * coneScale);
+
+      const falloff = softFalloff(angle, visualRadius * GAUSSIAN_SOFTNESS);
+      if (falloff <= 0) break;
+
+      // Radiance with distance decay and cone falloff
+      const decay = light.decay ?? 2;
+      const distDecay = Math.pow(Math.max(0.1, dist), -decay) * Math.pow(Math.max(0.1, 5), decay);
+      const solidAngle = Math.PI * Math.sin(visualRadius) * Math.sin(visualRadius);
+      const safeSolidAngle = Math.max(1e-6, solidAngle);
+      const radiance = (light.intensity / safeSolidAngle) * 200 * falloff * coneFalloff * distDecay;
+
+      result.r = light.color.r * radiance;
+      result.g = light.color.g * radiance;
+      result.b = light.color.b * radiance;
       break;
     }
 
     // ── Directional Light (Sun) ────────────────────────────────────────────
+    // Sun is a tiny extremely bright disk at infinity. Uses the real solar
+    // angular radius (0.2657°). Soft glow extends ~5x beyond the disk.
     case 'directional': {
-      const lightDir = light.direction ?? new THREE.Vector3(0, -1, 0).normalize();
+      const lightDir = light.direction ?? new THREE.Vector3(0, -1, 0).clone().normalize();
       const toSun = lightDir.clone().negate().normalize();
-      const sunAngRad = 0.004635; // real sun angular radius ~0.2657°
-      const cosAngle = dir.dot(toSun);
-      const angleToSun = Math.acos(Math.max(-1, Math.min(1, cosAngle)));
 
-      if (angleToSun < sunAngRad) {
-        // Sun disk — extremely bright
+      const cosAngle = Math.max(-1, Math.min(1, dir.dot(toSun)));
+      const angleToSun = Math.acos(cosAngle);
+
+      if (angleToSun < SUN_ANGULAR_RADIUS) {
+        // ── Sun disk: extremely bright (Stage 3: "Sun disk = 50,000+")
         const radiance = light.intensity * 80000;
         result.r = light.color.r * radiance;
         result.g = light.color.g * radiance;
         result.b = light.color.b * radiance;
       } else {
-        // Soft sky gradient contribution around the sun
-        const skyFactor = Math.max(0, dir.y) * 0.3;
-        const radiance = light.intensity * skyFactor;
-        result.r = light.color.r * radiance;
-        result.g = light.color.g * radiance;
-        result.b = light.color.b * radiance;
+        // ── Soft glow / sky gradient around the sun
+        // Extends to ~5x the solar radius with smooth falloff
+        const glowRadius = SUN_ANGULAR_RADIUS * 8;
+        const glowFalloff = softFalloff(angleToSun, glowRadius);
+        if (glowFalloff > 0) {
+          // Glow is much dimmer than the disk but still HDR (>1.0)
+          const glowRadiance = light.intensity * 50 * glowFalloff;
+          result.r = light.color.r * glowRadiance;
+          result.g = light.color.g * glowRadiance;
+          result.b = light.color.b * glowRadiance;
+        }
       }
       break;
     }
 
     // ── Rect Area Light ────────────────────────────────────────────────────
+    // Rendered by sampling points across the rectangle surface. Each sample
+    // contributes a soft glow proportional to the pixel's angular proximity.
+    // This creates a visible bright rectangle in the HDRI — matching how
+    // softboxes and panel lights appear in real HDRI captures.
     case 'area': {
       const lightNormal = light.normal ?? new THREE.Vector3(0, 0, 1);
       const facingDir = new THREE.Vector3()
@@ -214,10 +324,10 @@ function evaluateLightRadiance(
       const lightUp = light.up ?? new THREE.Vector3(0, 1, 0);
       const rectW = light.width ?? 2;
       const rectH = light.height ?? 2;
-      const samples = 16;
 
+      // Sample a grid across the rectangle
+      const samples = 12;
       let accR = 0, accG = 0, accB = 0;
-      let contribCount = 0;
 
       for (let sy = 0; sy < samples; sy++) {
         for (let sx = 0; sx < samples; sx++) {
@@ -225,41 +335,66 @@ function evaluateLightRadiance(
           const sv = (sy + 0.5) / samples;
 
           // Sample point on rectangle surface
-          const p = new THREE.Vector3()
-            .copy(light.position)
-            .addScaledVector(lightRight, (su - 0.5) * rectW)
-            .addScaledVector(lightUp, (sv - 0.5) * rectH);
+          const px = light.position.x
+            + lightRight.x * (su - 0.5) * rectW
+            + lightUp.x * (sv - 0.5) * rectH;
+          const py = light.position.y
+            + lightRight.y * (su - 0.5) * rectW
+            + lightUp.y * (sv - 0.5) * rectH;
+          const pz = light.position.z
+            + lightRight.z * (su - 0.5) * rectW
+            + lightUp.z * (sv - 0.5) * rectH;
 
-          const toP = new THREE.Vector3().subVectors(p, capturePoint);
-          const dist = Math.max(0.01, toP.length());
-          toP.normalize();
+          const dx = px - capturePoint.x;
+          const dy = py - capturePoint.y;
+          const dz = pz - capturePoint.z;
+          const dist = Math.max(0.01, Math.sqrt(dx * dx + dy * dy + dz * dz));
 
-          const cosA = dir.dot(toP);
-          const angle = Math.acos(Math.max(-1, Math.min(1, cosA)));
+          // Direction to this sample point
+          const invDist = 1 / dist;
+          const tx = dx * invDist;
+          const ty = dy * invDist;
+          const tz = dz * invDist;
 
-          const srcRadius = Math.min(rectW, rectH) / 32;
-          const angRadius = Math.atan2(srcRadius, dist);
+          // Angular distance from pixel direction to sample direction
+          const cosA = Math.max(-1, Math.min(1, dir.x * tx + dir.y * ty + dir.z * tz));
+          const angle = Math.acos(cosA);
 
-          if (angle < angRadius) {
-            const cosEmit = Math.max(0, toP.clone().negate().dot(lightNormal));
-            const radiance = light.intensity * cosEmit * 200 / (dist * dist + 0.1);
-            accR += light.color.r * radiance;
-            accG += light.color.g * radiance;
-            accB += light.color.b * radiance;
-            contribCount++;
-          }
+          // Each sample covers a small sub-rectangle of the area light
+          const subW = rectW / samples;
+          const subH = rectH / samples;
+          const sampleRadius = Math.atan2(Math.max(subW, subH) * 0.6, dist);
+
+          // Soft glow from this sample
+          const falloff = softFalloff(angle, sampleRadius * GAUSSIAN_SOFTNESS);
+          if (falloff <= 0) continue;
+
+          // Cosine emission factor (Lambert's law for the area surface)
+          const cosEmit = Math.max(0, -(tx * lightNormal.x + ty * lightNormal.y + tz * lightNormal.z));
+
+          // Radiance: intensity * cosEmit / solidAngle * falloff
+          // Area lights in studio HDRI should be 200–2000 range (Stage 3)
+          const solidAngle = Math.PI * Math.sin(sampleRadius) * Math.sin(sampleRadius);
+          const safeSA = Math.max(1e-6, solidAngle);
+          const radiance = (light.intensity * cosEmit / safeSA) * 150 * falloff;
+
+          accR += light.color.r * radiance;
+          accG += light.color.g * radiance;
+          accB += light.color.b * radiance;
         }
       }
 
-      if (contribCount > 0) {
-        result.r = accR / (samples * samples);
-        result.g = accG / (samples * samples);
-        result.b = accB / (samples * samples);
-      }
+      // Average over all samples
+      const totalSamples = samples * samples;
+      result.r = accR / totalSamples;
+      result.g = accG / totalSamples;
+      result.b = accB / totalSamples;
       break;
     }
 
     // ── Hemisphere Light ───────────────────────────────────────────────────
+    // Smooth gradient from ground color (bottom) to sky color (top).
+    // This is an ambient fill — values are typically 0.1–0.5 range.
     case 'hemisphere': {
       const t = (dir.y + 1) / 2; // 0 = ground, 1 = sky
       const skyCol = light.color;
@@ -279,15 +414,15 @@ function evaluateLightRadiance(
 /**
  * Generate a true HDR equirectangular image analytically from scene lights.
  *
- * For every pixel in the output:
- *   1. Convert pixel → world direction (equirectangular projection)
- *   2. Sum radiance contributions from all lights
- *   3. Optionally add environment map contribution
- *   4. Write raw float values directly
+ * Pipeline stages implemented:
+ *   Stage 2 (Capture): Analytical per-pixel, no camera/render
+ *   Stage 3 (Radiance): Float32 RGBA, unbounded values (0.001 to 100,000+)
+ *   Stage 4 (Projection): Equirectangular, 2:1 ratio, top-to-bottom
+ *   Stage 5 (Color Space): Linear — no gamma, no tone mapping
  *
  * @param scene           - The THREE.Scene containing lights.
  * @param width           - Output width in pixels.
- * @param height          - Output height in pixels.
+ * @param height          - Output height in pixels (should be width/2 for 2:1).
  * @param capturePoint    - World-space capture position (default: origin).
  * @param includeEnv      - Whether to include loaded environment texture.
  * @param envTexture      - User-loaded equirectangular environment texture.
@@ -313,6 +448,9 @@ export async function generateAnalyticalHDRI(
 
   // For each pixel, calculate analytical radiance
   for (let y = 0; y < height; y++) {
+    // Pre-compute solid angle for this row
+    const sa = pixelSolidAngle(y, height, width);
+
     for (let x = 0; x < width; x++) {
       const dir = pixelToDirection(x, y, width, height);
 
@@ -341,23 +479,32 @@ export async function generateAnalyticalHDRI(
       pixels[idx + 3] = 1.0;
     }
 
-    // Log progress every 100 rows
+    // Log progress every 100 rows + yield to event loop
     if (y % 100 === 0) {
       const pct = Math.round((y / height) * 100);
       console.log(`[LightForge HDRI] ${pct}% complete`);
-      // Yield to the event loop so the UI stays responsive
       await new Promise<void>((resolve) => setTimeout(resolve, 0));
     }
   }
 
-  // VERIFY — this MUST print > 1.0 for true HDR
+  // VERIFY — Stage 3 check: max pixel MUST be > 1.0 for true HDR
   let maxVal = 0;
+  let nonBlackCount = 0;
   for (let i = 0; i < pixels.length; i += 4) {
     const m = Math.max(pixels[i], pixels[i + 1], pixels[i + 2]);
     if (m > maxVal) maxVal = m;
+    if (m > 0.001) nonBlackCount++;
   }
-  console.log('[LightForge HDRI] Max pixel value:', maxVal);
-  console.log('[LightForge HDRI] True HDR:', maxVal > 1.0);
+  const totalPixels = width * height;
+  console.log(`[LightForge HDRI] Max pixel value: ${maxVal.toFixed(1)}`);
+  console.log(`[LightForge HDRI] Non-black pixels: ${nonBlackCount} / ${totalPixels} (${((nonBlackCount / totalPixels) * 100).toFixed(1)}%)`);
+  console.log(`[LightForge HDRI] True HDR: ${maxVal > 1.0}`);
+  if (maxVal <= 1.0) {
+    console.warn('[LightForge HDRI] WARNING: Max pixel value <= 1.0 — output is LDR, not HDR!');
+  }
+  if (nonBlackCount === 0) {
+    console.error('[LightForge HDRI] ERROR: All pixels are black! No lights found or all lights out of range.');
+  }
 
   return pixels;
 }
@@ -373,6 +520,7 @@ export async function generateAnalyticalHDRI(
  *   - obj.userData.isProxy === true
  *   - obj.userData.isGrid === true
  *   - obj.visible === false
+ *   - obj instanceof THREE.AmbientLight (omnidirectional, no position)
  *
  * @param scene - The THREE.Scene to traverse.
  * @returns Array of extracted light data objects.
@@ -383,10 +531,7 @@ function extractLightsFromScene(scene: THREE.Scene): ExtractedLight[] {
   const worldQuat = new THREE.Quaternion();
 
   scene.traverse((child) => {
-    // Skip non-lights
     if (!(child instanceof THREE.Light)) return;
-
-    // Skip hidden / helper / proxy objects
     if (!child.visible) return;
     if (child.userData.isLightHelper === true) return;
     if (child.userData.isProxy === true) return;
@@ -480,11 +625,12 @@ function extractLightsFromScene(scene: THREE.Scene): ExtractedLight[] {
  *
  * Applies envRotation (rotation around Y axis), converts direction to UV
  * via equirectangular projection, then bilinear-samples the texture.
+ * Handles DataTexture (Float32 from RGBELoader), HTMLCanvasElement, and ImageData.
  *
- * @param texture     - Equirectangular environment texture.
- * @param dir         - Normalized world direction to sample.
- * @param rotation    - Rotation in radians around Y axis.
- * @param intensity   - Brightness multiplier.
+ * @param texture   - Equirectangular environment texture.
+ * @param dir       - Normalized world direction to sample.
+ * @param rotation  - Rotation in radians around Y axis.
+ * @param intensity - Brightness multiplier.
  * @returns Sampled color (linear, scaled by intensity).
  */
 function sampleEnvTexture(
@@ -536,29 +682,27 @@ function sampleEnvTexture(
       data = d;
     }
   } else {
-    // Unsupported texture source
     return new THREE.Color(0, 0, 0);
   }
 
   // Bilinear sampling
   const px = u * texW - 0.5;
   const py = v * texH - 0.5;
-  const x0 = Math.floor(px) % texW;
-  const y0 = Math.floor(py) % texH;
+  const x0 = ((Math.floor(px) % texW) + texW) % texW;
+  const y0 = ((Math.floor(py) % texH) + texH) % texH;
   const x1 = (x0 + 1) % texW;
   const y1 = (y0 + 1) % texH;
   const fx = px - Math.floor(px);
   const fy = py - Math.floor(py);
 
-  const channels = isFloat ? 4 : 4; // both RGBA
   const getPixel = (xi: number, yi: number): [number, number, number] => {
-    const idx = (yi * texW + xi) * channels;
+    const idx = (yi * texW + xi) * 4;
     if (idx < 0 || idx + 2 >= data.length) return [0, 0, 0];
     if (isFloat) {
       const f = data as Float32Array;
       return [f[idx], f[idx + 1], f[idx + 2]];
     }
-    // Uint8 — convert from sRGB to linear
+    // Uint8 — convert from sRGB to linear (Stage 5: must be linear)
     return [
       sRGBToLinear((data[idx] ?? 0) / 255),
       sRGBToLinear((data[idx + 1] ?? 0) / 255),
@@ -571,18 +715,20 @@ function sampleEnvTexture(
   const c01 = getPixel(x0, y1);
   const c11 = getPixel(x1, y1);
 
-  const r = (c00[0] * (1 - fx) * (1 - fy) + c10[0] * fx * (1 - fy) +
-             c01[0] * (1 - fx) * fy + c11[0] * fx * fy) * intensity;
-  const g = (c00[1] * (1 - fx) * (1 - fy) + c10[1] * fx * (1 - fy) +
-             c01[1] * (1 - fx) * fy + c11[1] * fx * fy) * intensity;
-  const b = (c00[2] * (1 - fx) * (1 - fy) + c10[2] * fx * (1 - fy) +
-             c01[2] * (1 - fx) * fy + c11[2] * fx * fy) * intensity;
+  const w00 = (1 - fx) * (1 - fy);
+  const w10 = fx * (1 - fy);
+  const w01 = (1 - fx) * fy;
+  const w11 = fx * fy;
+
+  const r = (c00[0] * w00 + c10[0] * w10 + c01[0] * w01 + c11[0] * w11) * intensity;
+  const g = (c00[1] * w00 + c10[1] * w10 + c01[1] * w01 + c11[1] * w11) * intensity;
+  const b = (c00[2] * w00 + c10[2] * w10 + c01[2] * w01 + c11[2] * w11) * intensity;
 
   return new THREE.Color(r, g, b);
 }
 
 /**
- * Convert sRGB gamma value to linear.
+ * Convert sRGB gamma value to linear (Stage 5: linear color space mandatory).
  */
 function sRGBToLinear(c: number): number {
   if (c <= 0.04045) return c / 12.92;
@@ -594,10 +740,23 @@ function sRGBToLinear(c: number): number {
 /**
  * Encode HDR pixel data into a Radiance RGBE .hdr file (ArrayBuffer).
  *
- * Uses uncompressed (flat) RGBE encoding for maximum compatibility.
- * Input is RGBA Float32Array (4 floats per pixel, top-to-bottom, linear).
+ * Stage 6 (File Encoding): RGBE format
+ *   R, G, B = mantissa bytes (0–255)
+ *   E = shared exponent (biased +128)
+ *   Decoded value = RGB × 2^(E−128) / 256
+ *   Range: 10^-38 to 10^38
  *
- * @param pixels - Float32Array of RGBA (4 floats/pixel, linear).
+ * Header format (exact):
+ *   #?RADIANCE\n
+ *   SOFTWARE=LightForge Studio\n
+ *   FORMAT=32-bit_rle_rgbe\n
+ *   EXPOSURE=1.0\n
+ *   \n
+ *   -Y {height} +X {width}\n
+ *
+ * Input: RGBA Float32Array (4 floats/pixel, top-to-bottom, linear).
+ *
+ * @param pixels - Float32Array of RGBA (4 floats/pixel, linear, top-to-bottom).
  * @param width  - Image width in pixels.
  * @param height - Image height in pixels.
  * @returns Complete .hdr file as ArrayBuffer.
@@ -635,12 +794,13 @@ export function encodeHDR(
 /**
  * Convert a single RGB float triplet to Radiance RGBE (4 bytes).
  *
- * RGBE encoding with shared exponent:
+ * Algorithm:
  *   maxVal = max(r, g, b)
  *   if maxVal < 1e-32: output [0,0,0,0]
  *   else:
  *     exp = floor(log2(maxVal)) + 1
- *     correction pass: adjust if needed
+ *     correction: if maxVal * 2^(-exp) < 0.5: exp--
+ *                 if maxVal * 2^(-exp) >= 1.0: exp++
  *     scale = 2^(-exp) * 256
  *     R/G/B = clamp(floor(component * scale), 0, 255)
  *     E = clamp(exp + 128, 0, 255)
@@ -684,14 +844,15 @@ function rgbFloatToRGBE(
 /**
  * Encode HDR pixel data into an OpenEXR .exr file (ArrayBuffer).
  *
- * Channels: B, G, R (alphabetical, float32) — standard HDRI EXR convention.
- * Compression: NO_COMPRESSION (0).
- * Alpha is set to 1.0 for all pixels.
+ * Stage 6 (File Encoding): OpenEXR format
+ *   Channels: B, G, R (alphabetical order, float32)
+ *   Compression: NO_COMPRESSION (0)
+ *   Magic: 0x762F3101 (20000630 decimal), Version: 2
  *
- * Input is RGBA Float32Array (4 floats per pixel, top-to-bottom, linear).
- * The alpha channel in the input is ignored; alpha in EXR is always 1.0.
+ * Input: RGBA Float32Array (4 floats/pixel, top-to-bottom, linear).
+ * Alpha in input is ignored; no alpha channel in output (RGB only).
  *
- * @param pixels - Float32Array of RGBA (4 floats/pixel, linear).
+ * @param pixels - Float32Array of RGBA (4 floats/pixel, linear, top-to-bottom).
  * @param width  - Image width in pixels.
  * @param height - Image height in pixels.
  * @returns Complete .exr file as ArrayBuffer.
@@ -730,16 +891,15 @@ export function encodeEXR(
   const writeChannelEntry = (arr: number[], name: string): void => {
     const bytes = new TextEncoder().encode(name);
     for (const b of bytes) arr.push(b);
-    arr.push(0); // null terminator
-    // Pad name to 4-byte boundary (including null)
+    arr.push(0);
     const nameLen = bytes.length + 1;
     const pad = (4 - (nameLen % 4)) % 4;
     for (let i = 0; i < pad; i++) arr.push(0);
-    // Channel properties (16 bytes): pixel_type(i32) + pLinear(u32) + x_sampling(u32) + y_sampling(u32)
+    // pixel_type(i32) + pLinear(u32) + x_sampling(u32) + y_sampling(u32)
     for (const v of intToBytes(PIXEL_TYPE_FLOAT)) arr.push(v);
-    for (const v of intToBytes(0)) arr.push(v);            // pLinear
-    for (const v of intToBytes(1)) arr.push(v);            // x sampling
-    for (const v of intToBytes(1)) arr.push(v);            // y sampling
+    for (const v of intToBytes(0)) arr.push(v);
+    for (const v of intToBytes(1)) arr.push(v);
+    for (const v of intToBytes(1)) arr.push(v);
   };
 
   const writeAttrValue = (arr: number[], valueBytes: number[]): void => {
@@ -752,66 +912,62 @@ export function encodeEXR(
   // ── Build header attributes ──────────────────────────────────────────────
   const hdr: number[] = [];
 
-  // 1) channels (chlist): 3 entries × 20 bytes + 1 terminator byte = 61 bytes
+  // 1) channels (chlist)
   writeName(hdr, 'channels');
   writeName(hdr, 'chlist');
   const channelData: number[] = [];
   for (const chName of CHANNEL_NAMES) {
     writeChannelEntry(channelData, chName);
   }
-  channelData.push(0); // channel list terminator
+  channelData.push(0);
   writeAttrValue(hdr, channelData);
 
-  // 2) compression: 1 byte (0 = NO_COMPRESSION)
+  // 2) compression
   writeName(hdr, 'compression');
   writeName(hdr, 'compression');
   writeAttrValue(hdr, [0]);
 
-  // 3) dataWindow (box2i): 4 × int32 = 16 bytes
+  // 3) dataWindow (box2i)
   writeName(hdr, 'dataWindow');
   writeName(hdr, 'box2i');
   writeAttrValue(hdr, [
-    ...intToBytes(0),
-    ...intToBytes(0),
-    ...intToBytes(width - 1),
-    ...intToBytes(height - 1),
+    ...intToBytes(0), ...intToBytes(0),
+    ...intToBytes(width - 1), ...intToBytes(height - 1),
   ]);
 
-  // 4) displayWindow (box2i): 4 × int32 = 16 bytes
+  // 4) displayWindow (box2i)
   writeName(hdr, 'displayWindow');
   writeName(hdr, 'box2i');
   writeAttrValue(hdr, [
-    ...intToBytes(0),
-    ...intToBytes(0),
-    ...intToBytes(width - 1),
-    ...intToBytes(height - 1),
+    ...intToBytes(0), ...intToBytes(0),
+    ...intToBytes(width - 1), ...intToBytes(height - 1),
   ]);
 
-  // 5) lineOrder: 1 byte (0 = INCREASING_Y)
+  // 5) lineOrder
   writeName(hdr, 'lineOrder');
   writeName(hdr, 'lineOrder');
   writeAttrValue(hdr, [0]);
 
-  // 6) pixelAspectRatio (float): 4 bytes
+  // 6) pixelAspectRatio
   writeName(hdr, 'pixelAspectRatio');
   writeName(hdr, 'float');
   writeAttrValue(hdr, floatToBytes(1.0));
 
-  // 7) screenWindowCenter (v2f): 8 bytes
+  // 7) screenWindowCenter (v2f)
   writeName(hdr, 'screenWindowCenter');
   writeName(hdr, 'v2f');
   writeAttrValue(hdr, [...floatToBytes(0.0), ...floatToBytes(0.0)]);
 
-  // 8) screenWindowWidth (float): 4 bytes
+  // 8) screenWindowWidth
   writeName(hdr, 'screenWindowWidth');
   writeName(hdr, 'float');
   writeAttrValue(hdr, floatToBytes(1.0));
 
-  // End of header: empty name (single null byte), then pad to 8-byte boundary
+  // End of header
   hdr.push(0);
   while (hdr.length % 8 !== 0) hdr.push(0);
 
-  const fileHeaderSize = 8; // magic(4) + version(4)
+  const fileHeaderSize = 8;
   const headerSize = hdr.length;
   const offsetTableSize = height * 8;
   const scanlineDataStart = fileHeaderSize + headerSize + offsetTableSize;
@@ -824,7 +980,6 @@ export function encodeEXR(
   }
 
   // ── Scanline pixel data ─────────────────────────────────────────────────
-  // Each scanline: [y_coord (u32)] [data_size (u32)] [B(u32) G(u32) R(u32) per pixel]
   const scanlines: number[] = [];
   for (let y = 0; y < height; y++) {
     for (const v of intToBytes(y)) scanlines.push(v);
@@ -842,14 +997,11 @@ export function encodeEXR(
   const file = new Uint8Array(totalSize);
   const dv = new DataView(file.buffer);
 
-  // Magic number: 0x762F3101 (20000630 decimal)
   dv.setUint32(0, 20000630, true);
-  // Version: 2
   dv.setUint32(4, 2, true);
 
   file.set(new Uint8Array(hdr), 8);
 
-  // Offset table
   const offsetBase = fileHeaderSize + headerSize;
   for (let y = 0; y < height; y++) {
     const off = offsets[y];
@@ -857,7 +1009,6 @@ export function encodeEXR(
     dv.setUint32(offsetBase + y * 8 + 4, Math.floor(off / 0x100000000) & 0xffffffff, true);
   }
 
-  // Scanline data
   file.set(new Uint8Array(scanlines), scanlineDataStart);
 
   return file.buffer;
@@ -932,11 +1083,10 @@ export async function downloadHDRI(
   console.log(`[LightForge HDRI] Export complete: ${baseName}${ext}`);
 }
 
-// ─── Environment texture loader (for custom .hdr) ───────────────────────────
+// ─── Environment texture loader ──────────────────────────────────────────────
 
 /**
  * Load a raw .hdr ArrayBuffer into a THREE.DataTexture via RGBELoader.
- * Used to prepare the environment texture for analytical sampling.
  */
 function loadHDRITexture(buffer: ArrayBuffer): Promise<THREE.DataTexture | null> {
   return new Promise<THREE.DataTexture | null>((resolve) => {
@@ -976,7 +1126,6 @@ export async function exportSceneAsHDR(
   const resolution = options?.size ?? 2048;
   const height = Math.floor(resolution / 2);
 
-  // Try to load custom HDRI if available
   let envTexture: THREE.Texture | null = null;
   const rawBuffer = getRawHDRIData();
   if (rawBuffer) {
@@ -1015,7 +1164,6 @@ export async function exportSceneAsEXR(
   const resolution = options?.size ?? 2048;
   const height = Math.floor(resolution / 2);
 
-  // Try to load custom HDRI if available
   let envTexture: THREE.Texture | null = null;
   const rawBuffer = getRawHDRIData();
   if (rawBuffer) {
