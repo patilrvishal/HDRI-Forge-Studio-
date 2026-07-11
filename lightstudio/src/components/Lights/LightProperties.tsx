@@ -45,6 +45,41 @@ export const LightProperties: React.FC = () => {
     [lights, selectedLightId],
   );
 
+  // Safe accessor for spherical values — guards against NaN/undefined
+  const safeSpherical = useMemo(() => {
+    if (!light) return { lat: 0, lng: 0, radius: 5, height: 3 };
+    const s = light.transform.spherical;
+    return {
+      lat: Number.isFinite(s.lat) ? s.lat : 0,
+      lng: Number.isFinite(s.lng) ? s.lng : 0,
+      radius: Number.isFinite(s.radius) ? Math.max(0.5, s.radius) : 5,
+      height: Number.isFinite(s.height) ? s.height : 3,
+    };
+  }, [light]);
+
+  // Safe accessor for position values
+  const safePosition = useMemo(() => {
+    if (!light) return { x: 0, y: 0, z: 0 };
+    const p = light.transform.position;
+    return {
+      x: Number.isFinite(p.x) ? p.x : 0,
+      y: Number.isFinite(p.y) ? p.y : 0,
+      z: Number.isFinite(p.z) ? p.z : 0,
+    };
+  }, [light]);
+
+  // Safe accessor for rotation values
+  const safeRotation = useMemo(() => {
+    if (!light) return { x: 0, y: 0, z: 0, enabled: false };
+    const r = light.transform.rotation;
+    return {
+      x: Number.isFinite(r.x) ? r.x : 0,
+      y: Number.isFinite(r.y) ? r.y : 0,
+      z: Number.isFinite(r.z) ? r.z : 0,
+      enabled: r.enabled,
+    };
+  }, [light]);
+
   const handleUpdate = useCallback(
     (updates: Partial<Light>) => {
       if (!selectedLightId) return;
@@ -84,7 +119,7 @@ export const LightProperties: React.FC = () => {
 
   const handleSphericalChange = useCallback(
     (key: 'lat' | 'lng' | 'radius' | 'height', value: number) => {
-      if (!light) return;
+      if (!light || !Number.isFinite(value)) return;
       const newSpherical = { ...light.transform.spherical, [key]: value };
       const cart = sphericalToCartesian(
         newSpherical.lat,
@@ -102,7 +137,7 @@ export const LightProperties: React.FC = () => {
 
   const handlePositionChange = useCallback(
     (axis: 'x' | 'y' | 'z', value: number) => {
-      if (!light) return;
+      if (!light || !Number.isFinite(value)) return;
       const newPos = { ...light.transform.position, [axis]: value };
       updateLightTransform(light.id, {
         position: newPos,
@@ -113,7 +148,7 @@ export const LightProperties: React.FC = () => {
 
   const handleRotationChange = useCallback(
     (axis: 'x' | 'y' | 'z', value: number) => {
-      if (!light) return;
+      if (!light || !Number.isFinite(value)) return;
       const newRot = { ...light.transform.rotation, [axis]: value };
       updateLightTransform(light.id, {
         rotation: newRot,
@@ -280,7 +315,7 @@ export const LightProperties: React.FC = () => {
         </div>
         <Slider
           label="Latitude"
-          value={light.transform.spherical.lat}
+          value={safeSpherical.lat}
           min={-90}
           max={90}
           step={0.5}
@@ -289,7 +324,7 @@ export const LightProperties: React.FC = () => {
         />
         <Slider
           label="Longitude"
-          value={light.transform.spherical.lng}
+          value={safeSpherical.lng}
           min={0}
           max={360}
           step={0.5}
@@ -298,7 +333,7 @@ export const LightProperties: React.FC = () => {
         />
         <Slider
           label="Radius"
-          value={light.transform.spherical.radius}
+          value={safeSpherical.radius}
           min={0.5}
           max={30}
           step={0.1}
@@ -306,7 +341,7 @@ export const LightProperties: React.FC = () => {
         />
         <Slider
           label="Height"
-          value={light.transform.spherical.height}
+          value={safeSpherical.height}
           min={-5}
           max={15}
           step={0.1}
@@ -326,7 +361,7 @@ export const LightProperties: React.FC = () => {
           <div style={{ flex: 1 }}>
             <NumericInput
               label="X"
-              value={light.transform.position.x}
+              value={safePosition.x}
               min={-20}
               max={20}
               step={0.1}
@@ -337,7 +372,7 @@ export const LightProperties: React.FC = () => {
           <div style={{ flex: 1 }}>
             <NumericInput
               label="Y"
-              value={light.transform.position.y}
+              value={safePosition.y}
               min={-5}
               max={15}
               step={0.1}
@@ -348,7 +383,7 @@ export const LightProperties: React.FC = () => {
           <div style={{ flex: 1 }}>
             <NumericInput
               label="Z"
-              value={light.transform.position.z}
+              value={safePosition.z}
               min={-20}
               max={20}
               step={0.1}
@@ -365,7 +400,7 @@ export const LightProperties: React.FC = () => {
           Rotation
           <span style={{ marginLeft: 'auto' }}>
             <Toggle
-              checked={light.transform.rotation.enabled}
+              checked={safeRotation.enabled}
               onChange={(v) =>
                 handleUpdate({
                   transform: {
@@ -377,11 +412,11 @@ export const LightProperties: React.FC = () => {
             />
           </span>
         </div>
-        {light.transform.rotation.enabled && (
+        {safeRotation.enabled && (
           <>
             <Slider
               label="Rot X"
-              value={light.transform.rotation.x}
+              value={safeRotation.x}
               min={-180}
               max={180}
               step={1}
@@ -390,7 +425,7 @@ export const LightProperties: React.FC = () => {
             />
             <Slider
               label="Rot Y"
-              value={light.transform.rotation.y}
+              value={safeRotation.y}
               min={-180}
               max={180}
               step={1}
@@ -399,7 +434,7 @@ export const LightProperties: React.FC = () => {
             />
             <Slider
               label="Rot Z"
-              value={light.transform.rotation.z}
+              value={safeRotation.z}
               min={-180}
               max={180}
               step={1}

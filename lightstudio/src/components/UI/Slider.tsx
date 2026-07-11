@@ -43,7 +43,7 @@ export const Slider: React.FC<SliderProps> = ({
       />
       {showValue && (
         <span className="slider-value">
-          {Number.isInteger(step) ? value : value.toFixed(1)}{unit}
+          {Number.isNaN(value) ? '—' : (Number.isInteger(step) ? value : value.toFixed(1))}{unit}
         </span>
       )}
     </div>

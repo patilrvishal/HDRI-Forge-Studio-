@@ -97,7 +97,7 @@ const SECTIONS: SectionDef[] = [
   { name: 'Specular', physicalOnly: true },
   { name: 'Transmission', physicalOnly: true },
   { name: 'Coat', physicalOnly: true },
-  { name: 'Fabric / Carpet', physicalOnly: true, defaultExpanded: false },
+  { name: 'Fabric / Carpet', physicalOnly: true, defaultExpanded: true },
   { name: 'Iridescence', physicalOnly: true },
   { name: 'Emission' },
   { name: 'Displacement', defaultExpanded: false },

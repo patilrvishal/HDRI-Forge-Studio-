@@ -195,7 +195,6 @@ const SECTIONS: ManualSection[] = [
       { type: 'text', data: 'HDRI not loading: Ensure the file is a valid .hdr format. Very large HDRIs (>8K) may take longer to process. Try a smaller resolution first.' },
       { type: 'text', data: 'Material changes not visible: Make sure the material is assigned to the mesh and the mesh is visible in the scene hierarchy. Check the Scene tab for hidden objects.' },
       { type: 'text', data: 'Exported HDRI has max value = 1.0: This indicates a bug in the radiance calculation. A true HDRI should have max pixel values > 100. Check the console for "[LightForge HDRI] Max pixel value" output.' },
-      { type: 'text', data: 'NaN warnings in Light Properties: This is caused by a spherical coordinate conversion bug. The cartesianToSpherical function is being fixed to resolve this issue permanently.' },
       { type: 'tip', data: 'If the viewport becomes unresponsive, try pressing F to reset the camera, or use Window > Reset Layout to restore the default panel arrangement.' },
     ],
   },

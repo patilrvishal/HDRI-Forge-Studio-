@@ -21,8 +21,14 @@ export function cartesianToSpherical(
   const height = y;
   const horizontalDist = Math.sqrt(x * x + z * z);
   const radius = horizontalDist;
-  const lat = Math.atan2(y - height, horizontalDist) * RAD2DEG;
-  const lng = Math.atan2(z, x) * RAD2DEG;
+  // Elevation angle from horizontal plane: atan2(y, horizontalDist)
+  // Guard against NaN when both y and horizontalDist are 0
+  const lat = (horizontalDist === 0 && y === 0)
+    ? 0
+    : Math.atan2(y, horizontalDist) * RAD2DEG;
+  const lng = (x === 0 && z === 0)
+    ? 0
+    : Math.atan2(z, x) * RAD2DEG;
   return {
     lat,
     lng: lng < 0 ? lng + 360 : lng,
