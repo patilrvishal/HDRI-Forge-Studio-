@@ -677,49 +677,12 @@ const TreeNode: React.FC<{
   const renameRef = useRef<HTMLInputElement>(null);
   const rowRef = useRef<HTMLDivElement>(null);
 
-  const hasChildren = node.children.length > 0;
-  const isSelected = selectedId === node.object.uuid;
-  const isHidden = hiddenIds.includes(node.object.uuid);
-  const isExpanded = expandedIds.includes(node.object.uuid);
-  const isColl = node.isCollection;
-  const isDropTarget = dropTargetId === node.object.uuid;
-
-  // Filter by type
-  if (filterType !== 'all') {
-    const typeMap: Record<string, string[]> = {
-      mesh: ['mesh'],
-      light: ['light'],
-      camera: ['camera'],
-      group: ['group'],
-    };
-    const allowed = typeMap[filterType] || [];
-    if (allowed.length > 0 && !allowed.includes(node.type)) {
-      // Collections (which have type='group') should always show in 'group' filter
-      const isGroupMatch = isColl && filterType === 'group';
-      if (!isGroupMatch) {
-        let hasMatch = false;
-        const checkDescendants = (n: HierarchyNode) => {
-          if (allowed.includes(n.type) || (n.isCollection && filterType === 'group')) hasMatch = true;
-          n.children.forEach(checkDescendants);
-        };
-        checkDescendants(node);
-        if (!hasMatch) return null;
-      }
-    }
-  }
-
-  // Filter by search
-  const matchesSearch = !searchQuery || node.name.toLowerCase().includes(searchQuery.toLowerCase());
-  const childMatchesSearch = searchQuery ? hasDescendantMatch(node, searchQuery) : false;
-  if (searchQuery && !matchesSearch && !childMatchesSearch) return null;
+  // ── ALL hooks must be called before any conditional return (React Rules of Hooks) ──
 
   const handleSelect = useCallback(() => {
     select(node.object.uuid);
-    // Always show the right panel on Properties tab when selecting from hierarchy
     useUIStore.getState().setRightPanelTab('properties');
     useUIStore.getState().showPanel('rightPanel');
-
-    // Material integration for mesh — also switch to matEdit if a named material is found
     if (node.type === 'mesh' && node.object instanceof THREE.Mesh) {
       const matStore = useMaterialEditorStore.getState();
       const mat = node.object.material;
@@ -741,9 +704,7 @@ const TreeNode: React.FC<{
       toggleVisibility(node.object.uuid);
       const newHidden = useSceneHierarchyStore.getState().hiddenIds.includes(node.object.uuid);
       node.object.visible = !newHidden;
-      node.object.traverse((c) => {
-        c.visible = !newHidden;
-      });
+      node.object.traverse((c) => { c.visible = !newHidden; });
       refresh();
     },
     [node, toggleVisibility, refresh],
@@ -783,68 +744,51 @@ const TreeNode: React.FC<{
     [handleRenameCommit, node.object.name],
   );
 
-  // Drag handlers
   const handleNodeDragStart = useCallback((e: React.DragEvent) => {
     e.dataTransfer.effectAllowed = 'move';
     e.dataTransfer.setData('text/plain', node.object.uuid);
     onDragStart(node.object.uuid, node.name);
-    if (rowRef.current) {
-      rowRef.current.style.opacity = '0.4';
-    }
+    if (rowRef.current) rowRef.current.style.opacity = '0.4';
   }, [node.object.uuid, node.name, onDragStart]);
 
   const handleNodeDragEnd = useCallback(() => {
     onDragEnd();
-    if (rowRef.current) {
-      rowRef.current.style.opacity = '1';
-    }
+    if (rowRef.current) rowRef.current.style.opacity = '1';
   }, [onDragEnd]);
 
   const handleNodeDragOver = useCallback((e: React.DragEvent) => {
-    // Only allow drop on collection nodes
-    if (!isColl) return;
+    if (!node.isCollection) return;
     e.preventDefault();
     e.dataTransfer.dropEffect = 'move';
-  }, [isColl]);
+  }, [node.isCollection]);
 
   const handleNodeDragEnter = useCallback((e: React.DragEvent) => {
-    if (!isColl) return;
+    if (!node.isCollection) return;
     e.preventDefault();
     onDropOnCollection(node.object.uuid);
-  }, [isColl, node.object.uuid, onDropOnCollection]);
+  }, [node.isCollection, node.object.uuid, onDropOnCollection]);
 
   const handleNodeDragLeave = useCallback((e: React.DragEvent) => {
-    if (!isColl) return;
+    if (!node.isCollection) return;
     onDropOnCollection('');
-  }, [isColl, onDropOnCollection]);
+  }, [node.isCollection, onDropOnCollection]);
 
   const handleNodeDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault();
     e.stopPropagation();
-    if (!isColl || !sceneRef.current) return;
+    if (!node.isCollection || !sceneRef.current) return;
     const dragUuid = e.dataTransfer.getData('text/plain');
-    if (!dragUuid || dragUuid === node.object.uuid) {
-      onDropOnCollection('');
-      return;
-    }
+    if (!dragUuid || dragUuid === node.object.uuid) { onDropOnCollection(''); return; }
     const scene = sceneRef.current;
     const dragObj = findObjectByUuid(scene, dragUuid);
-    if (!dragObj) {
-      onDropOnCollection('');
-      return;
-    }
-    // Prevent moving a collection into its own descendant
-    if (isDescendantOf(dragObj, node.object)) {
-      onDropOnCollection('');
-      return;
-    }
+    if (!dragObj) { onDropOnCollection(''); return; }
+    if (isDescendantOf(dragObj, node.object)) { onDropOnCollection(''); return; }
     dragObj.parent?.remove(dragObj);
     node.object.add(dragObj);
     onDropOnCollection('');
     refresh();
-  }, [isColl, node.object, sceneRef, onDropOnCollection, refresh]);
+  }, [node.isCollection, node.object, sceneRef, onDropOnCollection, refresh]);
 
-  // Filter children
   const filteredChildren = useMemo(() => {
     return node.children.filter((child) => {
       if (filterType !== 'all') {
@@ -874,6 +818,43 @@ const TreeNode: React.FC<{
       return true;
     });
   }, [node.children, filterType, searchQuery]);
+
+  // ── Computed values (after all hooks) ──
+
+  const hasChildren = node.children.length > 0;
+  const isSelected = selectedId === node.object.uuid;
+  const isHidden = hiddenIds.includes(node.object.uuid);
+  const isExpanded = expandedIds.includes(node.object.uuid);
+  const isColl = node.isCollection;
+  const isDropTarget = dropTargetId === node.object.uuid;
+
+  // Filter by type (early return — no hooks below this point)
+  if (filterType !== 'all') {
+    const typeMap: Record<string, string[]> = {
+      mesh: ['mesh'],
+      light: ['light'],
+      camera: ['camera'],
+      group: ['group'],
+    };
+    const allowed = typeMap[filterType] || [];
+    if (allowed.length > 0 && !allowed.includes(node.type)) {
+      const isGroupMatch = isColl && filterType === 'group';
+      if (!isGroupMatch) {
+        let hasMatch = false;
+        const checkDescendants = (n: HierarchyNode) => {
+          if (allowed.includes(n.type) || (n.isCollection && filterType === 'group')) hasMatch = true;
+          n.children.forEach(checkDescendants);
+        };
+        checkDescendants(node);
+        if (!hasMatch) return null;
+      }
+    }
+  }
+
+  // Filter by search (early return — no hooks below this point)
+  const matchesSearch = !searchQuery || node.name.toLowerCase().includes(searchQuery.toLowerCase());
+  const childMatchesSearch = searchQuery ? hasDescendantMatch(node, searchQuery) : false;
+  if (searchQuery && !matchesSearch && !childMatchesSearch) return null;
 
   return (
     <div>
@@ -1193,6 +1174,9 @@ const ObjectPropertiesPanel: React.FC<{
     setLocalTick((n) => n + 1);
   }, [selectedId]);
 
+  // ALL hooks must be called BEFORE any early return (React Rules of Hooks)
+  const isIsolated = useSceneHierarchyStore((s) => s.isolatedId === (selectedId ?? ''));
+
   if (!selectedObj) {
     return (
       <div
@@ -1216,7 +1200,6 @@ const ObjectPropertiesPanel: React.FC<{
   const nodeType = getNodeType(selectedObj);
   const isHidden = hiddenIds.includes(selectedObj.uuid);
   const isColl = isCollection(selectedObj);
-  const isIsolated = useSceneHierarchyStore((s) => s.isolatedId === selectedObj.uuid);
 
   const toDeg = THREE.MathUtils.radToDeg;
   const toRad = THREE.MathUtils.degToRad;

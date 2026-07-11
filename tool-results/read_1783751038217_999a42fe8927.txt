@@ -1,0 +1,2002 @@
+     1→import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+     2→import * as THREE from 'three';
+     3→import { useSceneHierarchyStore, HierarchyFilterType } from '../../store/sceneHierarchyStore';
+     4→import { useMaterialEditorStore } from '../../store/materialEditorStore';
+     5→import { useUIStore } from '../../store/uiStore';
+     6→
+     7→/* ═══════════════════════════════════════════════════════════════════
+     8→   Types & Interfaces
+     9→   ═══════════════════════════════════════════════════════════════════ */
+    10→
+    11→interface SceneHierarchyProps {
+    12→  sceneRef: React.MutableRefObject<THREE.Scene | null>;
+    13→}
+    14→
+    15→interface HierarchyNode {
+    16→  name: string;
+    17→  type: 'group' | 'mesh' | 'light' | 'camera' | 'helper' | 'other';
+    18→  object: THREE.Object3D;
+    19→  children: HierarchyNode[];
+    20→  isCollection?: boolean;
+    21→}
+    22→
+    23→interface ContextMenuState {
+    24→  x: number;
+    25→  y: number;
+    26→  objectId: string;
+    27→  showSubmenu: boolean;
+    28→}
+    29→
+    30→interface DragState {
+    31→  dragUuid: string;
+    32→  dragName: string;
+    33→}
+    34→
+    35→/* ═══════════════════════════════════════════════════════════════════
+    36→   Helpers
+    37→   ═══════════════════════════════════════════════════════════════════ */
+    38→
+    39→function getNodeType(obj: THREE.Object3D): HierarchyNode['type'] {
+    40→  if (obj.userData.isLightHelper || obj.userData.isProxy || obj.userData.isGrid) return 'helper';
+    41→  if (obj instanceof THREE.Light) return 'light';
+    42→  if (obj instanceof THREE.Camera) return 'camera';
+    43→  if (obj instanceof THREE.Mesh) return 'mesh';
+    44→  if (obj instanceof THREE.Group && obj.children.length > 0) return 'group';
+    45→  return 'other';
+    46→}
+    47→
+    48→function isCollection(obj: THREE.Object3D): boolean {
+    49→  return obj instanceof THREE.Group &&
+    50→    !obj.userData.isGrid &&
+    51→    !obj.userData.isProxy &&
+    52→    obj.userData._isCollection === true;
+    53→}
+    54→
+    55→function buildTree(scene: THREE.Scene): HierarchyNode[] {
+    56→  const nodes: HierarchyNode[] = [];
+    57→  for (const child of scene.children) {
+    58→    if (child.userData.isGrid || child.userData.isProxy) continue;
+    59→    nodes.push(buildNode(child));
+    60→  }
+    61→  return nodes;
+    62→}
+    63→
+    64→function buildNode(obj: THREE.Object3D): HierarchyNode {
+    65→  const children: HierarchyNode[] = [];
+    66→  for (const child of obj.children) {
+    67→    if (child.userData.isGrid || child.userData.isProxy) continue;
+    68→    children.push(buildNode(child));
+    69→  }
+    70→  return {
+    71→    name: obj.name || `${obj.type}_${obj.id}`,
+    72→    type: getNodeType(obj),
+    73→    object: obj,
+    74→    children,
+    75→    isCollection: isCollection(obj),
+    76→  };
+    77→}
+    78→
+    79→function hasDescendantMatch(node: HierarchyNode, query: string): boolean {
+    80→  const q = query.toLowerCase();
+    81→  if (node.name.toLowerCase().includes(q)) return true;
+    82→  return node.children.some((c) => hasDescendantMatch(c, q));
+    83→}
+    84→
+    85→function findObjectByUuid(scene: THREE.Scene, uuid: string): THREE.Object3D | null {
+    86→  let result: THREE.Object3D | null = null;
+    87→  scene.traverse((child) => {
+    88→    if (child.uuid === uuid) result = child;
+    89→  });
+    90→  return result;
+    91→}
+    92→
+    93→function getAllDescendantIds(obj: THREE.Object3D): string[] {
+    94→  const ids: string[] = [obj.uuid];
+    95→  obj.traverse((child) => {
+    96→    if (child.uuid !== obj.uuid) ids.push(child.uuid);
+    97→  });
+    98→  return ids;
+    99→}
+   100→
+   101→function getAllCollections(scene: THREE.Scene): THREE.Group[] {
+   102→  const groups: THREE.Group[] = [];
+   103→  scene.traverse((child) => {
+   104→    if (isCollection(child)) groups.push(child as THREE.Group);
+   105→  });
+   106→  return groups;
+   107→}
+   108→
+   109→function countCollections(scene: THREE.Scene): number {
+   110→  let count = 0;
+   111→  for (const child of scene.children) {
+   112→    if (isCollection(child)) count++;
+   113→  }
+   114→  scene.traverse((child) => {
+   115→    if (child !== scene && isCollection(child)) count++;
+   116→  });
+   117→  return count;
+   118→}
+   119→
+   120→/** Check if targetId is a descendant of parentId (or the same object) */
+   121→function isDescendantOf(parentObj: THREE.Object3D, checkObj: THREE.Object3D): boolean {
+   122→  if (parentObj.uuid === checkObj.uuid) return true;
+   123→  let found = false;
+   124→  parentObj.traverse((child) => {
+   125→    if (child.uuid === checkObj.uuid) found = true;
+   126→  });
+   127→  return found;
+   128→}
+   129→
+   130→/* ═══════════════════════════════════════════════════════════════════
+   131→   Type colors & SVG icons (Blender-style small icons)
+   132→   ═══════════════════════════════════════════════════════════════════ */
+   133→
+   134→const TYPE_COLORS: Record<string, string> = {
+   135→  group: '#7dd3fc',
+   136→  mesh: '#a78bfa',
+   137→  light: '#f0a868',
+   138→  camera: '#94a3b8',
+   139→  helper: '#475569',
+   140→  other: '#475569',
+   141→  collection: '#fbbf24',
+   142→};
+   143→
+   144→const TypeIcon: React.FC<{ type: string; isCollection?: boolean; size?: number }> = ({ type, isCollection: isColl, size = 13 }) => {
+   145→  const c = isColl ? TYPE_COLORS.collection : (TYPE_COLORS[type] || '#475569');
+   146→  if (isColl) {
+   147→    return (
+   148→      <svg width={size} height={size} viewBox="0 0 16 16" fill="none" style={{ color: c, flexShrink: 0 }}>
+   149→        <path d="M2 4h4l1.5-2h5L14 4h2v8a1 1 0 01-1 1H2a1 1 0 01-1-1V5a1 1 0 011-1z" stroke="currentColor" strokeWidth="1.2" fill="none" />
+   150→        <line x1="4" y1="8" x2="12" y2="8" stroke="currentColor" strokeWidth="0.8" opacity="0.5" />
+   151→      </svg>
+   152→    );
+   153→  }
+   154→  switch (type) {
+   155→    case 'mesh':
+   156→      return (
+   157→        <svg width={size} height={size} viewBox="0 0 16 16" fill="none" style={{ color: c, flexShrink: 0 }}>
+   158→          <path d="M8 1.5L14.5 5v6L8 14.5 1.5 11V5z" stroke="currentColor" strokeWidth="1.1" />
+   159→          <path d="M1.5 5L8 8l6.5-3M8 8v6.5" stroke="currentColor" strokeWidth="0.8" opacity="0.5" />
+   160→        </svg>
+   161→      );
+   162→    case 'light':
+   163→      return (
+   164→        <svg width={size} height={size} viewBox="0 0 16 16" fill="none" style={{ color: c, flexShrink: 0 }}>
+   165→          <circle cx="8" cy="8" r="3.5" stroke="currentColor" strokeWidth="1.1" />
+   166→          <line x1="8" y1="2" x2="8" y2="3.5" stroke="currentColor" strokeWidth="1" />
+   167→          <line x1="8" y1="12.5" x2="8" y2="14" stroke="currentColor" strokeWidth="1" />
+   168→          <line x1="2" y1="8" x2="3.5" y2="8" stroke="currentColor" strokeWidth="1" />
+   169→          <line x1="12.5" y1="8" x2="14" y2="8" stroke="currentColor" strokeWidth="1" />
+   170→          <line x1="3.8" y1="3.8" x2="4.9" y2="4.9" stroke="currentColor" strokeWidth="0.8" />
+   171→          <line x1="11.1" y1="11.1" x2="12.2" y2="12.2" stroke="currentColor" strokeWidth="0.8" />
+   172→          <line x1="3.8" y1="12.2" x2="4.9" y2="11.1" stroke="currentColor" strokeWidth="0.8" />
+   173→          <line x1="11.1" y1="4.9" x2="12.2" y2="3.8" stroke="currentColor" strokeWidth="0.8" />
+   174→        </svg>
+   175→      );
+   176→    case 'camera':
+   177→      return (
+   178→        <svg width={size} height={size} viewBox="0 0 16 16" fill="none" style={{ color: c, flexShrink: 0 }}>
+   179→          <path d="M2 5h3l1-1.5h4l1 1.5h3a1 1 0 011 1v6a1 1 0 01-1 1H2a1 1 0 01-1-1V6a1 1 0 011-1z" stroke="currentColor" strokeWidth="1.1" />
+   180→          <circle cx="8" cy="8.5" r="2.5" stroke="currentColor" strokeWidth="1" />
+   181→        </svg>
+   182→      );
+   183→    case 'group':
+   184→      return (
+   185→        <svg width={size} height={size} viewBox="0 0 16 16" fill="none" style={{ color: c, flexShrink: 0 }}>
+   186→          <rect x="1" y="3" width="14" height="10" rx="1.5" stroke="currentColor" strokeWidth="1.1" />
+   187→          <line x1="1" y1="7" x2="15" y2="7" stroke="currentColor" strokeWidth="0.8" opacity="0.4" />
+   188→        </svg>
+   189→      );
+   190→    default:
+   191→      return (
+   192→        <svg width={size} height={size} viewBox="0 0 16 16" fill="none" style={{ color: c, flexShrink: 0 }}>
+   193→          <circle cx="8" cy="8" r="3" stroke="currentColor" strokeWidth="1.1" />
+   194→        </svg>
+   195→      );
+   196→  }
+   197→};
+   198→
+   199→/* ═══════════════════════════════════════════════════════════════════
+   200→   Context Menu
+   201→   ═══════════════════════════════════════════════════════════════════ */
+   202→
+   203→interface CtxItem {
+   204→  label: string;
+   205→  icon: React.ReactNode;
+   206→  shortcut?: string;
+   207→  divider?: false;
+   208→  action?: () => void;
+   209→  submenu?: React.ReactNode;
+   210→  disabled?: boolean;
+   211→}
+   212→
+   213→interface CtxDivider {
+   214→  divider: true;
+   215→}
+   216→
+   217→const CtxDivider = () => (
+   218→  <div style={{ height: 1, background: 'var(--border-light)', margin: '3px 6px' }} />
+   219→);
+   220→
+   221→const ContextMenu: React.FC<{
+   222→  state: ContextMenuState;
+   223→  onClose: () => void;
+   224→  sceneRef: React.MutableRefObject<THREE.Scene | null>;
+   225→  refresh: () => void;
+   226→}> = ({ state, onClose, sceneRef, refresh }) => {
+   227→  const menuRef = useRef<HTMLDivElement>(null);
+   228→  const [hoverSubmenu, setHoverSubmenu] = useState(false);
+   229→
+   230→  const scene = sceneRef.current;
+   231→  const obj = scene ? findObjectByUuid(scene, state.objectId) : null;
+   232→
+   233→  const store = useSceneHierarchyStore.getState();
+   234→  const isHidden = obj ? store.hiddenIds.includes(obj.uuid) : false;
+   235→  const isIsolated = obj ? store.isolatedId === obj.uuid : false;
+   236→
+   237→  const collections = useMemo(() => {
+   238→    if (!scene) return [];
+   239→    return getAllCollections(scene).filter((g) => g.uuid !== state.objectId);
+   240→  }, [scene, state.objectId]);
+   241→
+   242→  const handleSelectHierarchy = useCallback(() => {
+   243→    if (!obj) return;
+   244→    store.select(obj.uuid);
+   245→    refresh();
+   246→    onClose();
+   247→  }, [obj, store, refresh, onClose]);
+   248→
+   249→  const handleDeselect = useCallback(() => {
+   250→    store.select(null);
+   251→    onClose();
+   252→  }, [store, onClose]);
+   253→
+   254→  const handleDuplicate = useCallback(() => {
+   255→    if (!obj) return;
+   256→    const clone = obj.clone();
+   257→    clone.name = obj.name + '_copy';
+   258→    clone.traverse((child) => {
+   259→      if (child instanceof THREE.Mesh) {
+   260→        child.material = Array.isArray(child.material)
+   261→          ? child.material.map((m) => m.clone())
+   262→          : child.material.clone();
+   263→        if (child.geometry) child.geometry = child.geometry.clone();
+   264→      }
+   265→    });
+   266→    if (obj.parent) obj.parent.add(clone);
+   267→    refresh();
+   268→    onClose();
+   269→  }, [obj, refresh, onClose]);
+   270→
+   271→  const handleDelete = useCallback(() => {
+   272→    if (!obj) return;
+   273→    obj.traverse((child) => {
+   274→      if (child instanceof THREE.Mesh) {
+   275→        if (child.geometry) child.geometry.dispose();
+   276→        const mats = Array.isArray(child.material) ? child.material : [child.material];
+   277→        mats.forEach((m) => m.dispose());
+   278→      }
+   279→    });
+   280→    obj.parent?.remove(obj);
+   281→    const s = useSceneHierarchyStore.getState();
+   282→    const newHidden = s.hiddenIds.filter((id) => id !== obj.uuid);
+   283→    useSceneHierarchyStore.setState({ hiddenIds: newHidden, selectedId: null, isolatedId: null });
+   284→    refresh();
+   285→    onClose();
+   286→  }, [obj, refresh, onClose]);
+   287→
+   288→  const handleHide = useCallback(() => {
+   289→    if (!obj) return;
+   290→    useSceneHierarchyStore.getState().toggleVisibility(obj.uuid);
+   291→    obj.visible = false;
+   292→    obj.traverse((c) => { c.visible = false; });
+   293→    refresh();
+   294→    onClose();
+   295→  }, [obj, refresh, onClose]);
+   296→
+   297→  const handleShow = useCallback(() => {
+   298→    if (!obj) return;
+   299→    const s = useSceneHierarchyStore.getState();
+   300→    const newHidden = s.hiddenIds.filter((id) => id !== obj.uuid);
+   301→    useSceneHierarchyStore.setState({ hiddenIds: newHidden });
+   302→    obj.visible = true;
+   303→    obj.traverse((c) => { c.visible = true; });
+   304→    refresh();
+   305→    onClose();
+   306→  }, [obj, refresh, onClose]);
+   307→
+   308→  const handleIsolate = useCallback(() => {
+   309→    if (!obj || !scene) return;
+   310→    const s = useSceneHierarchyStore.getState();
+   311→    if (s.isolatedId === obj.uuid) {
+   312→      s.showAll();
+   313→      scene.traverse((child) => {
+   314→        if (child.userData.isGrid || child.userData.isProxy) return;
+   315→        child.visible = true;
+   316→      });
+   317→    } else {
+   318→      s.isolate(obj.uuid);
+   319→      scene.traverse((child) => {
+   320→        if (child.userData.isGrid || child.userData.isProxy) return;
+   321→        if (child.uuid === obj.uuid) {
+   322→          child.visible = true;
+   323→        } else {
+   324→          let isDesc = false;
+   325→          obj.traverse((d) => { if (d.uuid === child.uuid) isDesc = true; });
+   326→          child.visible = isDesc;
+   327→        }
+   328→      });
+   329→    }
+   330→    refresh();
+   331→    onClose();
+   332→  }, [obj, scene, refresh, onClose]);
+   333→
+   334→  const handleMoveToCollection = useCallback(
+   335→    (group: THREE.Group) => {
+   336→      if (!obj || !scene) return;
+   337→      // Prevent moving a parent into its own descendant
+   338→      if (isDescendantOf(obj, group)) return;
+   339→      obj.parent?.remove(obj);
+   340→      group.add(obj);
+   341→      refresh();
+   342→      onClose();
+   343→    },
+   344→    [obj, scene, refresh, onClose],
+   345→  );
+   346→
+   347→  const handleNewCollection = useCallback(() => {
+   348→    if (!scene) return;
+   349→    const n = countCollections(scene) + 1;
+   350→    const g = new THREE.Group();
+   351→    g.name = `Collection ${n}`;
+   352→    g.userData._isCollection = true;
+   353→    scene.add(g);
+   354→    refresh();
+   355→    onClose();
+   356→  }, [scene, refresh, onClose]);
+   357→
+   358→  const handleNewCollectionHere = useCallback(() => {
+   359→    if (!obj || !scene) return;
+   360→    const n = countCollections(scene) + 1;
+   361→    const g = new THREE.Group();
+   362→    g.name = `Collection ${n}`;
+   363→    g.userData._isCollection = true;
+   364→    obj.add(g);
+   365→    refresh();
+   366→    onClose();
+   367→  }, [obj, scene, refresh, onClose]);
+   368→
+   369→  useEffect(() => {
+   370→    const handler = (e: MouseEvent) => {
+   371→      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+   372→        onClose();
+   373→      }
+   374→    };
+   375→    document.addEventListener('mousedown', handler);
+   376→    return () => document.removeEventListener('mousedown', handler);
+   377→  }, [onClose]);
+   378→
+   379→  if (!obj) return null;
+   380→
+   381→  const menuItems: (CtxItem | CtxDivider)[] = [
+   382→    {
+   383→      label: 'Select Hierarchy',
+   384→      icon: (
+   385→        <svg width="11" height="11" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3">
+   386→          <path d="M2 2h5v5H2zM9 2h5v5H9zM2 9h5v5H2z" />
+   387→        </svg>
+   388→      ),
+   389→      action: handleSelectHierarchy,
+   390→    },
+   391→    { label: 'Deselect', icon: (
+   392→      <svg width="11" height="11" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3">
+   393→        <rect x="2" y="2" width="12" height="12" rx="1" strokeDasharray="3 2" />
+   394→      </svg>
+   395→    ), action: handleDeselect },
+   396→    { divider: true },
+   397→    {
+   398→      label: 'Duplicate',
+   399→      icon: (
+   400→        <svg width="11" height="11" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3">
+   401→          <rect x="5" y="5" width="9" height="9" rx="1" />
+   402→          <rect x="1" y="1" width="9" height="9" rx="1" opacity="0.5" />
+   403→        </svg>
+   404→      ),
+   405→      shortcut: 'Shift+D',
+   406→      action: handleDuplicate,
+   407→    },
+   408→    {
+   409→      label: 'Delete',
+   410→      icon: (
+   411→        <svg width="11" height="11" viewBox="0 0 16 16" fill="none" stroke="var(--danger)" strokeWidth="1.3">
+   412→          <path d="M3 4h10M5 4V3a1 1 0 011-1h4a1 1 0 011 1v1M6 7v5M8 7v5M10 7v5M4 4l.7 9a1 1 0 001 .9h4.6a1 1 0 001-.9L12 4" />
+   413→        </svg>
+   414→      ),
+   415→      shortcut: 'Del',
+   416→      action: handleDelete,
+   417→    },
+   418→    { divider: true },
+   419→    {
+   420→      label: 'Move to Collection',
+   421→      icon: (
+   422→        <svg width="11" height="11" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3">
+   423→          <path d="M3 2h3l1-1h4l1 1h2a1 1 0 011 1v9a1 1 0 01-1 1H3a1 1 0 01-1-1V3a1 1 0 011-1z" />
+   424→          <path d="M6 10h6M9 7v6" />
+   425→        </svg>
+   426→      ),
+   427→      submenu:
+   428→        collections.length > 0 ? (
+   429→          <div
+   430→            style={{
+   431→              position: 'absolute',
+   432→              left: '100%',
+   433→              top: 0,
+   434→              background: 'var(--bg-deep)',
+   435→              border: '1px solid var(--border-light)',
+   436→              borderRadius: 'var(--radius-sm)',
+   437→              padding: '3px 0',
+   438→              minWidth: 140,
+   439→              maxHeight: 200,
+   440→              overflowY: 'auto',
+   441→              zIndex: 1000,
+   442→              boxShadow: '0 4px 16px rgba(0,0,0,0.5)',
+   443→            }}
+   444→          >
+   445→            {collections.map((g) => (
+   446→              <div
+   447→                key={g.uuid}
+   448→                onMouseDown={(e) => {
+   449→                  e.stopPropagation();
+   450→                  handleMoveToCollection(g);
+   451→                }}
+   452→                style={{
+   453→                  display: 'flex',
+   454→                  alignItems: 'center',
+   455→                  gap: 6,
+   456→                  padding: '4px 10px',
+   457→                  fontSize: 10,
+   458→                  color: 'var(--text-sec)',
+   459→                  cursor: 'pointer',
+   460→                  whiteSpace: 'nowrap',
+   461→                }}
+   462→                onMouseEnter={(e) => {
+   463→                  (e.currentTarget as HTMLElement).style.background = 'var(--accent-bg)';
+   464→                  (e.currentTarget as HTMLElement).style.color = 'var(--text)';
+   465→                }}
+   466→                onMouseLeave={(e) => {
+   467→                  (e.currentTarget as HTMLElement).style.background = 'transparent';
+   468→                  (e.currentTarget as HTMLElement).style.color = 'var(--text-sec)';
+   469→                }}
+   470→              >
+   471→                <TypeIcon type="group" isCollection />
+   472→                <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{g.name}</span>
+   473→              </div>
+   474→            ))}
+   475→          </div>
+   476→        ) : undefined,
+   477→    },
+   478→    { divider: true },
+   479→    {
+   480→      label: isHidden ? 'Show' : 'Hide',
+   481→      icon: isHidden ? (
+   482→        <svg width="11" height="11" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3">
+   483→          <path d="M1 8s3-5 7-5 7 5 7 5-3 5-7 5-7-5-7-5z" />
+   484→          <circle cx="8" cy="8" r="2" />
+   485→        </svg>
+   486→      ) : (
+   487→        <svg width="11" height="11" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3">
+   488→          <path d="M1 8s3-5 7-5 7 5 7 5-3 5-7 5-7-5-7-5z" />
+   489→          <line x1="2" y1="2" x2="14" y2="14" />
+   490→        </svg>
+   491→      ),
+   492→      shortcut: 'H',
+   493→      action: isHidden ? handleShow : handleHide,
+   494→    },
+   495→    {
+   496→      label: isIsolated ? 'Disable Isolate' : 'Isolate',
+   497→      icon: (
+   498→        <svg width="11" height="11" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3">
+   499→          <circle cx="8" cy="8" r="6" />
+   500→          <circle cx="8" cy="8" r="2" />
+   501→        </svg>
+   502→      ),
+   503→      action: handleIsolate,
+   504→    },
+   505→    { divider: true },
+   506→    {
+   507→      label: 'New Collection',
+   508→      icon: (
+   509→        <svg width="11" height="11" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3">
+   510→          <path d="M2 4h4l1.5-2h5L14 4h2a1 1 0 011 1v8a1 1 0 01-1 1H2a1 1 0 01-1-1V5a1 1 0 011-1z" />
+   511→          <path d="M8 7v5M5.5 9.5h5" />
+   512→        </svg>
+   513→      ),
+   514→      action: handleNewCollection,
+   515→    },
+   516→    {
+   517→      label: 'New Collection Here',
+   518→      icon: (
+   519→        <svg width="11" height="11" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3">
+   520→          <path d="M2 4h4l1.5-2h5L14 4h2a1 1 0 011 1v8a1 1 0 01-1 1H2a1 1 0 01-1-1V5a1 1 0 011-1z" />
+   521→          <path d="M8 7v5M5.5 9.5h5" />
+   522→        </svg>
+   523→      ),
+   524→      action: handleNewCollectionHere,
+   525→    },
+   526→  ];
+   527→
+   528→  const menuWidth = 200;
+   529→  const menuHeight = menuItems.length * 26 + 10;
+   530→  const adjustedX = state.x + menuWidth > window.innerWidth ? state.x - menuWidth : state.x;
+   531→  const adjustedY = state.y + menuHeight > window.innerHeight ? Math.max(0, state.y - menuHeight) : state.y;
+   532→
+   533→  return (
+   534→    <div
+   535→      ref={menuRef}
+   536→      style={{
+   537→        position: 'fixed',
+   538→        left: adjustedX,
+   539→        top: adjustedY,
+   540→        background: 'var(--bg-deep)',
+   541→        border: '1px solid var(--border-light)',
+   542→        borderRadius: 'var(--radius-sm)',
+   543→        padding: '3px 0',
+   544→        minWidth: 180,
+   545→        zIndex: 999,
+   546→        boxShadow: '0 4px 20px rgba(0,0,0,0.6)',
+   547→      }}
+   548→    >
+   549→      {menuItems.map((item, i) => {
+   550→        if ('divider' in item && item.divider) {
+   551→          return <CtxDivider key={`div-${i}`} />;
+   552→        }
+   553→        const mi = item as CtxItem;
+   554→        return (
+   555→          <div
+   556→            key={i}
+   557→            style={{
+   558→              display: 'flex',
+   559→              alignItems: 'center',
+   560→              gap: 6,
+   561→              padding: '0 8px',
+   562→              height: 26,
+   563→              fontSize: 10,
+   564→              color: mi.disabled ? 'var(--text-dim)' : 'var(--text-sec)',
+   565→              cursor: mi.disabled ? 'default' : 'pointer',
+   566→              position: 'relative',
+   567→              opacity: mi.disabled ? 0.4 : 1,
+   568→              userSelect: 'none',
+   569→            }}
+   570→            onMouseDown={(e) => {
+   571→              e.stopPropagation();
+   572→              if (!mi.disabled && mi.action) mi.action();
+   573→            }}
+   574→            onMouseEnter={(e) => {
+   575→              if (mi.disabled) return;
+   576→              (e.currentTarget as HTMLElement).style.background = 'var(--accent-bg)';
+   577→              (e.currentTarget as HTMLElement).style.color = 'var(--text)';
+   578→              if (mi.submenu) setHoverSubmenu(true);
+   579→            }}
+   580→            onMouseLeave={(e) => {
+   581→              (e.currentTarget as HTMLElement).style.background = 'transparent';
+   582→              (e.currentTarget as HTMLElement).style.color = mi.disabled ? 'var(--text-dim)' : 'var(--text-sec)';
+   583→              if (mi.submenu) setHoverSubmenu(false);
+   584→            }}
+   585→          >
+   586→            <span style={{ width: 14, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+   587→              {mi.icon}
+   588→            </span>
+   589→            <span style={{ flex: 1 }}>{mi.label}</span>
+   590→            {mi.submenu && (
+   591→              <svg width="8" height="8" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" style={{ flexShrink: 0 }}>
+   592→                <path d="M6 4l4 4-4 4" />
+   593→              </svg>
+   594→            )}
+   595→            {mi.shortcut && (
+   596→              <span style={{ fontSize: 9, color: 'var(--text-dim)', marginLeft: 12, fontFamily: 'var(--font-mono)' }}>
+   597→                {mi.shortcut}
+   598→              </span>
+   599→            )}
+   600→            {mi.submenu && (state.showSubmenu || hoverSubmenu) && mi.submenu}
+   601→          </div>
+   602→        );
+   603→      })}
+   604→    </div>
+   605→  );
+   606→};
+   607→
+   608→/* ═══════════════════════════════════════════════════════════════════
+   609→   Blender-style Row Icons (Eye, Camera, Select Arrow)
+   610→   ═══════════════════════════════════════════════════════════════════ */
+   611→
+   612→/** Small inline icon button for the tree row */
+   613→const RowIconButton: React.FC<{
+   614→  active?: boolean;
+   615→  title: string;
+   616→  onClick: (e: React.MouseEvent) => void;
+   617→  children: React.ReactNode;
+   618→}> = ({ active, title, onClick, children }) => (
+   619→  <button
+   620→    onClick={onClick}
+   621→    title={title}
+   622→    style={{
+   623→      width: 16,
+   624→      height: 16,
+   625→      display: 'flex',
+   626→      alignItems: 'center',
+   627→      justifyContent: 'center',
+   628→      background: 'none',
+   629→      border: 'none',
+   630→      cursor: 'pointer',
+   631→      color: active ? 'var(--text-sec)' : 'var(--text-dim)',
+   632→      opacity: active ? 1 : 0.35,
+   633→      flexShrink: 0,
+   634→      padding: 0,
+   635→      borderRadius: 2,
+   636→      transition: 'opacity 0.1s',
+   637→    }}
+   638→    onMouseEnter={(e) => {
+   639→      (e.currentTarget as HTMLElement).style.opacity = '1';
+   640→      (e.currentTarget as HTMLElement).style.background = 'var(--accent-bg)';
+   641→    }}
+   642→    onMouseLeave={(e) => {
+   643→      (e.currentTarget as HTMLElement).style.opacity = active ? '1' : '0.35';
+   644→      (e.currentTarget as HTMLElement).style.background = 'none';
+   645→    }}
+   646→  >
+   647→    {children}
+   648→  </button>
+   649→);
+   650→
+   651→/* ═══════════════════════════════════════════════════════════════════
+   652→   Tree Node (Blender-style with drag-and-drop support)
+   653→   ═══════════════════════════════════════════════════════════════════ */
+   654→
+   655→const TreeNode: React.FC<{
+   656→  node: HierarchyNode;
+   657→  depth: number;
+   658→  sceneRef: React.MutableRefObject<THREE.Scene | null>;
+   659→  refresh: () => void;
+   660→  onContextMenu: (e: React.MouseEvent, uuid: string) => void;
+   661→  onDragStart: (uuid: string, name: string) => void;
+   662→  onDragEnd: () => void;
+   663→  onDropOnCollection: (collectionUuid: string) => void;
+   664→  dropTargetId: string | null;
+   665→}> = ({ node, depth, sceneRef, refresh, onContextMenu, onDragStart, onDragEnd, onDropOnCollection, dropTargetId }) => {
+   666→  const selectedId = useSceneHierarchyStore((s) => s.selectedId);
+   667→  const expandedIds = useSceneHierarchyStore((s) => s.expandedIds);
+   668→  const hiddenIds = useSceneHierarchyStore((s) => s.hiddenIds);
+   669→  const filterType = useSceneHierarchyStore((s) => s.filterType);
+   670→  const searchQuery = useSceneHierarchyStore((s) => s.searchQuery);
+   671→  const select = useSceneHierarchyStore((s) => s.select);
+   672→  const toggleExpanded = useSceneHierarchyStore((s) => s.toggleExpanded);
+   673→  const toggleVisibility = useSceneHierarchyStore((s) => s.toggleVisibility);
+   674→
+   675→  const [renaming, setRenaming] = useState(false);
+   676→  const [renameValue, setRenameValue] = useState(node.object.name);
+   677→  const renameRef = useRef<HTMLInputElement>(null);
+   678→  const rowRef = useRef<HTMLDivElement>(null);
+   679→
+   680→  // ── ALL hooks must be called before any conditional return (React Rules of Hooks) ──
+   681→
+   682→  const handleSelect = useCallback(() => {
+   683→    select(node.object.uuid);
+   684→    useUIStore.getState().setRightPanelTab('properties');
+   685→    useUIStore.getState().showPanel('rightPanel');
+   686→    if (node.type === 'mesh' && node.object instanceof THREE.Mesh) {
+   687→      const matStore = useMaterialEditorStore.getState();
+   688→      const mat = node.object.material;
+   689→      if (mat) {
+   690→        const matName = Array.isArray(mat) ? mat[0]?.name : (mat as THREE.Material).name;
+   691→        if (matName) {
+   692→          const match = matStore.materials.find((m) => m.name === matName);
+   693→          if (match) {
+   694→            matStore.selectMaterial(match.id);
+   695→          }
+   696→        }
+   697→      }
+   698→    }
+   699→  }, [node, select]);
+   700→
+   701→  const handleToggleVisibility = useCallback(
+   702→    (e: React.MouseEvent) => {
+   703→      e.stopPropagation();
+   704→      toggleVisibility(node.object.uuid);
+   705→      const newHidden = useSceneHierarchyStore.getState().hiddenIds.includes(node.object.uuid);
+   706→      node.object.visible = !newHidden;
+   707→      node.object.traverse((c) => { c.visible = !newHidden; });
+   708→      refresh();
+   709→    },
+   710→    [node, toggleVisibility, refresh],
+   711→  );
+   712→
+   713→  const handleContextMenu = useCallback(
+   714→    (e: React.MouseEvent) => {
+   715→      e.preventDefault();
+   716→      e.stopPropagation();
+   717→      onContextMenu(e, node.object.uuid);
+   718→    },
+   719→    [node.object.uuid, onContextMenu],
+   720→  );
+   721→
+   722→  const handleDoubleClickName = useCallback(() => {
+   723→    setRenaming(true);
+   724→    setRenameValue(node.object.name);
+   725→    setTimeout(() => renameRef.current?.select(), 0);
+   726→  }, [node.object.name]);
+   727→
+   728→  const handleRenameCommit = useCallback(() => {
+   729→    setRenaming(false);
+   730→    if (renameValue.trim()) {
+   731→      node.object.name = renameValue.trim();
+   732→      refresh();
+   733→    }
+   734→  }, [renameValue, node.object, refresh]);
+   735→
+   736→  const handleRenameKeyDown = useCallback(
+   737→    (e: React.KeyboardEvent) => {
+   738→      if (e.key === 'Enter') handleRenameCommit();
+   739→      if (e.key === 'Escape') {
+   740→        setRenaming(false);
+   741→        setRenameValue(node.object.name);
+   742→      }
+   743→    },
+   744→    [handleRenameCommit, node.object.name],
+   745→  );
+   746→
+   747→  const handleNodeDragStart = useCallback((e: React.DragEvent) => {
+   748→    e.dataTransfer.effectAllowed = 'move';
+   749→    e.dataTransfer.setData('text/plain', node.object.uuid);
+   750→    onDragStart(node.object.uuid, node.name);
+   751→    if (rowRef.current) rowRef.current.style.opacity = '0.4';
+   752→  }, [node.object.uuid, node.name, onDragStart]);
+   753→
+   754→  const handleNodeDragEnd = useCallback(() => {
+   755→    onDragEnd();
+   756→    if (rowRef.current) rowRef.current.style.opacity = '1';
+   757→  }, [onDragEnd]);
+   758→
+   759→  const handleNodeDragOver = useCallback((e: React.DragEvent) => {
+   760→    if (!node.isCollection) return;
+   761→    e.preventDefault();
+   762→    e.dataTransfer.dropEffect = 'move';
+   763→  }, [node.isCollection]);
+   764→
+   765→  const handleNodeDragEnter = useCallback((e: React.DragEvent) => {
+   766→    if (!node.isCollection) return;
+   767→    e.preventDefault();
+   768→    onDropOnCollection(node.object.uuid);
+   769→  }, [node.isCollection, node.object.uuid, onDropOnCollection]);
+   770→
+   771→  const handleNodeDragLeave = useCallback((e: React.DragEvent) => {
+   772→    if (!node.isCollection) return;
+   773→    onDropOnCollection('');
+   774→  }, [node.isCollection, onDropOnCollection]);
+   775→
+   776→  const handleNodeDrop = useCallback((e: React.DragEvent) => {
+   777→    e.preventDefault();
+   778→    e.stopPropagation();
+   779→    if (!node.isCollection || !sceneRef.current) return;
+   780→    const dragUuid = e.dataTransfer.getData('text/plain');
+   781→    if (!dragUuid || dragUuid === node.object.uuid) { onDropOnCollection(''); return; }
+   782→    const scene = sceneRef.current;
+   783→    const dragObj = findObjectByUuid(scene, dragUuid);
+   784→    if (!dragObj) { onDropOnCollection(''); return; }
+   785→    if (isDescendantOf(dragObj, node.object)) { onDropOnCollection(''); return; }
+   786→    dragObj.parent?.remove(dragObj);
+   787→    node.object.add(dragObj);
+   788→    onDropOnCollection('');
+   789→    refresh();
+   790→  }, [node.isCollection, node.object, sceneRef, onDropOnCollection, refresh]);
+   791→
+   792→  const filteredChildren = useMemo(() => {
+   793→    return node.children.filter((child) => {
+   794→      if (filterType !== 'all') {
+   795→        const typeMap: Record<string, string[]> = {
+   796→          mesh: ['mesh'],
+   797→          light: ['light'],
+   798→          camera: ['camera'],
+   799→          group: ['group'],
+   800→        };
+   801→        const allowed = typeMap[filterType] || [];
+   802→        if (allowed.length > 0) {
+   803→          const isChildGroupMatch = child.isCollection && filterType === 'group';
+   804→          if (allowed.includes(child.type) || isChildGroupMatch) return true;
+   805→          let hasMatch = false;
+   806→          const check = (n: HierarchyNode) => {
+   807→            if (allowed.includes(n.type) || (n.isCollection && filterType === 'group')) hasMatch = true;
+   808→            n.children.forEach(check);
+   809→          };
+   810→          check(child);
+   811→          return hasMatch;
+   812→        }
+   813→      }
+   814→      if (searchQuery) {
+   815→        const q = searchQuery.toLowerCase();
+   816→        return child.name.toLowerCase().includes(q) || hasDescendantMatch(child, searchQuery);
+   817→      }
+   818→      return true;
+   819→    });
+   820→  }, [node.children, filterType, searchQuery]);
+   821→
+   822→  // ── Computed values (after all hooks) ──
+   823→
+   824→  const hasChildren = node.children.length > 0;
+   825→  const isSelected = selectedId === node.object.uuid;
+   826→  const isHidden = hiddenIds.includes(node.object.uuid);
+   827→  const isExpanded = expandedIds.includes(node.object.uuid);
+   828→  const isColl = node.isCollection;
+   829→  const isDropTarget = dropTargetId === node.object.uuid;
+   830→
+   831→  // Filter by type (early return — no hooks below this point)
+   832→  if (filterType !== 'all') {
+   833→    const typeMap: Record<string, string[]> = {
+   834→      mesh: ['mesh'],
+   835→      light: ['light'],
+   836→      camera: ['camera'],
+   837→      group: ['group'],
+   838→    };
+   839→    const allowed = typeMap[filterType] || [];
+   840→    if (allowed.length > 0 && !allowed.includes(node.type)) {
+   841→      const isGroupMatch = isColl && filterType === 'group';
+   842→      if (!isGroupMatch) {
+   843→        let hasMatch = false;
+   844→        const checkDescendants = (n: HierarchyNode) => {
+   845→          if (allowed.includes(n.type) || (n.isCollection && filterType === 'group')) hasMatch = true;
+   846→          n.children.forEach(checkDescendants);
+   847→        };
+   848→        checkDescendants(node);
+   849→        if (!hasMatch) return null;
+   850→      }
+   851→    }
+   852→  }
+   853→
+   854→  // Filter by search (early return — no hooks below this point)
+   855→  const matchesSearch = !searchQuery || node.name.toLowerCase().includes(searchQuery.toLowerCase());
+   856→  const childMatchesSearch = searchQuery ? hasDescendantMatch(node, searchQuery) : false;
+   857→  if (searchQuery && !matchesSearch && !childMatchesSearch) return null;
+   858→
+   859→  return (
+   860→    <div>
+   861→      <div
+   862→        ref={rowRef}
+   863→        draggable={!renaming}
+   864→        style={{
+   865→          display: 'flex',
+   866→          alignItems: 'center',
+   867→          gap: 1,
+   868→          paddingLeft: 2 + depth * 16,
+   869→          paddingRight: 2,
+   870→          height: 24,
+   871→          cursor: 'pointer',
+   872→          background: isDropTarget
+   873→            ? 'rgba(251, 191, 36, 0.15)'
+   874→            : isSelected
+   875→              ? 'rgba(167, 139, 250, 0.15)'
+   876→              : 'transparent',
+   877→          borderLeft: isSelected ? '2px solid var(--accent)' : '2px solid transparent',
+   878→          borderBottom: isDropTarget ? '1px solid rgba(251, 191, 36, 0.5)' : '1px solid transparent',
+   879→          borderTop: isDropTarget ? '1px solid rgba(251, 191, 36, 0.5)' : '1px solid transparent',
+   880→          transition: 'background 0.1s',
+   881→          userSelect: 'none',
+   882→        }}
+   883→        onClick={handleSelect}
+   884→        onContextMenu={handleContextMenu}
+   885→        onDragStart={handleNodeDragStart}
+   886→        onDragEnd={handleNodeDragEnd}
+   887→        onDragOver={handleNodeDragOver}
+   888→        onDragEnter={handleNodeDragEnter}
+   889→        onDragLeave={handleNodeDragLeave}
+   890→        onDrop={handleNodeDrop}
+   891→        onMouseEnter={(e) => {
+   892→          if (!isSelected && !isDropTarget) {
+   893→            (e.currentTarget as HTMLElement).style.background = 'rgba(255,255,255,0.03)';
+   894→          }
+   895→        }}
+   896→        onMouseLeave={(e) => {
+   897→          if (!isSelected) {
+   898→            (e.currentTarget as HTMLElement).style.background = 'transparent';
+   899→          } else if (!isDropTarget) {
+   900→            (e.currentTarget as HTMLElement).style.background = 'rgba(167, 139, 250, 0.15)';
+   901→          }
+   902→        }}
+   903→      >
+   904→        {/* Chevron */}
+   905→        <span
+   906→          style={{
+   907→            width: 14,
+   908→            height: 14,
+   909→            display: 'flex',
+   910→            alignItems: 'center',
+   911→            justifyContent: 'center',
+   912→            fontSize: 6,
+   913→            color: 'var(--text-dim)',
+   914→            visibility: hasChildren ? 'visible' : 'hidden',
+   915→            transform: isExpanded ? 'rotate(90deg)' : 'rotate(0deg)',
+   916→            transition: 'transform 0.15s',
+   917→            flexShrink: 0,
+   918→          }}
+   919→          onClick={(e) => {
+   920→            e.stopPropagation();
+   921→            toggleExpanded(node.object.uuid);
+   922→          }}
+   923→        >
+   924→          {'\u25B6'}
+   925→        </span>
+   926→
+   927→        {/* Type icon */}
+   928→        <TypeIcon type={node.type} isCollection={isColl} />
+   929→
+   930→        {/* Name / Rename input */}
+   931→        {renaming ? (
+   932→          <input
+   933→            ref={renameRef}
+   934→            value={renameValue}
+   935→            onChange={(e) => setRenameValue(e.target.value)}
+   936→            onBlur={handleRenameCommit}
+   937→            onKeyDown={handleRenameKeyDown}
+   938→            onClick={(e) => e.stopPropagation()}
+   939→            style={{
+   940→              flex: 1,
+   941→              fontSize: 10,
+   942→              background: 'var(--bg-input)',
+   943→              border: '1px solid var(--accent)',
+   944→              borderRadius: 2,
+   945→              color: 'var(--text)',
+   946→              padding: '0 3px',
+   947→              outline: 'none',
+   948→              minWidth: 0,
+   949→              fontFamily: 'var(--font-ui)',
+   950→              height: 16,
+   951→            }}
+   952→            autoFocus
+   953→          />
+   954→        ) : (
+   955→          <span
+   956→            style={{
+   957→              flex: 1,
+   958→              fontSize: 10,
+   959→              color: isHidden ? 'var(--text-dim)' : (isColl ? '#fbbf24' : 'var(--text-sec)'),
+   960→              opacity: isHidden ? 0.5 : 1,
+   961→              overflow: 'hidden',
+   962→              textOverflow: 'ellipsis',
+   963→              whiteSpace: 'nowrap',
+   964→              fontStyle: isHidden ? 'italic' : 'normal',
+   965→              minWidth: 0,
+   966→              fontWeight: isColl ? 500 : 400,
+   967→              lineHeight: '24px',
+   968→            }}
+   969→            title={node.name}
+   970→            onDoubleClick={(e) => {
+   971→              e.stopPropagation();
+   972→              handleDoubleClickName();
+   973→            }}
+   974→          >
+   975→            {node.name}
+   976→          </span>
+   977→        )}
+   978→
+   979→        {/* ── Blender-style row action icons ── */}
+   980→
+   981→        {/* Eye (viewport visibility) */}
+   982→        <RowIconButton
+   983→          active={!isHidden}
+   984→          title={isHidden ? 'Show in Viewport' : 'Hide in Viewport'}
+   985→          onClick={handleToggleVisibility}
+   986→        >
+   987→          {!isHidden ? (
+   988→            <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.2">
+   989→              <path d="M1 8s3-5 7-5 7 5 7 5-3 5-7 5-7-5-7-5z" />
+   990→              <circle cx="8" cy="8" r="2" />
+   991→            </svg>
+   992→          ) : (
+   993→            <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.2">
+   994→              <path d="M1 8s3-5 7-5 7 5 7 5-3 5-7 5-7-5-7-5z" />
+   995→              <line x1="2" y1="2" x2="14" y2="14" />
+   996→            </svg>
+   997→          )}
+   998→        </RowIconButton>
+   999→      </div>
+  1000→
+  1001→      {/* Children */}
+  1002→      {hasChildren && isExpanded && (
+  1003→        <div>
+  1004→          {filteredChildren.map((child) => (
+  1005→            <TreeNode
+  1006→              key={child.object.uuid}
+  1007→              node={child}
+  1008→              depth={depth + 1}
+  1009→              sceneRef={sceneRef}
+  1010→              refresh={refresh}
+  1011→              onContextMenu={onContextMenu}
+  1012→              onDragStart={onDragStart}
+  1013→              onDragEnd={onDragEnd}
+  1014→              onDropOnCollection={onDropOnCollection}
+  1015→              dropTargetId={dropTargetId}
+  1016→            />
+  1017→          ))}
+  1018→        </div>
+  1019→      )}
+  1020→    </div>
+  1021→  );
+  1022→};
+  1023→
+  1024→/* ═══════════════════════════════════════════════════════════════════
+  1025→   Vec3 Input
+  1026→   ═══════════════════════════════════════════════════════════════════ */
+  1027→
+  1028→const AXIS_COLORS = ['#f87171', '#4ade80', '#60a5fa'];
+  1029→const AXIS_LABELS = ['X', 'Y', 'Z'];
+  1030→
+  1031→const Vec3Input: React.FC<{
+  1032→  label: string;
+  1033→  values: [number, number, number];
+  1034→  onChange: (idx: number, value: number) => void;
+  1035→  decimals?: number;
+  1036→}> = ({ label, values, onChange, decimals = 3 }) => (
+  1037→  <div style={{ display: 'flex', alignItems: 'center', gap: 3 }}>
+  1038→    <span style={{ fontSize: 9, color: 'var(--text-dim)', width: 40, flexShrink: 0, fontFamily: 'var(--font-mono)' }}>
+  1039→      {label}
+  1040→    </span>
+  1041→    {[0, 1, 2].map((idx) => (
+  1042→      <div key={idx} style={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+  1043→        <span style={{ fontSize: 8, color: AXIS_COLORS[idx], width: 8, textAlign: 'center', fontFamily: 'var(--font-mono)', flexShrink: 0 }}>
+  1044→          {AXIS_LABELS[idx]}
+  1045→        </span>
+  1046→        <input
+  1047→          type="number"
+  1048→          step="any"
+  1049→          value={parseFloat(values[idx].toFixed(decimals))}
+  1050→          onChange={(e) => onChange(idx, parseFloat(e.target.value) || 0)}
+  1051→          style={{
+  1052→            width: 48,
+  1053→            fontSize: 9,
+  1054→            fontFamily: 'var(--font-mono)',
+  1055→            background: 'var(--bg-input)',
+  1056→            border: '1px solid var(--border)',
+  1057→            borderRadius: 2,
+  1058→            color: 'var(--text-sec)',
+  1059→            padding: '2px 3px',
+  1060→            outline: 'none',
+  1061→            flexShrink: 0,
+  1062→          }}
+  1063→        />
+  1064→      </div>
+  1065→    ))}
+  1066→  </div>
+  1067→);
+  1068→
+  1069→/* ═══════════════════════════════════════════════════════════════════
+  1070→   Collapsible Section
+  1071→   ═══════════════════════════════════════════════════════════════════ */
+  1072→
+  1073→const CollapsibleSection: React.FC<{
+  1074→  title: string;
+  1075→  defaultOpen?: boolean;
+  1076→  icon?: React.ReactNode;
+  1077→  children: React.ReactNode;
+  1078→}> = ({ title, defaultOpen = true, icon, children }) => {
+  1079→  const [open, setOpen] = useState(defaultOpen);
+  1080→  return (
+  1081→    <div style={{ borderBottom: '1px solid var(--border)' }}>
+  1082→      <div
+  1083→        style={{
+  1084→          display: 'flex',
+  1085→          alignItems: 'center',
+  1086→          gap: 4,
+  1087→          padding: '4px 6px',
+  1088→          cursor: 'pointer',
+  1089→          userSelect: 'none',
+  1090→          background: 'rgba(255,255,255,0.02)',
+  1091→        }}
+  1092→        onClick={() => setOpen(!open)}
+  1093→      >
+  1094→        <span
+  1095→          style={{
+  1096→            fontSize: 7,
+  1097→            color: 'var(--text-dim)',
+  1098→            transform: open ? 'rotate(90deg)' : 'rotate(0deg)',
+  1099→            transition: 'transform 0.15s',
+  1100→            display: 'inline-block',
+  1101→            width: 10,
+  1102→            textAlign: 'center',
+  1103→          }}
+  1104→        >
+  1105→          {'\u25B6'}
+  1106→        </span>
+  1107→        {icon && <span style={{ display: 'flex', alignItems: 'center' }}>{icon}</span>}
+  1108→        <span style={{ fontSize: 9, color: 'var(--text-sec)', fontWeight: 500, letterSpacing: '0.02em' }}>{title}</span>
+  1109→      </div>
+  1110→      {open && (
+  1111→        <div style={{ padding: '4px 6px 6px 18px', display: 'flex', flexDirection: 'column', gap: 3 }}>
+  1112→          {children}
+  1113→        </div>
+  1114→      )}
+  1115→    </div>
+  1116→  );
+  1117→};
+  1118→
+  1119→/* ═══════════════════════════════════════════════════════════════════
+  1120→   Info Row helper
+  1121→   ═══════════════════════════════════════════════════════════════════ */
+  1122→
+  1123→const InfoRow: React.FC<{
+  1124→  label: string;
+  1125→  value: React.ReactNode;
+  1126→  valueColor?: string;
+  1127→  title?: string;
+  1128→}> = ({ label, value, valueColor, title }) => (
+  1129→  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 9 }}>
+  1130→    <span style={{ color: 'var(--text-dim)' }}>{label}</span>
+  1131→    <span
+  1132→      style={{ color: valueColor || 'var(--text-sec)', fontFamily: 'var(--font-mono)', maxWidth: 120, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+  1133→      title={title}
+  1134→    >
+  1135→      {value}
+  1136→    </span>
+  1137→  </div>
+  1138→);
+  1139→
+  1140→/* ═══════════════════════════════════════════════════════════════════
+  1141→   Object Properties Panel (Enhanced — bottom panel with tick refresh)
+  1142→   ═══════════════════════════════════════════════════════════════════ */
+  1143→
+  1144→const ObjectPropertiesPanel: React.FC<{
+  1145→  sceneRef: React.MutableRefObject<THREE.Scene | null>;
+  1146→  refresh: () => void;
+  1147→  tick: number;
+  1148→}> = ({ sceneRef, refresh, tick }) => {
+  1149→  const selectedId = useSceneHierarchyStore((s) => s.selectedId);
+  1150→  const hiddenIds = useSceneHierarchyStore((s) => s.hiddenIds);
+  1151→
+  1152→  // Use useState + tick to force re-renders when external changes happen
+  1153→  const [localTick, setLocalTick] = useState(0);
+  1154→
+  1155→  // Re-read object from scene on each tick (not from stale ref)
+  1156→  const selectedObj = useMemo(() => {
+  1157→    if (!selectedId || !sceneRef.current) return null;
+  1158→    return findObjectByUuid(sceneRef.current, selectedId);
+  1159→    // tick + localTick ensure we re-evaluate even if selectedId didn't change
+  1160→    // eslint-disable-next-line react-hooks/exhaustive-deps
+  1161→  }, [selectedId, tick, localTick]);
+  1162→
+  1163→  // Periodic refresh to pick up external changes (gizmo transforms, etc.)
+  1164→  useEffect(() => {
+  1165→    if (!selectedId) return;
+  1166→    const interval = setInterval(() => {
+  1167→      setLocalTick((n) => n + 1);
+  1168→    }, 250);
+  1169→    return () => clearInterval(interval);
+  1170→  }, [selectedId]);
+  1171→
+  1172→  // Force re-render on selection change
+  1173→  useEffect(() => {
+  1174→    setLocalTick((n) => n + 1);
+  1175→  }, [selectedId]);
+  1176→
+  1177→  // ALL hooks must be called BEFORE any early return (React Rules of Hooks)
+  1178→  const isIsolated = useSceneHierarchyStore((s) => s.isolatedId === (selectedId ?? ''));
+  1179→
+  1180→  if (!selectedObj) {
+  1181→    return (
+  1182→      <div
+  1183→        style={{
+  1184→          flexShrink: 0,
+  1185→          borderTop: '1px solid var(--border)',
+  1186→          display: 'flex',
+  1187→          alignItems: 'center',
+  1188→          justifyContent: 'center',
+  1189→          height: 48,
+  1190→          background: 'var(--bg-card)',
+  1191→        }}
+  1192→      >
+  1193→        <span style={{ fontSize: 10, color: 'var(--text-dim)', fontStyle: 'italic' }}>
+  1194→          No Selection
+  1195→        </span>
+  1196→      </div>
+  1197→    );
+  1198→  }
+  1199→
+  1200→  const nodeType = getNodeType(selectedObj);
+  1201→  const isHidden = hiddenIds.includes(selectedObj.uuid);
+  1202→  const isColl = isCollection(selectedObj);
+  1203→
+  1204→  const toDeg = THREE.MathUtils.radToDeg;
+  1205→  const toRad = THREE.MathUtils.degToRad;
+  1206→
+  1207→  // Snapshot current values for display
+  1208→  const pos: [number, number, number] = [selectedObj.position.x, selectedObj.position.y, selectedObj.position.z];
+  1209→  const rot: [number, number, number] = [toDeg(selectedObj.rotation.x), toDeg(selectedObj.rotation.y), toDeg(selectedObj.rotation.z)];
+  1210→  const scl: [number, number, number] = [selectedObj.scale.x, selectedObj.scale.y, selectedObj.scale.z];
+  1211→
+  1212→  const worldPos = new THREE.Vector3();
+  1213→  selectedObj.getWorldPosition(worldPos);
+  1214→
+  1215→  const handlePositionChange = (idx: number, value: number) => {
+  1216→    if (idx === 0) selectedObj.position.x = value;
+  1217→    if (idx === 1) selectedObj.position.y = value;
+  1218→    if (idx === 2) selectedObj.position.z = value;
+  1219→    refresh();
+  1220→  };
+  1221→
+  1222→  const handleRotationChange = (idx: number, value: number) => {
+  1223→    const rad = toRad(value);
+  1224→    if (idx === 0) selectedObj.rotation.x = rad;
+  1225→    if (idx === 1) selectedObj.rotation.y = rad;
+  1226→    if (idx === 2) selectedObj.rotation.z = rad;
+  1227→    refresh();
+  1228→  };
+  1229→
+  1230→  const handleScaleChange = (idx: number, value: number) => {
+  1231→    if (idx === 0) selectedObj.scale.x = value;
+  1232→    if (idx === 1) selectedObj.scale.y = value;
+  1233→    if (idx === 2) selectedObj.scale.z = value;
+  1234→    refresh();
+  1235→  };
+  1236→
+  1237→  const handleVisibleToggle = () => {
+  1238→    useSceneHierarchyStore.getState().toggleVisibility(selectedObj.uuid);
+  1239→    const newHidden = useSceneHierarchyStore.getState().hiddenIds.includes(selectedObj.uuid);
+  1240→    selectedObj.visible = !newHidden;
+  1241→    selectedObj.traverse((c) => { c.visible = !newHidden; });
+  1242→    refresh();
+  1243→  };
+  1244→
+  1245→  const handleIsolate = () => {
+  1246→    const s = useSceneHierarchyStore.getState();
+  1247→    const scene = sceneRef.current;
+  1248→    if (!scene) return;
+  1249→    if (s.isolatedId === selectedObj.uuid) {
+  1250→      s.showAll();
+  1251→      scene.traverse((child) => {
+  1252→        if (child.userData.isGrid || child.userData.isProxy) return;
+  1253→        child.visible = true;
+  1254→      });
+  1255→    } else {
+  1256→      s.isolate(selectedObj.uuid);
+  1257→      scene.traverse((child) => {
+  1258→        if (child.userData.isGrid || child.userData.isProxy) return;
+  1259→        if (child.uuid === selectedObj.uuid) {
+  1260→          child.visible = true;
+  1261→        } else {
+  1262→          let isDesc = false;
+  1263→          selectedObj.traverse((d) => { if (d.uuid === child.uuid) isDesc = true; });
+  1264→          child.visible = isDesc;
+  1265→        }
+  1266→      });
+  1267→    }
+  1268→    refresh();
+  1269→  };
+  1270→
+  1271→  const handleDeselect = () => {
+  1272→    useSceneHierarchyStore.getState().select(null);
+  1273→  };
+  1274→
+  1275→  // ── Mesh info ──
+  1276→  let meshInfo: React.ReactNode = null;
+  1277→  if (selectedObj instanceof THREE.Mesh) {
+  1278→    try {
+  1279→    const geo = selectedObj.geometry;
+  1280→    const verts = geo && geo.attributes && geo.attributes.position ? geo.attributes.position.count : 0;
+  1281→    const tris = geo && geo.index ? geo.index.count / 3 : verts / 3;
+  1282→    const mat = selectedObj.material;
+  1283→    const matArr = mat ? (Array.isArray(mat) ? mat.filter(Boolean) : [mat]) : [];
+  1284→    const matNames = matArr.length > 0 ? matArr.map((m) => m.name || 'unnamed').join(', ') : 'unnamed';
+  1285→    const matType = matArr.length > 0 ? (matArr[0])?.type || '\u2014' : '\u2014';
+  1286→    const hasVertexColors = geo && geo.attributes ? !!geo.attributes.color : false;
+  1287→    const hasUVs = geo && geo.attributes ? !!geo.attributes.uv : false;
+  1288→    const hasNormals = geo && geo.attributes ? !!geo.attributes.normal : false;
+  1289→
+  1290→    // Get bounding box
+  1291→    geo.computeBoundingBox();
+  1292→    const bb = geo.boundingBox;
+  1293→    const size = new THREE.Vector3();
+  1294→    if (bb) bb.getSize(size);
+  1295→
+  1296→    meshInfo = (
+  1297→      <CollapsibleSection title="Mesh Info" defaultOpen={false} icon={
+  1298→        <svg width="10" height="10" viewBox="0 0 16 16" fill="none" stroke="var(--text-dim)" strokeWidth="1.2">
+  1299→          <path d="M8 1.5L14.5 5v6L8 14.5 1.5 11V5z" />
+  1300→        </svg>
+  1301→      }>
+  1302→        <InfoRow label="Vertices" value={verts.toLocaleString()} />
+  1303→        <InfoRow label="Triangles" value={Math.floor(tris).toLocaleString()} />
+  1304→        <InfoRow
+  1305→          label="Size"
+  1306→          value={`${size.x.toFixed(2)} \u00d7 ${size.y.toFixed(2)} \u00d7 ${size.z.toFixed(2)}`}
+  1307→        />
+  1308→        <InfoRow
+  1309→          label="Material"
+  1310→          value={matNames}
+  1311→          valueColor="var(--accent-bright)"
+  1312→          title={matNames}
+  1313→        />
+  1314→        <InfoRow label="Mat. Type" value={matType.replace('Material', '')} />
+  1315→        <InfoRow
+  1316→          label="UVs"
+  1317→          value={hasUVs ? 'Yes' : 'No'}
+  1318→          valueColor={hasUVs ? 'var(--success)' : 'var(--text-dim)'}
+  1319→        />
+  1320→        <InfoRow
+  1321→          label="Normals"
+  1322→          value={hasNormals ? 'Yes' : 'No'}
+  1323→          valueColor={hasNormals ? 'var(--success)' : 'var(--text-dim)'}
+  1324→        />
+  1325→        <InfoRow
+  1326→          label="Vertex Colors"
+  1327→          value={hasVertexColors ? 'Yes' : 'No'}
+  1328→          valueColor={hasVertexColors ? 'var(--success)' : 'var(--text-dim)'}
+  1329→        />
+  1330→      </CollapsibleSection>
+  1331→    );
+  1332→    } catch (_) { meshInfo = null; }
+  1333→  }
+  1334→
+  1335→  // ── Light info ──
+  1336→  let lightInfo: React.ReactNode = null;
+  1337→  if (selectedObj instanceof THREE.Light) {
+  1338→    const lightColor = '#' + selectedObj.color.getHexString();
+  1339→    const intensity = selectedObj.intensity;
+  1340→    const lightType = selectedObj.type.replace('Light', '');
+  1341→
+  1342→    let extraInfo: React.ReactNode = null;
+  1343→
+  1344→    if (selectedObj instanceof THREE.PointLight) {
+  1345→      const dist = selectedObj.distance;
+  1346→      extraInfo = (
+  1347→        <>
+  1348→          <InfoRow
+  1349→            label="Distance"
+  1350→            value={dist === 0 ? 'Infinite' : dist.toFixed(2)}
+  1351→          />
+  1352→          <InfoRow label="Decay" value={String(selectedObj.decay)} />
+  1353→        </>
+  1354→      );
+  1355→    } else if (selectedObj instanceof THREE.SpotLight) {
+  1356→      extraInfo = (
+  1357→        <>
+  1358→          <InfoRow
+  1359→            label="Distance"
+  1360→            value={selectedObj.distance === 0 ? 'Infinite' : selectedObj.distance.toFixed(2)}
+  1361→          />
+  1362→          <InfoRow label="Decay" value={String(selectedObj.decay)} />
+  1363→          <InfoRow label="Angle" value={`${toDeg(selectedObj.angle).toFixed(1)}\u00b0`} />
+  1364→          <InfoRow label="Penumbra" value={selectedObj.penumbra.toFixed(2)} />
+  1365→        </>
+  1366→      );
+  1367→    } else if (selectedObj instanceof THREE.DirectionalLight) {
+  1368→      extraInfo = (
+  1369→        <InfoRow label="Intensity" value={intensity.toFixed(3)} />
+  1370→      );
+  1371→    } else if (selectedObj instanceof THREE.HemisphereLight) {
+  1372→      const skyColor = '#' + selectedObj.color.getHexString();
+  1373→      const groundColor = '#' + selectedObj.groundColor.getHexString();
+  1374→      extraInfo = (
+  1375→        <>
+  1376→          <InfoRow label="Sky Color" value={skyColor} />
+  1377→          <InfoRow label="Ground Color" value={groundColor} />
+  1378→          <InfoRow label="Intensity" value={intensity.toFixed(3)} />
+  1379→        </>
+  1380→      );
+  1381→    }
+  1382→
+  1383→    lightInfo = (
+  1384→      <CollapsibleSection title="Light Info" defaultOpen={false} icon={
+  1385→        <svg width="10" height="10" viewBox="0 0 16 16" fill="none" stroke="var(--text-dim)" strokeWidth="1.2">
+  1386→          <circle cx="8" cy="8" r="3.5" />
+  1387→          <line x1="8" y1="2" x2="8" y2="3.5" />
+  1388→          <line x1="8" y1="12.5" x2="8" y2="14" />
+  1389→        </svg>
+  1390→      }>
+  1391→        <InfoRow label="Type" value={lightType} valueColor="#f0a868" />
+  1392→        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 9 }}>
+  1393→          <span style={{ color: 'var(--text-dim)' }}>Color</span>
+  1394→          <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+  1395→            <span
+  1396→              style={{
+  1397→                width: 12,
+  1398→                height: 12,
+  1399→                borderRadius: 2,
+  1400→                background: lightColor,
+  1401→                border: '1px solid var(--border)',
+  1402→                display: 'inline-block',
+  1403→                boxShadow: `0 0 4px ${lightColor}40`,
+  1404→              }}
+  1405→            />
+  1406→            <span style={{ color: 'var(--text-sec)', fontFamily: 'var(--font-mono)' }}>{lightColor}</span>
+  1407→          </span>
+  1408→        </div>
+  1409→        {extraInfo}
+  1410→      </CollapsibleSection>
+  1411→    );
+  1412→  }
+  1413→
+  1414→  const childCount = selectedObj.children.filter(
+  1415→    (c) => !c.userData.isGrid && !c.userData.isProxy,
+  1416→  ).length;
+  1417→
+  1418→  const typeBadge = isColl ? 'Collection' : nodeType;
+  1419→  const typeBadgeColor = TYPE_COLORS[isColl ? 'collection' : nodeType] || 'var(--text-dim)';
+  1420→
+  1421→  return (
+  1422→    <div
+  1423→      style={{
+  1424→        borderTop: '1px solid var(--border)',
+  1425→        background: 'var(--bg-card)',
+  1426→        flexShrink: 0,
+  1427→      }}
+  1428→    >
+  1429→      {/* ── Header: type icon + name + type badge + close button ── */}
+  1430→      <div style={{
+  1431→        display: 'flex',
+  1432→        alignItems: 'center',
+  1433→        gap: 5,
+  1434→        padding: '4px 6px',
+  1435→        borderBottom: '1px solid var(--border-light)',
+  1436→        background: 'rgba(255,255,255,0.02)',
+  1437→      }}>
+  1438→        <TypeIcon type={nodeType} isCollection={isColl} size={12} />
+  1439→        <span
+  1440→          style={{
+  1441→            fontSize: 10,
+  1442→            color: 'var(--text)',
+  1443→            flex: 1,
+  1444→            overflow: 'hidden',
+  1445→            textOverflow: 'ellipsis',
+  1446→            whiteSpace: 'nowrap',
+  1447→            fontWeight: 500,
+  1448→          }}
+  1449→          title={selectedObj.name || selectedObj.type}
+  1450→        >
+  1451→          {selectedObj.name || selectedObj.type}
+  1452→        </span>
+  1453→        <span
+  1454→          style={{
+  1455→            fontSize: 7,
+  1456→            color: typeBadgeColor,
+  1457→            background: 'var(--bg-input)',
+  1458→            border: `1px solid ${typeBadgeColor}30`,
+  1459→            borderRadius: 3,
+  1460→            padding: '0 5px',
+  1461→            lineHeight: '15px',
+  1462→            textTransform: 'uppercase',
+  1463→            fontFamily: 'var(--font-mono)',
+  1464→            flexShrink: 0,
+  1465→            fontWeight: 600,
+  1466→            letterSpacing: '0.03em',
+  1467→          }}
+  1468→        >
+  1469→          {typeBadge}
+  1470→        </span>
+  1471→        {/* Close / Deselect button */}
+  1472→        <button
+  1473→          onClick={handleDeselect}
+  1474→          title="Deselect (close properties)"
+  1475→          style={{
+  1476→            width: 16,
+  1477→            height: 16,
+  1478→            display: 'flex',
+  1479→            alignItems: 'center',
+  1480→            justifyContent: 'center',
+  1481→            background: 'none',
+  1482→            border: 'none',
+  1483→            cursor: 'pointer',
+  1484→            color: 'var(--text-dim)',
+  1485→            borderRadius: 2,
+  1486→            padding: 0,
+  1487→            flexShrink: 0,
+  1488→          }}
+  1489→          onMouseEnter={(e) => {
+  1490→            (e.currentTarget as HTMLElement).style.color = 'var(--text)';
+  1491→            (e.currentTarget as HTMLElement).style.background = 'var(--accent-bg)';
+  1492→          }}
+  1493→          onMouseLeave={(e) => {
+  1494→            (e.currentTarget as HTMLElement).style.color = 'var(--text-dim)';
+  1495→            (e.currentTarget as HTMLElement).style.background = 'none';
+  1496→          }}
+  1497→        >
+  1498→          <svg width="10" height="10" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2">
+  1499→            <path d="M4 4l8 8M12 4l-8 8" />
+  1500→          </svg>
+  1501→        </button>
+  1502→      </div>
+  1503→
+  1504→      {/* ── Scrollable properties content ── */}
+  1505→      <div style={{ overflowY: 'auto', overflowX: 'hidden' }}>
+  1506→        {/* Quick Actions Row */}
+  1507→        <div style={{ display: 'flex', gap: 4, padding: '4px 6px', borderBottom: '1px solid var(--border-light)' }}>
+  1508→          <button
+  1509→            onClick={handleVisibleToggle}
+  1510→            style={{
+  1511→              flex: 1,
+  1512→              fontSize: 8,
+  1513→              padding: '3px 0',
+  1514→              borderRadius: 3,
+  1515→              cursor: 'pointer',
+  1516→              fontFamily: 'var(--font-mono)',
+  1517→              border: `1px solid ${isHidden ? 'var(--border)' : 'rgba(74, 222, 128, 0.3)'}`,
+  1518→              background: isHidden ? 'var(--bg-input)' : 'rgba(74, 222, 128, 0.1)',
+  1519→              color: isHidden ? 'var(--text-dim)' : 'var(--success)',
+  1520→              transition: 'all 0.1s',
+  1521→            }}
+  1522→          >
+  1523→            {isHidden ? 'Hidden' : 'Visible'}
+  1524→          </button>
+  1525→          <button
+  1526→            onClick={handleIsolate}
+  1527→            style={{
+  1528→              flex: 1,
+  1529→              fontSize: 8,
+  1530→              padding: '3px 0',
+  1531→              borderRadius: 3,
+  1532→              cursor: 'pointer',
+  1533→              fontFamily: 'var(--font-mono)',
+  1534→              border: `1px solid ${isIsolated ? 'rgba(167, 139, 250, 0.3)' : 'var(--border)'}`,
+  1535→              background: isIsolated ? 'rgba(167, 139, 250, 0.1)' : 'var(--bg-input)',
+  1536→              color: isIsolated ? 'var(--accent-bright)' : 'var(--text-dim)',
+  1537→              transition: 'all 0.1s',
+  1538→            }}
+  1539→          >
+  1540→            {isIsolated ? 'Isolated' : 'Isolate'}
+  1541→          </button>
+  1542→        </div>
+  1543→
+  1544→        {/* Transform Section */}
+  1545→        <CollapsibleSection title="Transform" defaultOpen={true} icon={
+  1546→          <svg width="10" height="10" viewBox="0 0 16 16" fill="none" stroke="var(--text-dim)" strokeWidth="1.2">
+  1547→            <path d="M8 1v14M1 8h14M4 4l8 8M12 4l-8 8" />
+  1548→          </svg>
+  1549→        }>
+  1550→          <Vec3Input label="Location" values={pos} onChange={handlePositionChange} />
+  1551→          <Vec3Input label="Rotation" values={rot} onChange={handleRotationChange} />
+  1552→          <Vec3Input label="Scale" values={scl} onChange={handleScaleChange} />
+  1553→          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 9, marginTop: 1 }}>
+  1554→            <span style={{ color: 'var(--text-dim)' }}>World Pos</span>
+  1555→            <span style={{ color: 'var(--text-dim)', fontFamily: 'var(--font-mono)', fontSize: 8 }}>
+  1556→              {worldPos.x.toFixed(2)}, {worldPos.y.toFixed(2)}, {worldPos.z.toFixed(2)}
+  1557→            </span>
+  1558→          </div>
+  1559→        </CollapsibleSection>
+  1560→
+  1561→        {/* Object Info Section */}
+  1562→        <CollapsibleSection title="Object Info" defaultOpen={true} icon={
+  1563→          <svg width="10" height="10" viewBox="0 0 16 16" fill="none" stroke="var(--text-dim)" strokeWidth="1.2">
+  1564→            <circle cx="8" cy="8" r="6" />
+  1565→            <path d="M8 5v3.5M8 10.5v.5" />
+  1566→          </svg>
+  1567→        }>
+  1568→          <InfoRow
+  1569→            label="Type"
+  1570→            value={isColl ? 'Collection' : nodeType}
+  1571→          />
+  1572→          <InfoRow label="Children" value={String(childCount)} />
+  1573→          <InfoRow
+  1574→            label="UUID"
+  1575→            value={`${selectedObj.uuid.slice(0, 13)}\u2026`}
+  1576→            valueColor="var(--text-dim)"
+  1577→            title={selectedObj.uuid}
+  1578→          />
+  1579→        </CollapsibleSection>
+  1580→
+  1581→        {/* Mesh Info Section (conditional) */}
+  1582→        {meshInfo}
+  1583→
+  1584→        {/* Light Info Section (conditional) */}
+  1585→        {lightInfo}
+  1586→      </div>
+  1587→    </div>
+  1588→  );
+  1589→};
+  1590→
+  1591→/* ═══════════════════════════════════════════════════════════════════
+  1592→   Resizable Split Handle
+  1593→   ═══════════════════════════════════════════════════════════════════ */
+  1594→
+  1595→const SplitHandle: React.FC<{
+  1596→  onDrag: (ratio: number) => void;
+  1597→  containerRef: React.RefObject<HTMLDivElement | null>;
+  1598→}> = ({ onDrag, containerRef }) => {
+  1599→  const handleMouseDown = useCallback((e: React.MouseEvent) => {
+  1600→    e.preventDefault();
+  1601→    const container = containerRef.current;
+  1602→    if (!container) return;
+  1603→    const rect = container.getBoundingClientRect();
+  1604→    const startY = e.clientY;
+  1605→    const startRatio = (e.clientY - rect.top) / rect.height;
+  1606→
+  1607→    const handleMouseMove = (moveEvent: MouseEvent) => {
+  1608→      const delta = moveEvent.clientY - startY;
+  1609→      const newRatio = Math.max(0.15, Math.min(0.85, startRatio + delta / rect.height));
+  1610→      onDrag(newRatio);
+  1611→    };
+  1612→
+  1613→    const handleMouseUp = () => {
+  1614→      document.removeEventListener('mousemove', handleMouseMove);
+  1615→      document.removeEventListener('mouseup', handleMouseUp);
+  1616→      document.body.style.cursor = '';
+  1617→      document.body.style.userSelect = '';
+  1618→    };
+  1619→
+  1620→    document.addEventListener('mousemove', handleMouseMove);
+  1621→    document.addEventListener('mouseup', handleMouseUp);
+  1622→    document.body.style.cursor = 'ns-resize';
+  1623→    document.body.style.userSelect = 'none';
+  1624→  }, [containerRef, onDrag]);
+  1625→
+  1626→  return (
+  1627→    <div
+  1628→      onMouseDown={handleMouseDown}
+  1629→      style={{
+  1630→        height: 4,
+  1631→        flexShrink: 0,
+  1632→        cursor: 'ns-resize',
+  1633→        background: 'var(--border-light)',
+  1634→        position: 'relative',
+  1635→        zIndex: 2,
+  1636→      }}
+  1637→      onMouseEnter={(e) => {
+  1638→        (e.currentTarget as HTMLElement).style.background = 'var(--accent)';
+  1639→      }}
+  1640→      onMouseLeave={(e) => {
+  1641→        (e.currentTarget as HTMLElement).style.background = 'var(--border-light)';
+  1642→      }}
+  1643→    >
+  1644→      {/* Center grip dots */}
+  1645→      <div style={{
+  1646→        position: 'absolute',
+  1647→        top: '50%',
+  1648→        left: '50%',
+  1649→        transform: 'translate(-50%, -50%)',
+  1650→        display: 'flex',
+  1651→        gap: 2,
+  1652→        pointerEvents: 'none',
+  1653→      }}>
+  1654→        <span style={{ width: 3, height: 1, background: 'var(--text-dim)', opacity: 0.5, borderRadius: 0.5 }} />
+  1655→        <span style={{ width: 3, height: 1, background: 'var(--text-dim)', opacity: 0.5, borderRadius: 0.5 }} />
+  1656→        <span style={{ width: 3, height: 1, background: 'var(--text-dim)', opacity: 0.5, borderRadius: 0.5 }} />
+  1657→      </div>
+  1658→    </div>
+  1659→  );
+  1660→};
+  1661→
+  1662→/* ═══════════════════════════════════════════════════════════════════
+  1663→   Main SceneHierarchy Component (Blender-style with resizable split)
+  1664→   ═══════════════════════════════════════════════════════════════════ */
+  1665→
+  1666→export const SceneHierarchy: React.FC<SceneHierarchyProps> = ({ sceneRef }) => {
+  1667→  const [tick, setTick] = useState(0);
+  1668→  const [ctxMenu, setCtxMenu] = useState<ContextMenuState | null>(null);
+  1669→  const [splitRatio, setSplitRatio] = useState(0.6);
+  1670→  const [dropTargetId, setDropTargetId] = useState<string | null>(null);
+  1671→
+  1672→  const containerRef = useRef<HTMLDivElement>(null);
+  1673→
+  1674→  const filterType = useSceneHierarchyStore((s) => s.filterType);
+  1675→  const searchQuery = useSceneHierarchyStore((s) => s.searchQuery);
+  1676→  const setFilterType = useSceneHierarchyStore((s) => s.setFilterType);
+  1677→  const setSearchQuery = useSceneHierarchyStore((s) => s.setSearchQuery);
+  1678→  const isolatedId = useSceneHierarchyStore((s) => s.isolatedId);
+  1679→  const selectedId = useSceneHierarchyStore((s) => s.selectedId);
+  1680→
+  1681→  const refresh = useCallback(() => setTick((n) => n + 1), []);
+  1682→
+  1683→  const tree = useMemo(() => {
+  1684→    const scene = sceneRef.current;
+  1685→    if (!scene) return [];
+  1686→    return buildTree(scene);
+  1687→    // eslint-disable-next-line react-hooks/exhaustive-deps
+  1688→  }, [sceneRef.current, tick]);
+  1689→
+  1690→  // Count total objects
+  1691→  const objectCount = useMemo(() => {
+  1692→    let count = 0;
+  1693→    const countNodes = (nodes: HierarchyNode[]) => {
+  1694→      for (const n of nodes) {
+  1695→        count++;
+  1696→        countNodes(n.children);
+  1697→      }
+  1698→    };
+  1699→    countNodes(tree);
+  1700→    return count;
+  1701→  }, [tree]);
+  1702→
+  1703→  // Expand all
+  1704→  const handleExpandAll = useCallback(() => {
+  1705→    const ids: string[] = [];
+  1706→    const scene = sceneRef.current;
+  1707→    if (scene) {
+  1708→      scene.traverse((child) => {
+  1709→        if (!child.userData.isGrid && !child.userData.isProxy && child.children.length > 0) {
+  1710→          ids.push(child.uuid);
+  1711→        }
+  1712→      });
+  1713→    }
+  1714→    useSceneHierarchyStore.getState().expandAll(ids);
+  1715→  }, [sceneRef]);
+  1716→
+  1717→  // Collapse all
+  1718→  const handleCollapseAll = useCallback(() => {
+  1719→    useSceneHierarchyStore.getState().collapseAll();
+  1720→  }, []);
+  1721→
+  1722→  // New Collection
+  1723→  const handleNewCollection = useCallback(() => {
+  1724→    const scene = sceneRef.current;
+  1725→    if (!scene) return;
+  1726→    const n = countCollections(scene) + 1;
+  1727→    const g = new THREE.Group();
+  1728→    g.name = `Collection ${n}`;
+  1729→    g.userData._isCollection = true;
+  1730→    scene.add(g);
+  1731→    refresh();
+  1732→  }, [sceneRef, refresh]);
+  1733→
+  1734→  // Show All
+  1735→  const handleShowAll = useCallback(() => {
+  1736→    const scene = sceneRef.current;
+  1737→    if (!scene) return;
+  1738→    useSceneHierarchyStore.getState().showAll();
+  1739→    scene.traverse((child) => {
+  1740→      child.visible = true;
+  1741→    });
+  1742→    refresh();
+  1743→  }, [sceneRef, refresh]);
+  1744→
+  1745→  // Context menu
+  1746→  const handleContextMenu = useCallback((e: React.MouseEvent, uuid: string) => {
+  1747→    setCtxMenu({ x: e.clientX, y: e.clientY, objectId: uuid, showSubmenu: false });
+  1748→  }, []);
+  1749→
+  1750→  const closeContextMenu = useCallback(() => setCtxMenu(null), []);
+  1751→
+  1752→  // Close context menu on scroll
+  1753→  useEffect(() => {
+  1754→    if (ctxMenu) {
+  1755→      const handler = () => closeContextMenu();
+  1756→      window.addEventListener('scroll', handler, true);
+  1757→      window.addEventListener('resize', handler);
+  1758→      return () => {
+  1759→        window.removeEventListener('scroll', handler, true);
+  1760→        window.removeEventListener('resize', handler);
+  1761→      };
+  1762→    }
+  1763→  }, [ctxMenu, closeContextMenu]);
+  1764→
+  1765→  // Drag-and-drop handlers (lifted to parent for cross-tree-node drops)
+  1766→  const handleDragStart = useCallback((_uuid: string, _name: string) => {
+  1767→    // We don't need to do much here; the UUID is in dataTransfer
+  1768→  }, []);
+  1769→
+  1770→  const handleDragEnd = useCallback(() => {
+  1771→    setDropTargetId(null);
+  1772→  }, []);
+  1773→
+  1774→  const handleDropOnCollection = useCallback((collectionUuid: string) => {
+  1775→    setDropTargetId(collectionUuid || null);
+  1776→  }, []);
+  1777→
+  1778→  const handleSplitDrag = useCallback((ratio: number) => {
+  1779→    setSplitRatio(ratio);
+  1780→  }, []);
+  1781→
+  1782→  const filterButtons: { label: string; value: HierarchyFilterType }[] = [
+  1783→    { label: 'All', value: 'all' },
+  1784→    { label: 'Mesh', value: 'mesh' },
+  1785→    { label: 'Light', value: 'light' },
+  1786→    { label: 'Camera', value: 'camera' },
+  1787→    { label: 'Group', value: 'group' },
+  1788→  ];
+  1789→
+  1790→  // Calculate tree vs properties split
+  1791→  const showProperties = selectedId !== null;
+  1792→
+  1793→  return (
+  1794→    <div
+  1795→      ref={containerRef}
+  1796→      style={{ display: 'flex', flexDirection: 'column', height: '100%', position: 'relative' }}
+  1797→      onDragOver={(e) => e.preventDefault()}
+  1798→    >
+  1799→      {/* ── Clean Toolbar ── */}
+  1800→      <div style={{ padding: '3px 4px', borderBottom: '1px solid var(--border)', display: 'flex', flexDirection: 'column', gap: 3, flexShrink: 0 }}>
+  1801→        {/* Search bar — Blender-style at top */}
+  1802→        <div style={{ position: 'relative' }}>
+  1803→          <svg
+  1804→            width="10"
+  1805→            height="10"
+  1806→            viewBox="0 0 16 16"
+  1807→            fill="none"
+  1808→            stroke="var(--text-dim)"
+  1809→            strokeWidth="1.5"
+  1810→            style={{ position: 'absolute', left: 6, top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none' }}
+  1811→          >
+  1812→            <circle cx="6.5" cy="6.5" r="5" />
+  1813→            <path d="M10.5 10.5L15 15" />
+  1814→          </svg>
+  1815→          <input
+  1816→            type="text"
+  1817→            placeholder="Filter objects..."
+  1818→            value={searchQuery}
+  1819→            onChange={(e) => setSearchQuery(e.target.value)}
+  1820→            style={{
+  1821→              width: '100%',
+  1822→              padding: '3px 6px 3px 22px',
+  1823→              fontSize: 10,
+  1824→              background: 'var(--bg-input)',
+  1825→              border: '1px solid var(--border)',
+  1826→              borderRadius: 'var(--radius-sm)',
+  1827→              color: 'var(--text)',
+  1828→              outline: 'none',
+  1829→              fontFamily: 'inherit',
+  1830→              boxSizing: 'border-box',
+  1831→            }}
+  1832→          />
+  1833→        </div>
+  1834→
+  1835→        {/* Filter buttons + action icons row */}
+  1836→        <div style={{ display: 'flex', gap: 1, alignItems: 'center' }}>
+  1837→          {filterButtons.map((fb) => (
+  1838→            <button
+  1839→              key={fb.value}
+  1840→              onClick={() => setFilterType(fb.value)}
+  1841→              style={{
+  1842→                fontSize: 9,
+  1843→                padding: '1px 5px',
+  1844→                borderRadius: 'var(--radius-sm)',
+  1845→                border: 'none',
+  1846→                cursor: 'pointer',
+  1847→                background: filterType === fb.value ? 'var(--accent-bg)' : 'transparent',
+  1848→                color: filterType === fb.value ? 'var(--accent)' : 'var(--text-dim)',
+  1849→                fontWeight: filterType === fb.value ? 600 : 400,
+  1850→                fontFamily: 'var(--font-ui)',
+  1851→                transition: 'all 0.1s',
+  1852→                outline: 'none',
+  1853→              }}
+  1854→              title={`Filter: ${fb.label}${fb.value === 'group' ? ' (includes Collections)' : ''}`}
+  1855→            >
+  1856→              {fb.label}
+  1857→            </button>
+  1858→          ))}
+  1859→
+  1860→          <div style={{ flex: 1 }} />
+  1861→
+  1862→          {/* Object count badge */}
+  1863→          <span style={{ fontSize: 8, color: 'var(--text-dim)', fontFamily: 'var(--font-mono)', marginRight: 2 }}>
+  1864→            {objectCount}
+  1865→          </span>
+  1866→
+  1867→          {/* Expand/Collapse All */}
+  1868→          <button
+  1869→            onClick={handleExpandAll}
+  1870→            title="Expand All"
+  1871→            style={{
+  1872→              width: 18, height: 18, display: 'flex', alignItems: 'center', justifyContent: 'center',
+  1873→              background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-dim)',
+  1874→              padding: 0, borderRadius: 2,
+  1875→            }}
+  1876→          >
+  1877→            <svg width="10" height="10" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3">
+  1878→              <path d="M4 2l8 6-8 6z" />
+  1879→            </svg>
+  1880→          </button>
+  1881→          <button
+  1882→            onClick={handleCollapseAll}
+  1883→            title="Collapse All"
+  1884→            style={{
+  1885→              width: 18, height: 18, display: 'flex', alignItems: 'center', justifyContent: 'center',
+  1886→              background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-dim)',
+  1887→              padding: 0, borderRadius: 2,
+  1888→            }}
+  1889→          >
+  1890→            <svg width="10" height="10" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3">
+  1891→              <path d="M2 6l12-4v12L2 10z" />
+  1892→            </svg>
+  1893→          </button>
+  1894→
+  1895→          {/* New Collection */}
+  1896→          <button
+  1897→            onClick={handleNewCollection}
+  1898→            title="New Collection"
+  1899→            style={{
+  1900→              width: 18, height: 18, display: 'flex', alignItems: 'center', justifyContent: 'center',
+  1901→              background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-dim)',
+  1902→              padding: 0, borderRadius: 2,
+  1903→            }}
+  1904→          >
+  1905→            <svg width="10" height="10" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3">
+  1906→              <path d="M2 4h4l1.5-2h5L14 4h2a1 1 0 011 1v8a1 1 0 01-1 1H2a1 1 0 01-1-1V5a1 1 0 011-1z" />
+  1907→              <path d="M8 7v4M6 9h4" />
+  1908→            </svg>
+  1909→          </button>
+  1910→
+  1911→          {/* Show All (visible when isolated) */}
+  1912→          {isolatedId && (
+  1913→            <button
+  1914→              onClick={handleShowAll}
+  1915→              title="Show All (exit isolation)"
+  1916→              style={{
+  1917→                width: 18, height: 18, display: 'flex', alignItems: 'center', justifyContent: 'center',
+  1918→                background: 'rgba(167,139,250,0.15)', border: '1px solid rgba(167,139,250,0.3)',
+  1919→                cursor: 'pointer', color: 'var(--accent-bright)',
+  1920→                padding: 0, borderRadius: 2,
+  1921→              }}
+  1922→            >
+  1923→              <svg width="10" height="10" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3">
+  1924→                <path d="M1 8s3-5 7-5 7 5 7 5-3 5-7 5-7-5-7-5z" />
+  1925→                <circle cx="8" cy="8" r="2" />
+  1926→              </svg>
+  1927→            </button>
+  1928→          )}
+  1929→
+  1930→          {/* Refresh */}
+  1931→          <button
+  1932→            onClick={refresh}
+  1933→            title="Refresh"
+  1934→            style={{
+  1935→              width: 18, height: 18, display: 'flex', alignItems: 'center', justifyContent: 'center',
+  1936→              background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-dim)',
+  1937→              padding: 0, borderRadius: 2,
+  1938→            }}
+  1939→          >
+  1940→            <svg width="10" height="10" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3">
+  1941→              <path d="M13.5 8A5.5 5.5 0 113 5.5" />
+  1942→              <path d="M13.5 3v5h-5" />
+  1943→            </svg>
+  1944→          </button>
+  1945→        </div>
+  1946→      </div>
+  1947→
+  1948→      {/* ── Resizable Split: Tree (top) + Properties (bottom) ── */}
+  1949→      {showProperties ? (
+  1950→        <>
+  1951→          {/* Tree view area */}
+  1952→          <div style={{ flex: splitRatio, overflowY: 'auto', overflowX: 'hidden', minHeight: 0, paddingTop: 1 }}>
+  1953→            {tree.length === 0 ? (
+  1954→              <div style={{ padding: 16, textAlign: 'center', fontSize: 10, color: 'var(--text-dim)' }}>
+  1955→                No objects in scene
+  1956→              </div>
+  1957→            ) : (
+  1958→              tree.map((node) => (
+  1959→                <TreeNode
+  1960→                  key={node.object.uuid}
+  1961→                  node={node}
+  1962→                  depth={0}
+  1963→                  sceneRef={sceneRef}
+  1964→                  refresh={refresh}
+  1965→                  onContextMenu={handleContextMenu}
+  1966→                  onDragStart={handleDragStart}
+  1967→                  onDragEnd={handleDragEnd}
+  1968→                  onDropOnCollection={handleDropOnCollection}
+  1969→                  dropTargetId={dropTargetId}
+  1970→                />
+  1971→              ))
+  1972→            )}
+  1973→          </div>
+  1974→
+  1975→          {/* Resizable split handle */}
+  1976→          <SplitHandle onDrag={handleSplitDrag} containerRef={containerRef} />
+  1977→
+  1978→          {/* Properties panel area */}
+  1979→          <div style={{ flex: 1 - splitRatio, overflow: 'hidden', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+  1980→            <ObjectPropertiesPanel sceneRef={sceneRef} refresh={refresh} tick={tick} />
+  1981→          </div>
+  1982→        </>
+  1983→      ) : (
+  1984→        /* No selection — tree takes full remaining space */
+  1985→        <div style={{ flex: 1, overflowY: 'auto', overflowX: 'hidden', paddingTop: 1 }}>
+  1986→          {tree.length === 0 ? (
+  1987→            <div style={{ padding: 16, textAlign: 'center', fontSize: 10, color: 'var(--text-dim)' }}>
+  1988→              No objects in scene
+  1989→            </div>
+  1990→          ) : (
+  1991→            tree.map((node) => (
+  1992→              <TreeNode
+  1993→                key={node.object.uuid}
+  1994→                node={node}
+  1995→                depth={0}
+  1996→                sceneRef={sceneRef}
+  1997→                refresh={refresh}
+  1998→                onContextMenu={handleContextMenu}
+  1999→                onDragStart={handleDragStart}
+  2000→                onDragEnd={handleDragEnd}
+
+[showing lines 1-2000 of 2036; use offset=2001 with limit to continue reading]
