@@ -1,20 +1,18 @@
 /**
- * HDRIExporter — WebGL-based HDRI/EXR export for LightForge Studio.
+ * HDRIExporter — Robust HDRI/EXR export for LightForge Studio.
  *
- * Captures the actual environment map displayed in the viewport and exports
- * it as a true HDR equirectangular image (.hdr or .exr).
+ * Captures the scene's environment map and exports it as a valid
+ * Radiance RGBE (.hdr) or OpenEXR (.exr) file.
  *
- * Export strategy (in priority order):
- *   1. Direct texture read: If scene.background is a DataTexture (custom HDRI
- *      shown as backplate), read its Float32 pixel data directly.
- *   2. Raw data fallback: If raw HDRI ArrayBuffer exists in the store
- *      (custom HDRI loaded but not shown as background), load via RGBELoader
- *      and read pixels.
- *   3. WebGL PMREM capture: If scene.environment exists (built-in presets
- *      or PMREM-processed textures), render it to equirectangular via a
- *      WebGL shader that samples the PMREM texture.
- *   4. Analytical fallback: If no environment exists at all, compute
- *      radiance analytically from scene lights.
+ * Capture strategy (priority order):
+ *   1. WebGL render: If scene.background is a texture (equirectangular HDRI
+ *      shown as backplate), render it to a Float32 render target.
+ *   2. Raw data fallback: If raw HDRI ArrayBuffer exists in the store,
+ *      load via RGBELoader and render to a render target.
+ *   3. PMREM capture: If scene.environment exists (built-in presets or
+ *      PMREM-processed textures), capture via CubeCamera + equirect shader.
+ *   4. Analytical fallback: If no environment exists, compute radiance
+ *      analytically from scene lights.
  *
  * All methods produce a Float32Array of RGBA linear values which are then
  * encoded as RGBE (.hdr) or OpenEXR (.exr) and downloaded.
@@ -37,10 +35,6 @@ export interface HDRIExportOptions {
 
 /**
  * Export the scene's environment as a Radiance .hdr file.
- *
- * Captures the actual HDRI environment visible in the viewport (not analytical
- * light radiance). Falls back to analytical generation only if no environment
- * texture exists.
  */
 export async function exportSceneAsHDR(
   renderer: THREE.WebGLRenderer,
@@ -53,26 +47,38 @@ export async function exportSceneAsHDR(
 
   console.log(`[LightForge HDRI] Exporting ${width}x${height} HDR...`);
 
-  const pixels = await captureEnvironmentHDRI(renderer, scene, width, height);
+  try {
+    const pixels = await captureEnvironmentHDRI(renderer, scene, width, height);
 
-  // Verify output
-  let maxVal = 0;
-  let nonZero = 0;
-  for (let i = 0; i < pixels.length; i += 4) {
-    const m = Math.max(pixels[i], pixels[i + 1], pixels[i + 2]);
-    if (m > maxVal) maxVal = m;
-    if (m > 0.001) nonZero++;
+    // Verify output
+    let maxVal = 0;
+    let nonZero = 0;
+    for (let i = 0; i < pixels.length; i += 4) {
+      const m = Math.max(pixels[i], pixels[i + 1], pixels[i + 2]);
+      if (m > maxVal) maxVal = m;
+      if (m > 0.001) nonZero++;
+    }
+    const total = width * height;
+    console.log(
+      `[LightForge HDRI] Max value: ${maxVal.toFixed(4)}, ` +
+      `Non-zero: ${nonZero}/${total} (${((nonZero / total) * 100).toFixed(1)}%)`
+    );
+
+    if (nonZero === 0) {
+      console.warn('[LightForge HDRI] WARNING: Exported HDRI is entirely black.');
+    }
+
+    const buffer = encodeHDR(pixels, width, height);
+    downloadBuffer(
+      buffer,
+      `${options?.filename ?? 'lightforge_hdri_' + Date.now()}.hdr`,
+      'image/vnd.radiance',
+    );
+    console.log('[LightForge HDRI] HDR export complete. File size:', buffer.byteLength, 'bytes');
+  } catch (err) {
+    console.error('[LightForge HDRI] HDR export failed:', err);
+    alert('HDRI export failed. Check the console for details.');
   }
-  const total = width * height;
-  console.log(`[LightForge HDRI] Max value: ${maxVal.toFixed(2)}, Non-zero: ${nonZero}/${total} (${((nonZero / total) * 100).toFixed(1)}%)`);
-
-  if (nonZero === 0) {
-    console.warn('[LightForge HDRI] WARNING: Exported HDRI is entirely black. No environment or lights found.');
-  }
-
-  const buffer = encodeHDR(pixels, width, height);
-  downloadBuffer(buffer, `${options?.filename ?? 'lightforge_hdri_' + Date.now()}.hdr`, 'image/vnd.radiance');
-  console.log('[LightForge HDRI] HDR export complete.');
 }
 
 /**
@@ -89,23 +95,26 @@ export async function exportSceneAsEXR(
 
   console.log(`[LightForge HDRI] Exporting ${width}x${height} EXR...`);
 
-  const pixels = await captureEnvironmentHDRI(renderer, scene, width, height);
+  try {
+    const pixels = await captureEnvironmentHDRI(renderer, scene, width, height);
 
-  const buffer = encodeEXR(pixels, width, height);
-  downloadBuffer(buffer, `${options?.filename ?? 'lightforge_hdri_' + Date.now()}.exr`, 'image/x-exr');
-  console.log('[LightForge HDRI] EXR export complete.');
+    const buffer = encodeEXR(pixels, width, height);
+    downloadBuffer(
+      buffer,
+      `${options?.filename ?? 'lightforge_hdri_' + Date.now()}.exr`,
+      'image/x-exr',
+    );
+    console.log('[LightForge HDRI] EXR export complete. File size:', buffer.byteLength, 'bytes');
+  } catch (err) {
+    console.error('[LightForge HDRI] EXR export failed:', err);
+    alert('EXR export failed. Check the console for details.');
+  }
 }
 
 // ─── Core: Capture Environment ────────────────────────────────────────────────
 
 /**
  * Capture the scene's environment as an equirectangular Float32Array.
- *
- * Strategy:
- *   1. If scene.background is a texture → read pixels directly
- *   2. If raw HDRI data exists in store → load and read
- *   3. If scene.environment exists → WebGL PMREM capture
- *   4. Fall back to analytical light radiance
  */
 async function captureEnvironmentHDRI(
   renderer: THREE.WebGLRenderer,
@@ -113,42 +122,41 @@ async function captureEnvironmentHDRI(
   width: number,
   height: number,
 ): Promise<Float32Array> {
-  // ── Method 1: Direct texture read from scene.background ───────────────────
-  // This works when a custom HDRI is loaded and showBackground=true,
-  // because EnvironmentLoader.setBackgroundFromEnv() sets scene.background
-  // to the original equirectangular DataTexture.
+  // ── Method 1: Render scene.background texture via WebGL ──────────────────
   if (scene.background instanceof THREE.Texture) {
-    console.log('[LightForge HDRI] Method 1: Reading scene.background texture directly');
-    const pixels = readEquirectTexturePixels(scene.background, width, height);
-    if (pixels) return pixels;
+    console.log('[LightForge HDRI] Method 1: WebGL render of scene.background texture');
+    try {
+      const pixels = renderTextureToEquirect(renderer, scene.background, width, height);
+      if (pixels && hasValidData(pixels)) return pixels;
+    } catch (err) {
+      console.warn('[LightForge HDRI] Method 1 failed:', err);
+    }
   }
 
   // ── Method 2: Raw HDRI data from store ────────────────────────────────────
-  // This works when a custom HDRI was loaded but showBackground=false.
   const rawBuffer = getRawHDRIData();
   if (rawBuffer) {
     console.log('[LightForge HDRI] Method 2: Loading raw HDRI data from store');
     try {
       const texture = await loadHDRITexture(rawBuffer);
       if (texture) {
-        const pixels = readEquirectTexturePixels(texture, width, height);
+        const pixels = renderTextureToEquirect(renderer, texture, width, height);
         texture.dispose();
-        if (pixels) return pixels;
+        if (pixels && hasValidData(pixels)) return pixels;
       }
     } catch (err) {
-      console.warn('[LightForge HDRI] Failed to load raw HDRI data:', err);
+      console.warn('[LightForge HDRI] Method 2 failed:', err);
     }
   }
 
   // ── Method 3: WebGL PMREM capture ─────────────────────────────────────────
-  // This works for built-in presets where scene.environment is a PMREM texture.
   if (scene.environment) {
-    console.log('[LightForge HDRI] Method 3: WebGL PMREM capture');
+    console.log('[LightForge HDRI] Method 3: WebGL PMREM capture via CubeCamera');
     try {
       const pixels = capturePMREMAsEquirect(renderer, scene.environment, width, height);
-      if (pixels) return pixels;
+      if (pixels && hasValidData(pixels)) return pixels;
     } catch (err) {
-      console.warn('[LightForge HDRI] PMREM capture failed:', err);
+      console.warn('[LightForge HDRI] Method 3 failed:', err);
     }
   }
 
@@ -157,162 +165,110 @@ async function captureEnvironmentHDRI(
   return generateAnalyticalHDRI(
     scene, width, height,
     new THREE.Vector3(0, 0, 0),
-    false, null, 1.0, 0,
   );
 }
 
-// ─── Method 1 & 2: Read Equirectangular Texture Pixels ───────────────────────
+// ─── Method 1 & 2: Render Texture to Equirect via WebGL ───────────────────────
 
 /**
- * Read pixel data from an equirectangular DataTexture and resize to target dimensions.
- *
- * Handles:
- *   - DataTexture with Float32Array image data (from RGBELoader)
- *   - DataTexture with Uint8Array image data (from Canvas/Image)
- *   - Arbitrary source dimensions → resized to target width x height
- *
- * @returns Float32Array of RGBA (4 floats/pixel, linear, top-to-bottom) or null on failure.
+ * Render a texture to a Float32 equirectangular render target and read back.
+ * This is the most robust approach — works for any texture type.
  */
-function readEquirectTexturePixels(
+function renderTextureToEquirect(
+  renderer: THREE.WebGLRenderer,
   texture: THREE.Texture,
-  targetWidth: number,
-  targetHeight: number,
+  width: number,
+  height: number,
 ): Float32Array | null {
-  const img = texture.image as unknown as Record<string, unknown> | null;
-  if (!img || typeof img !== 'object' || !('width' in img) || !('height' in img)) return null;
+  // Save renderer state
+  const origToneMapping = renderer.toneMapping;
+  const origToneMappingExposure = renderer.toneMappingExposure;
+  const origOutputColorSpace = renderer.outputColorSpace;
+  const currentRenderTarget = renderer.getRenderTarget();
 
-  const srcW = Number(img.width);
-  const srcH = Number(img.height);
-  if (srcW < 1 || srcH < 1) return null;
+  // Disable tone mapping and color space for raw HDR capture
+  renderer.toneMapping = THREE.NoToneMapping;
+  renderer.toneMappingExposure = 1.0;
+  renderer.outputColorSpace = THREE.LinearSRGBColorSpace;
 
-  // Get source pixel data
-  let srcData: Float32Array | Uint8Array | null = null;
-  let isFloat = false;
+  const rt = new THREE.WebGLRenderTarget(width, height, {
+    type: THREE.FloatType,
+    format: THREE.RGBAFormat,
+    minFilter: THREE.LinearFilter,
+    magFilter: THREE.LinearFilter,
+    generateMipmaps: false,
+  });
 
-  if (img instanceof HTMLCanvasElement) {
-    const ctx = img.getContext('2d');
-    if (!ctx) return null;
-    const imgData = ctx.getImageData(0, 0, srcW, srcH);
-    srcData = new Uint8Array(imgData.data.buffer) ;
-  } else if (img instanceof ImageData) {
-    srcData = new Uint8Array(img.data.buffer);
-  } else if ((img as any).data) {
-    const d = (img as any).data;
-    if (d instanceof Float32Array) {
-      srcData = d;
-      isFloat = true;
-    } else if (d instanceof Uint8Array) {
-      srcData = d;
-    }
-  }
+  try {
+    // Create a fullscreen quad that samples the texture
+    const quadScene = new THREE.Scene();
+    const quadCamera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
 
-  if (!srcData) return null;
-
-  // If source dimensions match target, read directly
-  if (srcW === targetWidth && srcH === targetHeight) {
-    return extractAndConvert(srcData, isFloat, srcW * srcH);
-  }
-
-  // Otherwise, bilinear-resample from source to target
-  const pixels = new Float32Array(targetWidth * targetHeight * 4);
-  const channels = 4;
-
-  for (let ty = 0; ty < targetHeight; ty++) {
-    for (let tx = 0; tx < targetWidth; tx++) {
-      // Map target pixel to source UV
-      const u = (tx + 0.5) / targetWidth;
-      const v = (ty + 0.5) / targetHeight;
-
-      // Source pixel coordinates (with 0.5 offset for center-sampling)
-      const sx = u * srcW - 0.5;
-      const sy = v * srcH - 0.5;
-
-      // Bilinear interpolation
-      const x0 = ((Math.floor(sx) % srcW) + srcW) % srcW;
-      const y0 = ((Math.floor(sy) % srcH) + srcH) % srcH;
-      const x1 = (x0 + 1) % srcW;
-      const y1 = (y0 + 1) % srcH;
-      const fx = sx - Math.floor(sx);
-      const fy = sy - Math.floor(sy);
-
-      const getPixel = (xi: number, yi: number): [number, number, number, number] => {
-        const idx = (yi * srcW + xi) * channels;
-        if (idx < 0 || idx + 3 >= srcData.length) return [0, 0, 0, 1];
-        if (isFloat) {
-          const f = srcData as Float32Array;
-          return [f[idx], f[idx + 1], f[idx + 2], f[idx + 3]];
+    const quadGeo = new THREE.PlaneGeometry(2, 2);
+    const quadMat = new THREE.ShaderMaterial({
+      depthTest: false,
+      depthWrite: false,
+      uniforms: {
+        tEnv: { value: texture },
+      },
+      vertexShader: /* glsl */ `
+        varying vec2 vUv;
+        void main() {
+          vUv = uv;
+          gl_Position = vec4(position.xy, 0.0, 1.0);
         }
-        // Uint8 → sRGB to linear
-        return [
-          sRGBToLinear((srcData[idx] ?? 0) / 255),
-          sRGBToLinear((srcData[idx + 1] ?? 0) / 255),
-          sRGBToLinear((srcData[idx + 2] ?? 0) / 255),
-          (srcData[idx + 3] ?? 255) / 255,
-        ];
-      };
+      `,
+      fragmentShader: /* glsl */ `
+        uniform sampler2D tEnv;
+        varying vec2 vUv;
+        void main() {
+          vec4 color = texture2D(tEnv, vUv);
+          gl_FragColor = vec4(color.rgb, 1.0);
+        }
+      `,
+    });
 
-      const c00 = getPixel(x0, y0);
-      const c10 = getPixel(x1, y0);
-      const c01 = getPixel(x0, y1);
-      const c11 = getPixel(x1, y1);
+    const quad = new THREE.Mesh(quadGeo, quadMat);
+    quadScene.add(quad);
 
-      const w00 = (1 - fx) * (1 - fy);
-      const w10 = fx * (1 - fy);
-      const w01 = (1 - fx) * fy;
-      const w11 = fx * fy;
+    // Render
+    renderer.setRenderTarget(rt);
+    renderer.render(quadScene, quadCamera);
 
-      const outIdx = (ty * targetWidth + tx) * 4;
-      pixels[outIdx]     = c00[0] * w00 + c10[0] * w10 + c01[0] * w01 + c11[0] * w11;
-      pixels[outIdx + 1] = c00[1] * w00 + c10[1] * w10 + c01[1] * w01 + c11[1] * w11;
-      pixels[outIdx + 2] = c00[2] * w00 + c10[2] * w10 + c01[2] * w01 + c11[2] * w11;
-      pixels[outIdx + 3] = 1.0;
-    }
+    // Read back pixels
+    const pixels = new Float32Array(width * height * 4);
+    renderer.readRenderTargetPixels(rt, 0, 0, width, height, pixels);
+
+    // WebGL readRenderTargetPixels returns bottom-to-top; flip to top-to-bottom
+    flipVertical(pixels, width, height);
+
+    // Cleanup
+    quadGeo.dispose();
+    quadMat.dispose();
+
+    return pixels;
+  } catch (err) {
+    console.error('[LightForge HDRI] WebGL texture render failed:', err);
+    return null;
+  } finally {
+    renderer.toneMapping = origToneMapping;
+    renderer.toneMappingExposure = origToneMappingExposure;
+    renderer.outputColorSpace = origOutputColorSpace;
+    rt.dispose();
+    renderer.setRenderTarget(currentRenderTarget);
   }
-
-  return pixels;
-}
-
-/**
- * Extract pixel data from a source array, converting to Float32 linear RGBA.
- */
-function extractAndConvert(
-  srcData: Float32Array | Uint8Array,
-  isFloat: boolean,
-  pixelCount: number,
-): Float32Array {
-  const pixels = new Float32Array(pixelCount * 4);
-  for (let i = 0; i < pixelCount; i++) {
-    const si = i * 4;
-    const di = i * 4;
-    if (isFloat) {
-      const f = srcData as Float32Array;
-      pixels[di]     = f[si] ?? 0;
-      pixels[di + 1] = f[si + 1] ?? 0;
-      pixels[di + 2] = f[si + 2] ?? 0;
-      pixels[di + 3] = f[si + 3] ?? 1;
-    } else {
-      pixels[di]     = sRGBToLinear(((srcData[si] ?? 0) as number) / 255);
-      pixels[di + 1] = sRGBToLinear(((srcData[si + 1] ?? 0) as number) / 255);
-      pixels[di + 2] = sRGBToLinear(((srcData[si + 2] ?? 0) as number) / 255);
-      pixels[di + 3] = 1.0;
-    }
-  }
-  return pixels;
 }
 
 // ─── Method 3: WebGL CubeCamera + Cube-to-Equirect Capture ──────────────────
 
 /**
- * Capture a PMREM environment texture as an equirectangular Float32 image
- * using CubeCamera and cube-to-equirectangular conversion.
+ * Capture a PMREM environment texture as an equirectangular Float32 image.
  *
  * Strategy:
- *   1. Create an environment-only scene with a large inverted sphere that
- *      displays the PMREM environment map via MeshStandardMaterial.
- *   2. Use CubeCamera to capture 6 cube faces from inside the sphere.
- *   3. Render the cube faces to an equirectangular map using a fullscreen
- *      shader with standard samplerCube sampling.
- *   4. Read back Float32 pixels.
+ *   1. Create an inverted sphere that displays the PMREM env via MeshStandardMaterial
+ *   2. Use CubeCamera to capture 6 cube faces from inside
+ *   3. Render cube faces to equirectangular via a fullscreen cube-sampling shader
+ *   4. Read back Float32 pixels
  */
 function capturePMREMAsEquirect(
   renderer: THREE.WebGLRenderer,
@@ -326,12 +282,11 @@ function capturePMREMAsEquirect(
   const origOutputColorSpace = renderer.outputColorSpace;
   const currentRenderTarget = renderer.getRenderTarget();
 
-  // Disable tone mapping and color space conversion for raw HDR capture
+  // Disable tone mapping and color space for raw HDR capture
   renderer.toneMapping = THREE.NoToneMapping;
   renderer.toneMappingExposure = 1.0;
   renderer.outputColorSpace = THREE.LinearSRGBColorSpace;
 
-  // Use half-height as cube face size (quality vs speed balance)
   const cubeSize = Math.min(height, 1024);
 
   // Create cube render target (Float32 for HDR)
@@ -351,13 +306,9 @@ function capturePMREMAsEquirect(
   });
 
   try {
-    // ── Step 1: Create environment-only scene with inverted sphere ────────
+    // Step 1: Create environment-only scene with inverted sphere
     const envScene = new THREE.Scene();
 
-    // Large inverted sphere that shows the environment map on its inner surface.
-    // MeshStandardMaterial properly handles PMREM texture sampling (Three.js
-    // sets all required CUBEUV defines internally).
-    // roughness=0 gives sharp reflections (mip 0), metalness=0 for no tint.
     const sphereGeo = new THREE.SphereGeometry(50, 128, 64);
     const sphereMat = new THREE.MeshStandardMaterial({
       side: THREE.BackSide,
@@ -370,17 +321,16 @@ function capturePMREMAsEquirect(
     const sphere = new THREE.Mesh(sphereGeo, sphereMat);
     envScene.add(sphere);
 
-    // Ambient light so the material is "active" (MeshStandardMaterial needs
-    // some light to render, but envMap provides the visual content)
+    // Small ambient so MeshStandardMaterial is "active"
     const ambient = new THREE.AmbientLight(0xffffff, 0.001);
     envScene.add(ambient);
 
-    // ── Step 2: Capture with CubeCamera ───────────────────────────────────
+    // Step 2: Capture with CubeCamera
     const cubeCamera = new THREE.CubeCamera(0.1, 100, cubeRT);
     envScene.add(cubeCamera);
     cubeCamera.update(renderer, envScene);
 
-    // ── Step 3: Convert cube faces to equirectangular ────────────────────
+    // Step 3: Convert cube faces to equirectangular
     const convertScene = new THREE.Scene();
     const convertCamera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
 
@@ -415,9 +365,7 @@ function capturePMREMAsEquirect(
             sin(phi) * cos(theta)
           );
 
-          // Sample cube map (standard hardware cube map sampling)
           vec4 color = textureCube(tCubeMap, dir);
-
           gl_FragColor = vec4(color.rgb, 1.0);
         }
       `,
@@ -430,29 +378,20 @@ function capturePMREMAsEquirect(
     renderer.setRenderTarget(equirectRT);
     renderer.render(convertScene, convertCamera);
 
-    // ── Step 4: Read back pixels ─────────────────────────────────────────
+    // Step 4: Read back pixels
     const pixels = new Float32Array(width * height * 4);
     renderer.readRenderTargetPixels(equirectRT, 0, 0, width, height, pixels);
 
-    // WebGL readRenderTargetPixels returns bottom-to-top, flip to top-to-bottom
-    const rowSize = width * 4;
-    const halfHeight = Math.floor(height / 2);
-    const tempRow = new Float32Array(rowSize);
-    for (let y = 0; y < halfHeight; y++) {
-      const topIdx = y * rowSize;
-      const botIdx = (height - 1 - y) * rowSize;
-      tempRow.set(pixels.subarray(topIdx, topIdx + rowSize));
-      pixels.copyWithin(topIdx, botIdx, botIdx + rowSize);
-      pixels.set(tempRow, botIdx);
-    }
+    // Flip bottom-to-top → top-to-bottom
+    flipVertical(pixels, width, height);
 
-    // ── Cleanup ──────────────────────────────────────────────────────────
+    // Cleanup
     sphereGeo.dispose();
     sphereMat.dispose();
     quadGeo.dispose();
     quadMat.dispose();
 
-    // Verify we got meaningful data
+    // Verify
     let maxVal = 0;
     for (let i = 0; i < pixels.length; i += 4) {
       const m = Math.max(pixels[i], pixels[i + 1], pixels[i + 2]);
@@ -469,7 +408,6 @@ function capturePMREMAsEquirect(
     console.error('[LightForge HDRI] CubeCamera capture error:', err);
     return null;
   } finally {
-    // Restore renderer state
     renderer.toneMapping = origToneMapping;
     renderer.toneMappingExposure = origToneMappingExposure;
     renderer.outputColorSpace = origOutputColorSpace;
@@ -481,7 +419,6 @@ function capturePMREMAsEquirect(
 
 // ─── Method 4: Analytical Light Radiance (Fallback) ──────────────────────────
 
-/** Normalized light data extracted from a THREE.Scene. */
 interface ExtractedLight {
   type: 'point' | 'spot' | 'directional' | 'area' | 'hemisphere';
   color: THREE.Color;
@@ -675,19 +612,29 @@ function extractLightsFromScene(scene: THREE.Scene): ExtractedLight[] {
     child.getWorldPosition(worldPos);
 
     if (child instanceof THREE.PointLight) {
-      lights.push({ type: 'point', color: child.color.clone(), intensity: child.intensity, position: worldPos.clone(), decay: child.decay });
+      lights.push({
+        type: 'point', color: child.color.clone(), intensity: child.intensity,
+        position: worldPos.clone(), decay: child.decay,
+      });
       return;
     }
     if (child instanceof THREE.SpotLight) {
       const dir = new THREE.Vector3();
       child.getWorldDirection(dir);
-      lights.push({ type: 'spot', color: child.color.clone(), intensity: child.intensity, position: worldPos.clone(), direction: dir.clone(), angle: child.angle, penumbra: child.penumbra, decay: child.decay });
+      lights.push({
+        type: 'spot', color: child.color.clone(), intensity: child.intensity,
+        position: worldPos.clone(), direction: dir.clone(),
+        angle: child.angle, penumbra: child.penumbra, decay: child.decay,
+      });
       return;
     }
     if (child instanceof THREE.DirectionalLight) {
       const dir = new THREE.Vector3();
       child.getWorldDirection(dir);
-      lights.push({ type: 'directional', color: child.color.clone(), intensity: child.intensity, position: worldPos.clone(), direction: dir.clone() });
+      lights.push({
+        type: 'directional', color: child.color.clone(), intensity: child.intensity,
+        position: worldPos.clone(), direction: dir.clone(),
+      });
       return;
     }
     if (child instanceof THREE.RectAreaLight) {
@@ -695,11 +642,19 @@ function extractLightsFromScene(scene: THREE.Scene): ExtractedLight[] {
       const right = new THREE.Vector3(1, 0, 0).applyQuaternion(worldQuat);
       const up = new THREE.Vector3(0, 1, 0).applyQuaternion(worldQuat);
       const normal = new THREE.Vector3(0, 0, -1).applyQuaternion(worldQuat);
-      lights.push({ type: 'area', color: child.color.clone(), intensity: child.intensity, position: worldPos.clone(), width: child.width, height: child.height, right: right.clone(), up: up.clone(), normal: normal.clone() });
+      lights.push({
+        type: 'area', color: child.color.clone(), intensity: child.intensity,
+        position: worldPos.clone(), width: child.width, height: child.height,
+        right: right.clone(), up: up.clone(), normal: normal.clone(),
+      });
       return;
     }
     if (child instanceof THREE.HemisphereLight) {
-      lights.push({ type: 'hemisphere', color: child.color.clone(), intensity: child.intensity, position: worldPos.clone(), groundColor: child.groundColor?.clone() ?? new THREE.Color(0, 0, 0) });
+      lights.push({
+        type: 'hemisphere', color: child.color.clone(), intensity: child.intensity,
+        position: worldPos.clone(),
+        groundColor: child.groundColor?.clone() ?? new THREE.Color(0, 0, 0),
+      });
       return;
     }
   });
@@ -708,17 +663,13 @@ function extractLightsFromScene(scene: THREE.Scene): ExtractedLight[] {
 }
 
 /**
- * Generate HDRI analytically from scene lights (fallback when no environment texture exists).
+ * Generate HDRI analytically from scene lights (fallback).
  */
 async function generateAnalyticalHDRI(
   scene: THREE.Scene,
   width: number,
   height: number,
   capturePoint: THREE.Vector3,
-  includeEnv: boolean,
-  envTexture: THREE.Texture | null,
-  envIntensity: number,
-  envRotation: number,
 ): Promise<Float32Array> {
   const pixels = new Float32Array(width * height * 4);
   const lights = extractLightsFromScene(scene);
@@ -743,6 +694,7 @@ async function generateAnalyticalHDRI(
       pixels[idx + 3] = 1.0;
     }
 
+    // Yield to the event loop every 100 rows
     if (y % 100 === 0) {
       await new Promise<void>((resolve) => setTimeout(resolve, 0));
     }
@@ -754,12 +706,13 @@ async function generateAnalyticalHDRI(
 // ─── Encoding: RGBE (.hdr) ───────────────────────────────────────────────────
 
 /**
- * Encode Float32 RGBA pixel data into a Radiance RGBE .hdr file.
+ * Encode Float32 RGBA pixel data into a valid Radiance RGBE .hdr file.
  *
- * Uses UNCOMPRESSED RGBE format (not RLE) for maximum compatibility.
- * Header uses `FORMAT=32-bit_rgbe` (without `_rle`) to match the data format.
+ * Uses the standard RLE (run-length encoding) format with proper
+ * per-scanline headers, ensuring compatibility with Photoshop,
+ * Blender, HDRShop, and all other HDR readers.
  *
- * Input: RGBA Float32Array (4 floats/pixel, top-to-bottom, linear).
+ * Input:  RGBA Float32Array (4 floats/pixel, top-to-bottom, linear).
  * Output: Complete .hdr file as ArrayBuffer.
  */
 export function encodeHDR(
@@ -767,30 +720,130 @@ export function encodeHDR(
   width: number,
   height: number,
 ): ArrayBuffer {
-  // Use uncompressed format string (not rle) for compatibility
-  const headerText =
-    '#?RADIANCE\n' +
-    'SOFTWARE=LightForge Studio\n' +
-    'FORMAT=32-bit_rgbe\n' +  // uncompressed — matches our data layout
-    '\n' +
-    `-Y ${height} +X ${width}\n`;
-  const headerBytes = new TextEncoder().encode(headerText);
+  // ── Build header ─────────────────────────────────────────────────────────
+  const headerLines = [
+    '#?RADIANCE',
+    'SOFTWARE=LightForge Studio',
+    'FORMAT=32-bit_rle_rgbe',
+    '',
+    `-Y ${height} +X ${width}`,
+    '',
+  ];
+  const headerStr = headerLines.join('\n');
+  const headerBytes = new TextEncoder().encode(headerStr);
 
-  const pixelDataSize = width * height * 4;
-  const pixelData = new Uint8Array(pixelDataSize);
-
+  // ── Convert all pixels to RGBE bytes ─────────────────────────────────────
+  // rgbeData[y][x] = [R, G, B, E] as uint8
+  const rgbeData = new Uint8Array(width * height * 4);
   for (let i = 0; i < width * height; i++) {
-    const r = pixels[i * 4];
-    const g = pixels[i * 4 + 1];
-    const b = pixels[i * 4 + 2];
-    rgbFloatToRGBE(r, g, b, pixelData, i * 4);
+    const srcIdx = i * 4;
+    rgbFloatToRGBE(
+      pixels[srcIdx], pixels[srcIdx + 1], pixels[srcIdx + 2],
+      rgbeData, i * 4,
+    );
   }
 
-  const buffer = new ArrayBuffer(headerBytes.length + pixelDataSize);
+  // ── RLE encode scanlines ────────────────────────────────────────────────
+  // Pre-allocate a generous buffer for RLE output.
+  // Worst case: each scanline expands slightly for RLE overhead.
+  // Max RLE per scanline: 4 channels * (128 + 128 * 2) = ~1280 bytes per channel
+  // So max per scanline: 4 (header) + 4 * 1280 = ~5124 bytes
+  const maxRLEPerScanline = 4 + 4 * (128 + 128 * 2); // header + 4 channels worst case
+  const rleBuffer = new Uint8Array(height * maxRLEPerScanline);
+  let rleOffset = 0;
+
+  for (let y = 0; y < height; y++) {
+    // New RLE scanline header: 0x02, 0x02, width_hi, width_lo
+    rleBuffer[rleOffset++] = 0x02;
+    rleBuffer[rleOffset++] = 0x02;
+    rleBuffer[rleOffset++] = (width >> 8) & 0xFF;
+    rleBuffer[rleOffset++] = width & 0xFF;
+
+    // RLE encode each of the 4 channels (R, G, B, E)
+    for (let ch = 0; ch < 4; ch++) {
+      rleOffset += rleEncodeChannel(rgbeData, y * width * 4, ch, width, rleBuffer, rleOffset);
+    }
+  }
+
+  // ── Assemble final file ─────────────────────────────────────────────────
+  const totalSize = headerBytes.length + rleOffset;
+  const buffer = new ArrayBuffer(totalSize);
   const view = new Uint8Array(buffer);
   view.set(headerBytes, 0);
-  view.set(pixelData, headerBytes.length);
+  view.set(rleBuffer.subarray(0, rleOffset), headerBytes.length);
+
   return buffer;
+}
+
+/**
+ * RLE-encode one channel of one scanline into the output buffer.
+ *
+ * Radiance RLE format for a single channel:
+ *   - Run of identical bytes (3-128): write (count | 0x80), value  → 2 bytes
+ *   - Literal run (1-128 different bytes): write count, byte1..byteN  → 1+count bytes
+ *
+ * @param rgbeData  The full RGBE byte array
+ * @param rowOffset Byte offset to the start of this scanline's RGBE data
+ * @param channel   Channel index (0=R, 1=G, 2=B, 3=E)
+ * @param width     Number of pixels in the scanline
+ * @param out       Output buffer
+ * @param outOff    Current write offset in output buffer
+ * @returns Number of bytes written
+ */
+function rleEncodeChannel(
+  rgbeData: Uint8Array,
+  rowOffset: number,
+  channel: number,
+  width: number,
+  out: Uint8Array,
+  outOff: number,
+): number {
+  let written = 0;
+  let x = 0;
+
+  while (x < width) {
+    // Count the run of identical bytes starting at x
+    let runLen = 1;
+    const val = rgbeData[rowOffset + x * 4 + channel];
+    while (x + runLen < width && runLen < 128 && rgbeData[rowOffset + (x + runLen) * 4 + channel] === val) {
+      runLen++;
+    }
+
+    if (runLen >= 3) {
+      // Write run: count byte (0x80 | runLen), value byte
+      out[outOff + written++] = 0x80 | runLen;
+      out[outOff + written++] = val;
+      x += runLen;
+    } else {
+      // Collect a literal run of non-repeating bytes
+      let litLen = 0;
+      let litStart = x;
+
+      // Find how many literal bytes we can write (max 128)
+      while (litLen < 128 && x + litLen < width) {
+        // Check if starting a new run of 3+ identical bytes
+        if (litLen > 0) {
+          const nextVal = rgbeData[rowOffset + (x + litLen) * 4 + channel];
+          let futureRun = 1;
+          while (x + litLen + futureRun < width && futureRun < 3 &&
+                 rgbeData[rowOffset + (x + litLen + futureRun) * 4 + channel] === nextVal) {
+            futureRun++;
+          }
+          if (futureRun >= 3) break; // Stop literal, let the run be encoded separately
+        }
+        litLen++;
+      }
+
+      // Write literal: count byte, then litLen bytes
+      out[outOff + written++] = litLen;
+      for (let i = 0; i < litLen; i++) {
+        out[outOff + written++] = rgbeData[rowOffset + (litStart + i) * 4 + channel];
+      }
+      x += litLen;
+    }
+  }
+
+  return written;
 }
 
 /**
@@ -813,14 +866,18 @@ function rgbFloatToRGBE(
     return;
   }
 
+  // Compute exponent: largest power of 2 such that maxVal / 2^exp < 1.0
   let exp = Math.floor(Math.log2(maxVal)) + 1;
   const scaled = maxVal * Math.pow(2, -exp);
+
+  // Adjust exponent so that scaled is in [0.5, 1.0)
   if (scaled < 0.5) {
     exp--;
   } else if (scaled >= 1.0) {
     exp++;
   }
 
+  // Encode mantissa: scale each channel to [0, 255]
   const scale = Math.pow(2, -exp) * 256.0;
   out[off] = Math.max(0, Math.min(255, Math.floor(r * scale)));
   out[off + 1] = Math.max(0, Math.min(255, Math.floor(g * scale)));
@@ -831,10 +888,11 @@ function rgbFloatToRGBE(
 // ─── Encoding: OpenEXR (.exr) ────────────────────────────────────────────────
 
 /**
- * Encode Float32 RGBA pixel data into an OpenEXR .exr file.
+ * Encode Float32 RGBA pixel data into a valid OpenEXR 2.0 .exr file.
  *
- * Channels: B, G, R (alphabetical order, float32).
+ * Channels: B, G, R (alphabetical order, each float32).
  * Compression: NO_COMPRESSION (0).
+ * Version: 2 (includes ySampling in channel entries).
  * Input: RGBA Float32Array (4 floats/pixel, top-to-bottom, linear).
  * Output: Complete .exr file as ArrayBuffer.
  */
@@ -846,141 +904,194 @@ export function encodeEXR(
   const CHANNEL_NAMES = ['B', 'G', 'R'] as const;
   const PIXEL_TYPE_FLOAT = 2;
   const NUM_CHANNELS = 3;
-  const BYTES_PER_PIXEL = NUM_CHANNELS * 4;
-  const SCANLINE_DATA_SIZE = width * BYTES_PER_PIXEL;
+  const BYTES_PER_PIXEL = NUM_CHANNELS * 4; // 3 channels × 4 bytes
+  const SCANLINE_PIXEL_DATA_SIZE = width * BYTES_PER_PIXEL;
 
-  const intToBytes = (val: number): number[] => [
-    val & 0xff,
-    (val >>> 8) & 0xff,
-    (val >>> 16) & 0xff,
-    (val >>> 24) & 0xff,
-  ];
+  // ── Helper functions ────────────────────────────────────────────────────
+  const intToBytesLE = (val: number): Uint8Array => {
+    const buf = new ArrayBuffer(4);
+    new DataView(buf).setInt32(0, val, true); // little-endian
+    return new Uint8Array(buf);
+  };
 
-  const floatToBytes = (val: number): number[] => {
+  const floatToBytesLE = (val: number): Uint8Array => {
     const buf = new ArrayBuffer(4);
     new DataView(buf).setFloat32(0, val, true);
-    return [...new Uint8Array(buf)];
+    return new Uint8Array(buf);
   };
 
-  const writeName = (arr: number[], str: string): void => {
-    const bytes = new TextEncoder().encode(str);
-    for (const b of bytes) arr.push(b);
-    arr.push(0);
+  // Build a channel entry: name\0 + padding + 5 × int32 fields
+  const buildChannelEntry = (name: string): Uint8Array => {
+    const nameBytes = new TextEncoder().encode(name);
+    const nameWithNull = nameBytes.length + 1; // includes null terminator
+    const namePadded = nameWithNull + ((4 - (nameWithNull % 4)) % 4);
+
+    // 5 int32 fields: pixelType, pLinear, reserved, xSampling, ySampling
+    const entrySize = namePadded + 5 * 4;
+    const entry = new Uint8Array(entrySize);
+    const dv = new DataView(entry.buffer);
+
+    // Write name + null + padding
+    entry.set(nameBytes, 0);
+    // entry[nameBytes.length] is already 0 from Uint8Array initialization (null terminator)
+    // Padding bytes are also already 0
+
+    // Write channel fields (all little-endian int32)
+    let off = namePadded;
+    dv.setInt32(off, PIXEL_TYPE_FLOAT, true); off += 4; // pixel type = FLOAT
+    dv.setInt32(off, 0, true);             off += 4; // pLinear = 0
+    dv.setInt32(off, 0, true);             off += 4; // reserved = 0
+    dv.setInt32(off, 1, true);             off += 4; // xSampling = 1
+    dv.setInt32(off, 1, true);             off += 4; // ySampling = 1 (required for version 2)
+
+    return entry;
   };
 
-  const writeChannelEntry = (arr: number[], name: string): void => {
-    const bytes = new TextEncoder().encode(name);
-    for (const b of bytes) arr.push(b);
-    arr.push(0);
-    const nameLen = bytes.length + 1;
-    const pad = (4 - (nameLen % 4)) % 4;
-    for (let i = 0; i < pad; i++) arr.push(0);
-    for (const v of intToBytes(PIXEL_TYPE_FLOAT)) arr.push(v);
-    for (const v of intToBytes(0)) arr.push(v);
-    for (const v of intToBytes(1)) arr.push(v);
-    for (const v of intToBytes(1)) arr.push(v);
+  // Build an attribute: name\0 + type\0 + size(int32) + value + padding
+  const buildAttribute = (name: string, type: string, valueBytes: Uint8Array): Uint8Array => {
+    const nameBytes = new TextEncoder().encode(name);
+    const typeBytes = new TextEncoder().encode(type);
+    const valuePadLen = (4 - (valueBytes.length % 4)) % 4;
+
+    // OpenEXR spec: name (null-terminated, NO padding) + type (null-terminated, NO padding)
+    // + size (int32) + value (padded to 4-byte boundary)
+    const totalSize = nameBytes.length + 1 + typeBytes.length + 1 + 4 + valueBytes.length + valuePadLen;
+
+    const attr = new Uint8Array(totalSize);
+    const dv = new DataView(attr.buffer);
+    let off = 0;
+
+    // Name + null terminator (NO padding between name and type)
+    attr.set(nameBytes, off); off += nameBytes.length;
+    off += 1; // null terminator (already 0 from Uint8Array)
+
+    // Type + null terminator (NO padding between type and size)
+    attr.set(typeBytes, off); off += typeBytes.length;
+    off += 1; // null terminator
+
+    // Value size (int32 LE)
+    dv.setInt32(off, valueBytes.length, true); off += 4;
+
+    // Value bytes + padding to 4-byte boundary
+    attr.set(valueBytes, off); off += valueBytes.length;
+    // Value padding bytes already 0 from Uint8Array initialization
+
+    return attr;
   };
 
-  const writeAttrValue = (arr: number[], valueBytes: number[]): void => {
-    for (const v of intToBytes(valueBytes.length)) arr.push(v);
-    for (const b of valueBytes) arr.push(b);
-    const pad = (4 - (valueBytes.length % 4)) % 4;
-    for (let i = 0; i < pad; i++) arr.push(0);
-  };
-
-  // Build header
-  const hdr: number[] = [];
-
-  writeName(hdr, 'channels');
-  writeName(hdr, 'chlist');
-  const channelData: number[] = [];
+  // ── Build channel list attribute value ──────────────────────────────────
+  const channelEntries: Uint8Array[] = [];
   for (const chName of CHANNEL_NAMES) {
-    writeChannelEntry(channelData, chName);
+    channelEntries.push(buildChannelEntry(chName));
   }
-  channelData.push(0);
-  writeAttrValue(hdr, channelData);
+  // Null terminator for channel list
+  const nullTerminator = new Uint8Array(1); // single 0x00 byte
+  const channelListValue = concatUint8Arrays(...channelEntries, nullTerminator);
 
-  writeName(hdr, 'compression');
-  writeName(hdr, 'compression');
-  writeAttrValue(hdr, [0]);
+  // ── Build header attributes ─────────────────────────────────────────────
+  const compressionValue = new Uint8Array([0]); // NO_COMPRESSION = 0
 
-  writeName(hdr, 'dataWindow');
-  writeName(hdr, 'box2i');
-  writeAttrValue(hdr, [
-    ...intToBytes(0), ...intToBytes(0),
-    ...intToBytes(width - 1), ...intToBytes(height - 1),
-  ]);
+  const dataWindowValue = new Uint8Array(16);
+  const dwDv = new DataView(dataWindowValue.buffer);
+  dwDv.setInt32(0, 0, true);                     // xMin
+  dwDv.setInt32(4, 0, true);                     // yMin
+  dwDv.setInt32(8, width - 1, true);             // xMax
+  dwDv.setInt32(12, height - 1, true);           // yMax
 
-  writeName(hdr, 'displayWindow');
-  writeName(hdr, 'box2i');
-  writeAttrValue(hdr, [
-    ...intToBytes(0), ...intToBytes(0),
-    ...intToBytes(width - 1), ...intToBytes(height - 1),
-  ]);
+  const displayWindowValue = new Uint8Array(16);
+  const dpDv = new DataView(displayWindowValue.buffer);
+  dpDv.setInt32(0, 0, true);
+  dpDv.setInt32(4, 0, true);
+  dpDv.setInt32(8, width - 1, true);
+  dpDv.setInt32(12, height - 1, true);
 
-  writeName(hdr, 'lineOrder');
-  writeName(hdr, 'lineOrder');
-  writeAttrValue(hdr, [0]);
+  const lineOrderValue = new Uint8Array([0]); // INCREASING_Y
 
-  writeName(hdr, 'pixelAspectRatio');
-  writeName(hdr, 'float');
-  writeAttrValue(hdr, floatToBytes(1.0));
+  const pixelAspectRatioValue = floatToBytesLE(1.0);
 
-  writeName(hdr, 'screenWindowCenter');
-  writeName(hdr, 'v2f');
-  writeAttrValue(hdr, [...floatToBytes(0.0), ...floatToBytes(0.0)]);
+  const screenWindowCenterValue = concatUint8Arrays(floatToBytesLE(0.0), floatToBytesLE(0.0));
+  const screenWindowWidthValue = floatToBytesLE(1.0);
 
-  writeName(hdr, 'screenWindowWidth');
-  writeName(hdr, 'float');
-  writeAttrValue(hdr, floatToBytes(1.0));
+  // Build attributes
+  const attrs: Uint8Array[] = [
+    buildAttribute('channels', 'chlist', channelListValue),
+    buildAttribute('compression', 'compression', compressionValue),
+    buildAttribute('dataWindow', 'box2i', dataWindowValue),
+    buildAttribute('displayWindow', 'box2i', displayWindowValue),
+    buildAttribute('lineOrder', 'lineOrder', lineOrderValue),
+    buildAttribute('pixelAspectRatio', 'float', pixelAspectRatioValue),
+    buildAttribute('screenWindowCenter', 'v2f', screenWindowCenterValue),
+    buildAttribute('screenWindowWidth', 'float', screenWindowWidthValue),
+  ];
 
-  // End of header
-  hdr.push(0);
-  while (hdr.length % 8 !== 0) hdr.push(0);
+  // Concatenate all attributes + end-of-header null byte + padding to 8 bytes
+  const headerContent = concatUint8Arrays(...attrs);
+  const endOfHeader = new Uint8Array(1); // null terminator
+  const prePadding = concatUint8Arrays(headerContent, endOfHeader);
+  const headerPadLen = (8 - (prePadding.length % 8)) % 8;
+  const headerPadding = new Uint8Array(headerPadLen); // all zeros
+  const headerBlock = concatUint8Arrays(prePadding, headerPadding);
 
-  const fileHeaderSize = 8;
-  const headerSize = hdr.length;
-  const offsetTableSize = height * 8;
-  const scanlineDataStart = fileHeaderSize + headerSize + offsetTableSize;
-  const scanlineBlockSize = 4 + 4 + SCANLINE_DATA_SIZE;
+  // ── Compute file layout ─────────────────────────────────────────────────
+  const magicNumberSize = 8; // 4 bytes magic + 4 bytes version
+  const offsetTableSize = height * 8; // each offset is uint64
+  const scanlineDataStart = magicNumberSize + headerBlock.length + offsetTableSize;
 
-  // Offset table
-  const offsets: number[] = [];
+  // Each scanline: y(int32) + pixelDataSize(int32) + pixelData
+  const scanlineHeaderSize = 8; // 2 × int32
+  const scanlineTotalSize = scanlineHeaderSize + SCANLINE_PIXEL_DATA_SIZE;
+
+  // ── Build offset table ──────────────────────────────────────────────────
+  const offsetTable = new Uint8Array(offsetTableSize);
+  const otDv = new DataView(offsetTable.buffer);
   for (let y = 0; y < height; y++) {
-    offsets.push(scanlineDataStart + y * scanlineBlockSize);
+    const offset = scanlineDataStart + y * scanlineTotalSize;
+    // Write as uint64 LE (two uint32 values)
+    otDv.setUint32(y * 8, offset & 0xFFFFFFFF, true);         // low 32 bits
+    otDv.setUint32(y * 8 + 4, Math.floor(offset / 0x100000000), true); // high 32 bits
   }
 
-  // Scanline pixel data
-  const scanlines: number[] = [];
+  // ── Build scanline data ─────────────────────────────────────────────────
+  const scanlineDataSize = height * scanlineTotalSize;
+  const scanlineData = new Uint8Array(scanlineDataSize);
+  const slDv = new DataView(scanlineData.buffer);
+
   for (let y = 0; y < height; y++) {
-    for (const v of intToBytes(y)) scanlines.push(v);
-    for (const v of intToBytes(SCANLINE_DATA_SIZE)) scanlines.push(v);
+    const baseOff = y * scanlineTotalSize;
+
+    // y coordinate (int32 LE)
+    slDv.setInt32(baseOff, y, true);
+    // pixel data size (int32 LE)
+    slDv.setInt32(baseOff + 4, SCANLINE_PIXEL_DATA_SIZE, true);
+
+    // Pixel data: for each pixel, write B, G, R as float32 LE
+    const pixelStart = baseOff + scanlineHeaderSize;
     for (let x = 0; x < width; x++) {
       const srcIdx = (y * width + x) * 4;
-      for (const b of floatToBytes(pixels[srcIdx + 2])) scanlines.push(b); // B
-      for (const b of floatToBytes(pixels[srcIdx + 1])) scanlines.push(b); // G
-      for (const b of floatToBytes(pixels[srcIdx])) scanlines.push(b);     // R
+      const pixOff = pixelStart + x * BYTES_PER_PIXEL;
+
+      // B (channel index 2)
+      slDv.setFloat32(pixOff, pixels[srcIdx + 2], true);
+      // G (channel index 1)
+      slDv.setFloat32(pixOff + 4, pixels[srcIdx + 1], true);
+      // R (channel index 0)
+      slDv.setFloat32(pixOff + 8, pixels[srcIdx], true);
     }
   }
 
-  // Assemble file
-  const totalSize = fileHeaderSize + headerSize + offsetTableSize + scanlines.length;
+  // ── Assemble final file ─────────────────────────────────────────────────
+  const magicAndVersion = new Uint8Array(8);
+  const mvDv = new DataView(magicAndVersion.buffer);
+  mvDv.setUint32(0, 20000630, true); // magic number
+  mvDv.setUint32(4, 2, true);         // version 2, no flags
+
+  const totalSize = magicNumberSize + headerBlock.length + offsetTableSize + scanlineData.length;
   const file = new Uint8Array(totalSize);
-  const dv = new DataView(file.buffer);
 
-  dv.setUint32(0, 20000630, true);
-  dv.setUint32(4, 2, true);
-
-  file.set(new Uint8Array(hdr), 8);
-
-  const offsetBase = fileHeaderSize + headerSize;
-  for (let y = 0; y < height; y++) {
-    const off = offsets[y];
-    dv.setUint32(offsetBase + y * 8, off & 0xffffffff, true);
-    dv.setUint32(offsetBase + y * 8 + 4, Math.floor(off / 0x100000000) & 0xffffffff, true);
-  }
-
-  file.set(new Uint8Array(scanlines), scanlineDataStart);
+  file.set(magicAndVersion, 0);
+  file.set(headerBlock, magicNumberSize);
+  file.set(offsetTable, magicNumberSize + headerBlock.length);
+  file.set(scanlineData, scanlineDataStart);
 
   return file.buffer;
 }
@@ -1008,6 +1119,49 @@ function loadHDRITexture(buffer: ArrayBuffer): Promise<THREE.DataTexture | null>
       },
     );
   });
+}
+
+/**
+ * Flip a pixel buffer vertically (bottom-to-top → top-to-bottom).
+ * Operates in-place on RGBA Float32 data.
+ */
+function flipVertical(pixels: Float32Array, width: number, height: number): void {
+  const rowSize = width * 4;
+  const halfHeight = Math.floor(height / 2);
+  const tempRow = new Float32Array(rowSize);
+
+  for (let y = 0; y < halfHeight; y++) {
+    const topIdx = y * rowSize;
+    const botIdx = (height - 1 - y) * rowSize;
+    tempRow.set(pixels.subarray(topIdx, topIdx + rowSize));
+    pixels.copyWithin(topIdx, botIdx, botIdx + rowSize);
+    pixels.set(tempRow, botIdx);
+  }
+}
+
+/**
+ * Check if pixel data has any meaningful non-zero values.
+ */
+function hasValidData(pixels: Float32Array): boolean {
+  for (let i = 0; i < pixels.length; i += 4) {
+    const m = Math.max(pixels[i], pixels[i + 1], pixels[i + 2]);
+    if (m > 0.001) return true;
+  }
+  return false;
+}
+
+/**
+ * Concatenate multiple Uint8Arrays into one.
+ */
+function concatUint8Arrays(...arrays: Uint8Array[]): Uint8Array {
+  const totalLen = arrays.reduce((sum, a) => sum + a.length, 0);
+  const result = new Uint8Array(totalLen);
+  let off = 0;
+  for (const a of arrays) {
+    result.set(a, off);
+    off += a.length;
+  }
+  return result;
 }
 
 /**

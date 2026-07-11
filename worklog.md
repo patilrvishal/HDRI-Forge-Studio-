@@ -312,3 +312,34 @@ Stage Summary:
 - API unchanged: exportSceneAsHDR() and exportSceneAsEXR() signatures remain backward-compatible
 - All 3 environment scenarios handled: custom HDRI (with/without background), built-in presets, no environment
 
+---
+Task ID: 1
+Agent: Main Agent
+Task: Redesign complete HDRI and EXR export logic
+
+Work Log:
+- Analyzed screenshot: Photoshop error "Could not open .hdr because the file-format module cannot parse the file"
+- Read all 1038 lines of HDRIExporter.ts, engine.ts, TopMenubar.tsx, hdriDataStore.ts, EnvironmentLoader.ts
+- Identified 3 critical bugs:
+  1. HDR encoding: Missing scanline headers (no 0x02/0x02/wHi/wLo RLE prefix per scanline)
+  2. HDR format string: Used invalid "FORMAT=32-bit_rgbe" instead of "FORMAT=32-bit_rle_rgbe"
+  3. EXR encoding: Missing ySampling field in channel entries (required for version 2)
+  4. EXR encoding: buildAttribute incorrectly padded name/type strings (OpenEXR spec says no padding)
+- Completely rewrote HDRIExporter.ts with:
+  - Proper Radiance RLE encoding with per-scanline 0x02/0x02/wHi/wLo headers
+  - Per-channel RLE compression (runs of 3+ identical bytes encoded as count|value)
+  - Fixed EXR channel entries with 5 int32 fields (pixelType, pLinear, reserved, xSampling, ySampling)
+  - Fixed EXR attribute encoding: name\0 + type\0 + size + value + valuePad (no name/type padding)
+  - Improved Method 1 capture: uses WebGL shader render to Float32 target instead of fragile direct texture data access
+  - Added hasValidData() check to detect failed captures
+  - Added proper error handling with user-facing alerts
+- Wrote comprehensive test script (test_hdri_encoding.mjs) that validates file structures byte-by-byte
+- All tests pass: HDR VALID ✓, EXR VALID ✓
+- TypeScript compilation: 0 errors
+
+Stage Summary:
+- /home/z/my-project/lightstudio/src/three/HDRIExporter.ts: Completely rewritten (1038 → ~700 lines, cleaner)
+- /home/z/my-project/lightstudio/scripts/test_hdri_encoding.mjs: New test script
+- /home/z/my-project/download/test_hdri_export.hdr: Valid test HDR file
+- /home/z/my-project/download/test_hdri_export.exr: Valid test EXR file
+
