@@ -180,7 +180,7 @@ export const EnvironmentAssetsPanel: React.FC = () => {
 
       // Also set as the active custom HDRI in the scene
       const url = URL.createObjectURL(new Blob([arrayBuffer], { type: 'application/octet-stream' }));
-      setEnvironment({ hdri: url, presetId: '__custom__' });
+      setEnvironment({ hdri: url, presetId: '__custom__', showBackground: true });
 
       // Store raw data for legacy scene save compatibility
       setRawHDRIData(arrayBuffer, file.name);
@@ -198,7 +198,7 @@ export const EnvironmentAssetsPanel: React.FC = () => {
       selectAsset(id);
       const asset = useHDRIAssetStore.getState().assets.find((a) => a.id === id);
       if (asset?.blobUrl) {
-        setEnvironment({ hdri: asset.blobUrl, presetId: '__custom__' });
+        setEnvironment({ hdri: asset.blobUrl, presetId: '__custom__', showBackground: true });
       }
     },
     [selectAsset, setEnvironment],
@@ -234,7 +234,7 @@ export const EnvironmentAssetsPanel: React.FC = () => {
         const first = state.assets[0];
         selectAsset(first.id);
         if (first.blobUrl) {
-          setEnvironment({ hdri: first.blobUrl, presetId: '__custom__' });
+          setEnvironment({ hdri: first.blobUrl, presetId: '__custom__', showBackground: true });
         }
       }
     },

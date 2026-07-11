@@ -193,3 +193,25 @@ Stage Summary:
 - scene.background = original equirect (NEW — visible 360° backplate)
 - "Show BG" toggle in EnvironmentBrowser/ViewportToolbar controls visibility
 - Built-in presets still show flat color background (no equirect available)
+
+---
+Task ID: hdri-viewport-backplate-fix
+Agent: Main Agent
+Task: Fix HDRI not showing as 360° viewport backplate when loaded
+
+Work Log:
+- Analyzed screenshot: HDRI loaded and marked ACTIVE but viewport shows only black with grid
+- Traced full HDRI loading flow: EnvironmentAssetsPanel → sceneStore → Viewport.tsx → EnvironmentLoader
+- Identified root cause: `showBackground` defaults to `false` in DEFAULT_SCENE_STATE
+- Every code path that sets `presetId: '__custom__'` was missing `showBackground: true`
+- This caused `setBackgroundFromEnv(scene, false)` → `scene.background = null` (backplate hidden)
+
+Stage Summary:
+- Fixed 6 locations across 3 files:
+  1. EnvironmentAssetsPanel.tsx `handleUpload` — added `showBackground: true`
+  2. EnvironmentAssetsPanel.tsx `handleSelectAsset` — added `showBackground: true`
+  3. EnvironmentAssetsPanel.tsx `handleRemoveAsset` fallback — added `showBackground: true`
+  4. EnvironmentBrowser.tsx `handleFileChange` — added `showBackground: true`
+  5. EnvironmentBrowser.tsx custom HDRI grid click — added `showBackground: true`
+  6. Viewport.tsx scene-restore effect — force `showBackground: true` when restoring custom HDRI
+- TypeScript compilation: 0 errors

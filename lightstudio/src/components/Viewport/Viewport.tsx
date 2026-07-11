@@ -445,9 +445,13 @@ export const Viewport: React.FC<ViewportProps> = ({ sceneManagerRef, onScreensho
       const url = URL.createObjectURL(blob);
       el.loadHDRI(url, sm.pmremGenerator)
         .then((envTexture) => {
-          el.setEnvironmentTexture(sm.scene, envTexture, useSceneStore.getState().environment.intensity);
-          // Restore 360° HDRI backplate visibility
-          el.setBackgroundFromEnv(sm.scene, useSceneStore.getState().environment.showBackground);
+          const envState = useSceneStore.getState().environment;
+          el.setEnvironmentTexture(sm.scene, envTexture, envState.intensity);
+          // Restore 360° HDRI backplate — always show when custom HDRI is loaded
+          if (!envState.showBackground) {
+            useSceneStore.getState().setEnvironment({ showBackground: true });
+          }
+          el.setBackgroundFromEnv(sm.scene, true);
         })
         .catch(() => {
           // Fallback to neutral studio

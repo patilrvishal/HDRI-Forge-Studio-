@@ -118,7 +118,7 @@ const EnvironmentBrowser: React.FC<EnvironmentBrowserProps> = ({ onClose, onPres
         }
         // Create blob URL for 3D scene loading
         const url = URL.createObjectURL(file);
-        setEnvironment({ hdri: url, presetId: '__custom__' });
+        setEnvironment({ hdri: url, presetId: '__custom__', showBackground: true });
 
         // Also add to the HDRI asset store so it appears in the Environment panel
         try {
@@ -329,7 +329,7 @@ const EnvironmentBrowser: React.FC<EnvironmentBrowserProps> = ({ onClose, onPres
                       onClick={() => {
                         useHDRIAssetStore.getState().selectAsset(asset.id);
                         if (asset.blobUrl) {
-                          setEnvironment({ hdri: asset.blobUrl, presetId: '__custom__' });
+                          setEnvironment({ hdri: asset.blobUrl, presetId: '__custom__', showBackground: true });
                         }
                       }}
                       style={{
