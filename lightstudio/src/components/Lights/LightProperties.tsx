@@ -6,7 +6,7 @@ import { Toggle } from '../UI/Toggle';
 import { NumericInput } from '../UI/NumericInput';
 import { Dropdown } from '../UI/Dropdown';
 import { ColorPicker } from '../UI/ColorPicker';
-import { sphericalToCartesian } from '../../utils/math';
+import { sphericalToCartesian, cartesianToSpherical } from '../../utils/math';
 import { colorProfileToHex, hexToKelvin, kelvinToHex } from '../../utils/colorConversion';
 
 const LIGHT_TYPE_OPTIONS: Array<{ value: string; label: string }> = [
@@ -120,7 +120,9 @@ export const LightProperties: React.FC = () => {
   const handleSphericalChange = useCallback(
     (key: 'lat' | 'lng' | 'radius' | 'height', value: number) => {
       if (!light || !Number.isFinite(value)) return;
-      const newSpherical = { ...light.transform.spherical, [key]: value };
+      // Start from safe current spherical values to avoid propagating NaN
+      const base = safeSpherical;
+      const newSpherical = { ...base, [key]: value };
       const cart = sphericalToCartesian(
         newSpherical.lat,
         newSpherical.lng,
@@ -132,18 +134,21 @@ export const LightProperties: React.FC = () => {
         position: cart,
       });
     },
-    [light, updateLightTransform],
+    [light, updateLightTransform, safeSpherical],
   );
 
   const handlePositionChange = useCallback(
     (axis: 'x' | 'y' | 'z', value: number) => {
       if (!light || !Number.isFinite(value)) return;
-      const newPos = { ...light.transform.position, [axis]: value };
+      const newPos = { ...safePosition, [axis]: value };
+      // Recalculate spherical from the new Cartesian position to keep them in sync
+      const sph = cartesianToSpherical(newPos.x, newPos.y, newPos.z);
       updateLightTransform(light.id, {
         position: newPos,
+        spherical: { lat: sph.lat, lng: sph.lng, radius: sph.radius, height: sph.height },
       });
     },
-    [light, updateLightTransform],
+    [light, updateLightTransform, safePosition],
   );
 
   const handleRotationChange = useCallback(

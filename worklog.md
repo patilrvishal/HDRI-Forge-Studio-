@@ -84,3 +84,44 @@ Stage Summary:
 - RectAreaLight uses 16x16 sampling grid for analytical evaluation
 - Backward-compatible API preserved: exportSceneAsHDR/EXR signatures unchanged
 - File: /home/z/my-project/lightstudio/src/three/HDRIExporter.ts
+
+---
+Task ID: 1
+Agent: Main Agent
+Task: Carpet Material Parameters — Verify sheen/sheenRoughness/sheenColor implementation
+
+Work Log:
+- Read src/types/MaterialEditor.ts — sheen, sheenRoughness, sheenColor already in PBRMaterialState
+- Read src/components/Materials/MaterialEditorPanel.tsx — "Fabric / Carpet" section with 3 PROP_ROWS already exists
+- Read src/three/MaterialManager.ts — sheen properties already applied to MeshPhysicalMaterial (lines 325-327)
+- Read src/store/materialEditorStore.ts — exportMaterials/importMaterials handles sheen correctly
+- Confirmed all 3 sheen params are fully functional: type → store → UI → MaterialManager → Three.js
+
+Stage Summary:
+- NO CHANGES NEEDED — carpet/fabric sheen parameters were already fully implemented
+- sheen (0-1), sheenRoughness (0-1), sheenColor (hex) all working end-to-end
+- "Fabric / Carpet" section in MaterialEditorPanel is defaultExpanded: true
+
+---
+Task ID: 2
+Agent: Main Agent
+Task: Fix NaN in LightProperties slider (cartesianToSpherical bidirectional sync)
+
+Work Log:
+- Found cartesianToSpherical in src/utils/math.ts — already has NaN guards for lat/lng
+- Found LightProperties.tsx — has safeSpherical with Number.isFinite guards
+- Identified ROOT CAUSE: handlePositionChange (XYZ input) updated position WITHOUT recalculating spherical
+  → spherical became stale → when user touched spherical slider, stale values could include initial NaN
+- Also: handleSphericalChange read from light.transform.spherical (raw, potentially stale) instead of safeSpherical
+- Fixed handleSphericalChange: now spreads from safeSpherical (NaN-guarded) instead of raw light.transform.spherical
+- Fixed handlePositionChange: now calls cartesianToSpherical to recalculate spherical from new XYZ position
+- Added cartesianToSpherical import
+- Both handlers now maintain bidirectional sync: position ↔ spherical always consistent
+- Verified tsc --strict --noEmit = 0 errors
+
+Stage Summary:
+- File: /home/z/my-project/lightstudio/src/components/Lights/LightProperties.tsx
+- Bug: XYZ position changes didn't sync back to spherical → stale/NaN values in spherical sliders
+- Fix: handlePositionChange now recalculates spherical via cartesianToSpherical
+- Fix: handleSphericalChange now reads from safeSpherical (NaN-guarded) instead of raw store
+- Result: Position ↔ Spherical always bidirectionally synced, NaN cannot propagate
