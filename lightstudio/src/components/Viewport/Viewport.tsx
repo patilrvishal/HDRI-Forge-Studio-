@@ -341,12 +341,20 @@ export const Viewport: React.FC<ViewportProps> = ({ sceneManagerRef, onScreensho
     };
   }, [backplate, backplateOpacity, sceneManagerRef]);
 
-  // Sync environment background (only when no backplate)
+  // Sync environment background (only when no backplate and no custom HDRI backplate)
   useEffect(() => {
     const sm = sceneManagerRef.current;
+    const el = envLoaderRef.current;
     if (!sm || backplate) return; // Skip if backplate is active
+
+    // If a custom HDRI is loaded, let it manage the background via setBackgroundFromEnv
+    if (environment.presetId === '__custom__' && el?.getEquirectTexture()) {
+      el.setBackgroundFromEnv(sm.scene, environment.showBackground);
+      return;
+    }
+
     sm.setBackground(environment.background, environment.showBackground);
-  }, [environment.background, environment.showBackground, sceneManagerRef, backplate]);
+  }, [environment.background, environment.showBackground, environment.presetId, sceneManagerRef, envLoaderRef, backplate]);
 
   // Sync ground settings (reflections, fade, color, PBR)
   useEffect(() => {
@@ -363,6 +371,10 @@ export const Viewport: React.FC<ViewportProps> = ({ sceneManagerRef, onScreensho
 
     // Skip custom HDRI — handled by the separate effect below
     if (environment.presetId === '__custom__') return;
+
+    // Built-in presets: clear any custom equirect, no 360° background
+    el.clearEquirectTexture();
+    el.setBackgroundFromEnv(sm.scene, false);
 
     const preset = getHDRIPresetById(environment.presetId);
     if (!preset) return;
@@ -381,6 +393,8 @@ export const Viewport: React.FC<ViewportProps> = ({ sceneManagerRef, onScreensho
       el.loadHDRI(environment.hdri, sm.pmremGenerator)
         .then((envTexture) => {
           el.setEnvironmentTexture(sm.scene, envTexture, environment.intensity);
+          // Show the HDRI as a 360° backplate in the viewport
+          el.setBackgroundFromEnv(sm.scene, environment.showBackground);
         })
         .catch(() => {
           // Fallback to neutral studio on error
@@ -390,8 +404,11 @@ export const Viewport: React.FC<ViewportProps> = ({ sceneManagerRef, onScreensho
             el.setEnvironmentTexture(sm.scene, envTexture, environment.intensity);
           }
         });
+    } else if (environment.presetId !== '__custom__') {
+      // Not custom — clear any HDRI backplate
+      el.setBackgroundFromEnv(sm.scene, false);
     }
-  }, [environment.presetId, environment.hdri, environment.intensity, sceneManagerRef, envLoaderRef]);
+  }, [environment.presetId, environment.hdri, environment.intensity, environment.showBackground, sceneManagerRef, envLoaderRef]);
 
   // Restore model from scene file (triggered when _pendingModelDataBase64 is set)
   useEffect(() => {
@@ -429,6 +446,8 @@ export const Viewport: React.FC<ViewportProps> = ({ sceneManagerRef, onScreensho
       el.loadHDRI(url, sm.pmremGenerator)
         .then((envTexture) => {
           el.setEnvironmentTexture(sm.scene, envTexture, useSceneStore.getState().environment.intensity);
+          // Restore 360° HDRI backplate visibility
+          el.setBackgroundFromEnv(sm.scene, useSceneStore.getState().environment.showBackground);
         })
         .catch(() => {
           // Fallback to neutral studio

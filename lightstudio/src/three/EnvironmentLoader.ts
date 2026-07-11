@@ -5,6 +5,8 @@ import type { HDRIPreset, EnvPanel } from '../types/Environment';
 export class EnvironmentLoader {
   private rgbeLoader: RGBELoader;
   private currentEnvTexture: THREE.Texture | null = null;
+  /** The original equirectangular texture (used as scene.background for 360° backplate) */
+  private currentEquirectTexture: THREE.Texture | null = null;
   private cache = new Map<string, THREE.Texture>();
 
   constructor() {
@@ -82,7 +84,11 @@ export class EnvironmentLoader {
     return envTexture;
   }
 
-  /** Load a real .hdr/.hdri file from a URL or File object */
+  /**
+   * Load a real .hdr/.hdri file from a URL or File object.
+   * Returns the PMREM-processed texture for scene.environment.
+   * Also stores the original equirectangular texture for use as scene.background.
+   */
   loadHDRI(
     source: string | File,
     pmremGenerator: THREE.PMREMGenerator,
@@ -95,7 +101,9 @@ export class EnvironmentLoader {
         (texture) => {
           texture.mapping = THREE.EquirectangularReflectionMapping;
           const envMap = pmremGenerator.fromEquirectangular(texture).texture;
-          texture.dispose();
+
+          // Keep the original equirect for scene.background (360° backplate)
+          this.setEquirectTexture(texture);
 
           if (typeof source === 'object') {
             URL.revokeObjectURL(url);
@@ -144,8 +152,36 @@ export class EnvironmentLoader {
     });
   }
 
+  /** Get the original equirectangular texture (for scene.background). */
+  getEquirectTexture(): THREE.Texture | null {
+    return this.currentEquirectTexture;
+  }
+
   getCurrentEnvTexture(): THREE.Texture | null {
     return this.currentEnvTexture;
+  }
+
+  /**
+   * Set the scene.background to the current equirectangular texture (360° HDRI backplate).
+   * Pass null to clear the HDRI background (revert to solid color).
+   */
+  setBackgroundFromEnv(
+    scene: THREE.Scene,
+    show: boolean,
+  ): void {
+    if (show && this.currentEquirectTexture) {
+      scene.background = this.currentEquirectTexture;
+    } else {
+      scene.background = null;
+    }
+  }
+
+  /** Clear the equirect texture (e.g., when switching to a built-in preset). */
+  clearEquirectTexture(): void {
+    if (this.currentEquirectTexture) {
+      this.currentEquirectTexture.dispose();
+      this.currentEquirectTexture = null;
+    }
   }
 
   clearCache(): void {
@@ -157,6 +193,7 @@ export class EnvironmentLoader {
 
   dispose(): void {
     this.clearCache();
+    this.clearEquirectTexture();
     if (this.currentEnvTexture) {
       this.currentEnvTexture.dispose();
       this.currentEnvTexture = null;
@@ -180,6 +217,13 @@ export class EnvironmentLoader {
       }
     }
     this.currentEnvTexture = texture;
+  }
+
+  private setEquirectTexture(texture: THREE.Texture): void {
+    if (this.currentEquirectTexture && this.currentEquirectTexture !== texture) {
+      this.currentEquirectTexture.dispose();
+    }
+    this.currentEquirectTexture = texture;
   }
 
   /** Create a 1x1 placeholder texture (used for "None" preset) */

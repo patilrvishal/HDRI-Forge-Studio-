@@ -163,3 +163,33 @@ Stage Summary:
 - Bug 2 (8MB file size): NOT A BUG — 2048×1024 × 4 bytes/pixel = 8.0 MB is correct for RGBE
 - Test verifies: Max=118,564, True HDR=YES, 2.0% non-black pixels
 - Lights are now visible at all resolutions (512 to 4096)
+
+---
+Task ID: 6
+Agent: Main Agent
+Task: Show loaded HDRI as 360° viewport backplate (sky dome)
+
+Work Log:
+- Identified root cause: EnvironmentLoader.loadHDRI() disposed the original equirect texture after PMREM processing — only scene.environment (reflections) was set, never scene.background (visible sky)
+- Modified EnvironmentLoader.ts:
+  1. Added currentEquirectTexture field to store original equirect
+  2. loadHDRI() no longer disposes the equirect — stores it via setEquirectTexture()
+  3. Added getEquirectTexture() — returns the original equirect
+  4. Added setBackgroundFromEnv(scene, show) — sets scene.background to equirect when show=true
+  5. Added clearEquirectTexture() — disposes and clears when switching to preset
+  6. dispose() now also clears equirect
+- Modified Viewport.tsx:
+  1. Built-in preset effect: calls clearEquirectTexture() + setBackgroundFromEnv(false) to clear any HDRI backplate
+  2. Custom HDRI loading effect: after loadHDRI, calls setBackgroundFromEnv(scene, showBackground)
+  3. Scene-file HDRI restore effect: same — calls setBackgroundFromEnv after loading
+  4. Background sync effect: when custom HDRI is loaded, delegates to setBackgroundFromEnv instead of flat color
+- The existing "Show BG" toggle (EnvironmentBrowser + ViewportToolbar) now controls the 360° HDRI backplate visibility
+- Verified tsc --strict --noEmit = 0 errors
+
+Stage Summary:
+- Files: src/three/EnvironmentLoader.ts, src/components/Viewport/Viewport.tsx
+- Custom HDRI files now display as a 360° equirectangular sky dome in the viewport
+- scene.environment = PMREM (for PBR reflections, unchanged)
+- scene.background = original equirect (NEW — visible 360° backplate)
+- "Show BG" toggle in EnvironmentBrowser/ViewportToolbar controls visibility
+- Built-in presets still show flat color background (no equirect available)
