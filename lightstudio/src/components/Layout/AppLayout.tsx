@@ -12,6 +12,7 @@ import { MaterialEditorPanel } from '../Materials/MaterialEditorPanel';
 import { ViewportDesignPanel } from '../Viewport/ViewportDesignPanel';
 import { RenderSettingsPanel } from '../Settings/RenderSettingsPanel';
 import { ResizeHandle } from '../UI/ResizeHandle';
+import { ErrorBoundary } from '../UI/ErrorBoundary';
 import { useUIStore, type PanelKey } from '../../store/uiStore';
 import { useSceneStore } from '../../store/sceneStore';
 import { useLightsStore } from '../../store/lightsStore';
@@ -339,7 +340,9 @@ export const AppLayout: React.FC = () => {
               ) : leftTab === 'environment' ? (
                 <EnvironmentAssetsPanel />
               ) : (
-                <SceneHierarchy sceneRef={sceneRef} />
+                <ErrorBoundary>
+                  <SceneHierarchy sceneRef={sceneRef} />
+                </ErrorBoundary>
               )}
             </div>
           </div>
@@ -525,7 +528,9 @@ export const AppLayout: React.FC = () => {
             <div className="panel-body" style={{ overflow: 'hidden', padding: 0, display: 'flex', flexDirection: 'column' }}>
               {rightTab === 'properties' && (
                 <div style={{ flex: 1, overflow: 'hidden' }}>
-                  <DynamicPropertiesPanel sceneRef={sceneRef} />
+                  <ErrorBoundary>
+                    <DynamicPropertiesPanel sceneRef={sceneRef} />
+                  </ErrorBoundary>
                 </div>
               )}
               {rightTab === 'preview' && (

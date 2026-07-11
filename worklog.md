@@ -240,3 +240,27 @@ Stage Summary:
 - Files: src/components/Properties/DynamicPropertiesPanel.tsx (NEW), src/components/Layout/AppLayout.tsx, src/three/LightManager.ts, src/components/Scene/SceneHierarchy.tsx
 - Right panel now dynamically updates based on hierarchy selection type
 - Zero new TypeScript errors
+
+---
+Task ID: 2
+Agent: Main Agent
+Task: Fix crash when clicking options in Scene Hierarchy panel
+
+Work Log:
+- Analyzed screenshot: user clicks filter buttons (All/Mesh/Light/Camera/Group) or tree items in Scene hierarchy → app crashes to white screen
+- Root cause analysis: The newly added DynamicPropertiesPanel (638 lines) had no error handling; any runtime render error crashes the entire app since there was no ErrorBoundary
+- Added defensive coding to prevent null/undefined access in mesh info extraction (material arrays, geometry attributes)
+- Added try-catch wrappers in DynamicPropertiesPanel render logic, useMemo hooks, and useEffect hooks
+- Added same defensive guards to SceneHierarchy's inline ObjectPropertiesPanel mesh info section
+- Created new ErrorBoundary component (src/components/UI/ErrorBoundary.tsx) with retry capability and error display
+- Wrapped DynamicPropertiesPanel and SceneHierarchy in ErrorBoundary in AppLayout
+- Fixed PostCSS dev server crash: parent directory's postcss.config.mjs (for Next.js project) was being picked up by Vite, causing "Invalid PostCSS Plugin" error. Changed vite.config.ts to use inline PostCSS config object instead of file path
+- Verified: vite build passes (133 modules), dev server starts clean (no PostCSS error), HTTP 200
+
+Stage Summary:
+- New file: src/components/UI/ErrorBoundary.tsx
+- Modified: src/components/Layout/AppLayout.tsx (ErrorBoundary wrappers)
+- Modified: src/components/Properties/DynamicPropertiesPanel.tsx (defensive try-catch, null guards)
+- Modified: src/components/Scene/SceneHierarchy.tsx (defensive mesh info extraction)
+- Modified: vite.config.ts (inline PostCSS config to avoid parent config conflict)
+- App no longer crashes to white screen; errors are caught and displayed with retry option

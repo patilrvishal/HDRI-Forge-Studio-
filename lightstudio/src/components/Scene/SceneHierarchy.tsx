@@ -1292,17 +1292,17 @@ const ObjectPropertiesPanel: React.FC<{
   // ── Mesh info ──
   let meshInfo: React.ReactNode = null;
   if (selectedObj instanceof THREE.Mesh) {
+    try {
     const geo = selectedObj.geometry;
-    const verts = geo.attributes.position ? geo.attributes.position.count : 0;
-    const tris = geo.index ? geo.index.count / 3 : verts / 3;
+    const verts = geo && geo.attributes && geo.attributes.position ? geo.attributes.position.count : 0;
+    const tris = geo && geo.index ? geo.index.count / 3 : verts / 3;
     const mat = selectedObj.material;
-    const matNames = (Array.isArray(mat) ? mat : [mat])
-      .map((m) => m.name || 'unnamed')
-      .join(', ');
-    const matType = (Array.isArray(mat) ? mat[0] : mat)?.type || '\u2014';
-    const hasVertexColors = !!geo.attributes.color;
-    const hasUVs = !!geo.attributes.uv;
-    const hasNormals = !!geo.attributes.normal;
+    const matArr = mat ? (Array.isArray(mat) ? mat.filter(Boolean) : [mat]) : [];
+    const matNames = matArr.length > 0 ? matArr.map((m) => m.name || 'unnamed').join(', ') : 'unnamed';
+    const matType = matArr.length > 0 ? (matArr[0])?.type || '\u2014' : '\u2014';
+    const hasVertexColors = geo && geo.attributes ? !!geo.attributes.color : false;
+    const hasUVs = geo && geo.attributes ? !!geo.attributes.uv : false;
+    const hasNormals = geo && geo.attributes ? !!geo.attributes.normal : false;
 
     // Get bounding box
     geo.computeBoundingBox();
@@ -1346,6 +1346,7 @@ const ObjectPropertiesPanel: React.FC<{
         />
       </CollapsibleSection>
     );
+    } catch (_) { meshInfo = null; }
   }
 
   // ── Light info ──

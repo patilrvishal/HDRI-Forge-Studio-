@@ -366,23 +366,36 @@ const MeshProperties: React.FC<{
     setTick((n) => n + 1);
   };
 
-  // Mesh info
+  // Mesh info — defensive guards for missing geometry/material
   const geo = obj.geometry;
-  const verts = geo.attributes.position ? geo.attributes.position.count : 0;
-  const tris = geo.index ? geo.index.count / 3 : verts / 3;
-  const mat = obj.material;
-  const matNames = (Array.isArray(mat) ? mat : [mat])
-    .map((m) => m.name || 'unnamed')
-    .join(', ');
-  const matType = (Array.isArray(mat) ? mat[0] : mat)?.type || '\u2014';
-  const hasVertexColors = !!geo.attributes.color;
-  const hasUVs = !!geo.attributes.uv;
-  const hasNormals = !!geo.attributes.normal;
-
-  geo.computeBoundingBox();
-  const bb = geo.boundingBox;
+  let verts = 0;
+  let tris = 0;
+  let matNames = 'unnamed';
+  let matType = '\u2014';
+  let hasVertexColors = false;
+  let hasUVs = false;
+  let hasNormals = false;
   const size = new THREE.Vector3();
-  if (bb) bb.getSize(size);
+
+  try {
+    if (geo && geo.attributes) {
+      verts = geo.attributes.position ? geo.attributes.position.count : 0;
+      tris = geo.index ? geo.index.count / 3 : verts / 3;
+      hasVertexColors = !!geo.attributes.color;
+      hasUVs = !!geo.attributes.uv;
+      hasNormals = !!geo.attributes.normal;
+
+      try { geo.computeBoundingBox(); } catch (_) { /* ignore */ }
+      const bb = geo.boundingBox;
+      if (bb) bb.getSize(size);
+    }
+    const mat = obj.material;
+    if (mat) {
+      const matArr = Array.isArray(mat) ? mat.filter(Boolean) : [mat];
+      matNames = matArr.map((m) => m.name || 'unnamed').join(', ');
+      matType = (matArr[0])?.type || '\u2014';
+    }
+  } catch (_) { /* use defaults */ }
 
   const childCount = obj.children.filter((c) => !c.userData.isGrid && !c.userData.isProxy).length;
 
@@ -564,43 +577,53 @@ export const DynamicPropertiesPanel: React.FC<DynamicPropertiesPanelProps> = ({ 
 
   // Find the selected Three.js object from the scene
   const selectedObj = useMemo(() => {
-    if (!selectedId || !sceneRef.current) return null;
-    return findObjectByUuid(sceneRef.current, selectedId);
+    try {
+      if (!selectedId || !sceneRef.current) return null;
+      return findObjectByUuid(sceneRef.current, selectedId);
+    } catch (_) {
+      return null;
+    }
   }, [selectedId, sceneRef.current]);
 
   const nodeType = useMemo(() => {
-    if (!selectedObj) return null;
-    return getNodeType(selectedObj);
+    try {
+      if (!selectedObj) return null;
+      return getNodeType(selectedObj);
+    } catch (_) {
+      return 'other';
+    }
   }, [selectedObj]);
 
   // Bridge: when a light is selected in hierarchy, sync lightsStore.selectedLightId
   // Also auto-switch to Properties tab
   useEffect(() => {
-    if (!selectedObj || nodeType !== 'light') return;
-    const lightId = selectedObj.userData.lightId as string | undefined;
-    if (lightId) {
-      selectLight(lightId);
-    }
-    setRightPanelTab('properties');
-    showPanel('rightPanel');
+    try {
+      if (!selectedObj || nodeType !== 'light') return;
+      const lightId = selectedObj.userData.lightId as string | undefined;
+      if (lightId) {
+        selectLight(lightId);
+      }
+      setRightPanelTab('properties');
+      showPanel('rightPanel');
+    } catch (_) { /* ignore sync errors */ }
   }, [selectedId, nodeType, selectedObj, selectLight, setRightPanelTab, showPanel]);
 
   // Auto-switch to Properties tab when any non-light object is selected
   useEffect(() => {
-    if (!selectedId || !nodeType) return;
-    if (nodeType !== 'light') {
-      setRightPanelTab('properties');
-      showPanel('rightPanel');
-    }
+    try {
+      if (!selectedId || !nodeType) return;
+      if (nodeType !== 'light') {
+        setRightPanelTab('properties');
+        showPanel('rightPanel');
+      }
+    } catch (_) { /* ignore */ }
   }, [selectedId]);
 
   // ── Render Logic ──
-
+  try {
   // Priority 1: Hierarchy has a selection -> route by object type
   if (selectedObj && nodeType) {
     if (nodeType === 'light') {
-      // Light selected in hierarchy -> render full LightProperties
-      // (lightsStore.selectedLightId was synced above)
       return (
         <div style={{ flex: 1, overflowY: 'auto' }}>
           <LightProperties />
@@ -635,4 +658,9 @@ export const DynamicPropertiesPanel: React.FC<DynamicPropertiesPanelProps> = ({ 
 
   // No selection at all
   return <EmptyState />;
+  } catch (err) {
+    // Last resort: if anything in the render logic throws, show empty state
+    console.error('[DynamicPropertiesPanel] Render error:', err);
+    return <EmptyState />;
+  }
 };
