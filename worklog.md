@@ -285,3 +285,30 @@ Stage Summary:
 - TreeNode: restructured to call all 14 hooks (8 useSceneHierarchyStore + 2 useState + 2 useRef + 12 useCallback + 1 useMemo) before conditional returns
 - ObjectPropertiesPanel: moved useSceneHierarchyStore hook before early return
 - All filter buttons (All/Mesh/Light/Camera/Group), search, tree item clicks, drag-and-drop now work without crashing
+
+---
+Task ID: 2
+Agent: Main Agent
+Task: Redesign complete HDRI and EXR export logic to fix white/blank exported files
+
+Work Log:
+- Analyzed uploaded screenshot showing completely white exported HDRI
+- Read all HDRI/EXR export related files: HDRIExporter.ts, ImageExporter.ts, Exporter.ts, SceneExporter.ts, RenderJob.ts, hdriDataStore.ts, hdriAssetStore.ts, ExportDialog.tsx, FinalRenderPanel.tsx, TopMenubar.tsx, EnvironmentLoader.ts, SceneManager.ts, Viewport.tsx
+- Identified root causes: (1) getRawHDRIData() returns null for built-in presets so no env contribution, (2) analytical-only approach cant capture environment, (3) FORMAT=32-bit_rle_rgbe header but uncompressed data, (4) hardcoded intensity/rotation values
+- Completely rewrote HDRIExporter.ts with 4-tier capture strategy:
+  - Method 1: Direct texture pixel read from scene.background (custom HDRI with showBackground=true)
+  - Method 2: Load raw HDRI data from store via RGBELoader (custom HDRI with showBackground=false)
+  - Method 3: WebGL CubeCamera capture of PMREM environment (built-in presets) with cube-to-equirect shader conversion
+  - Method 4: Analytical light radiance fallback (no environment)
+- Fixed HDR header: changed FORMAT=32-bit_rle_rgbe to FORMAT=32-bit_rgbe (uncompressed, matches data)
+- Added proper renderer state save/restore (tone mapping, color space)
+- Added Float32 pixel verification logging
+- Added bottom-to-top pixel row flip for WebGL readback
+- Build passes with zero HDRIExporter errors
+
+Stage Summary:
+- File modified: /home/z/my-project/lightstudio/src/three/HDRIExporter.ts (complete rewrite, ~1040 lines)
+- Root cause fixed: Environment capture now uses actual texture data instead of analytical-only approach
+- API unchanged: exportSceneAsHDR() and exportSceneAsEXR() signatures remain backward-compatible
+- All 3 environment scenarios handled: custom HDRI (with/without background), built-in presets, no environment
+
