@@ -3,8 +3,8 @@ import { TopMenubar } from '../Toolbar/TopMenubar';
 import { LeftToolbar } from '../Toolbar/LeftToolbar';
 import { Viewport } from '../Viewport/Viewport';
 import { LightListPanel } from '../Lights/LightListPanel';
-import { LightProperties } from '../Lights/LightProperties';
 import { LightProfileGrid } from '../Lights/LightProfileGrid';
+import { DynamicPropertiesPanel } from '../Properties/DynamicPropertiesPanel';
 import { PresetBrowser } from '../Presets/PresetBrowser';
 import { LightPreview } from '../Previews/LightPreview';
 import { MaterialPreviewTab, getMaterialPreviewThumbnail } from '../Previews/MaterialPreviewTab';
@@ -524,8 +524,8 @@ export const AppLayout: React.FC = () => {
             {/* Tab content */}
             <div className="panel-body" style={{ overflow: 'hidden', padding: 0, display: 'flex', flexDirection: 'column' }}>
               {rightTab === 'properties' && (
-                <div style={{ flex: 1, overflowY: 'auto' }}>
-                  <LightProperties />
+                <div style={{ flex: 1, overflow: 'hidden' }}>
+                  <DynamicPropertiesPanel sceneRef={sceneRef} />
                 </div>
               )}
               {rightTab === 'preview' && (

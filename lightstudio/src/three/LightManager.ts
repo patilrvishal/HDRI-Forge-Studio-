@@ -70,6 +70,9 @@ export class LightManager {
     const light = this.createLightFromType(lightData.type);
     light.visible = visible;
 
+    // Bridge: store lightId so hierarchy selection can find the lightsStore entry
+    light.userData.lightId = lightData.id;
+
     // Set color and intensity
     this.applyLightProperties(light, lightData);
 

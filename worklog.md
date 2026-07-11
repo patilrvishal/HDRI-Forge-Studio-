@@ -215,3 +215,28 @@ Stage Summary:
   5. EnvironmentBrowser.tsx custom HDRI grid click — added `showBackground: true`
   6. Viewport.tsx scene-restore effect — force `showBackground: true` when restoring custom HDRI
 - TypeScript compilation: 0 errors
+
+---
+Task ID: dynamic-properties-panel
+Agent: Main Agent
+Task: Make right-side Properties panel dynamic based on hierarchy selection
+
+Work Log:
+- Identified that right panel "Properties" tab was hardcoded to LightProperties regardless of selection
+- Found two disconnected selection systems: sceneHierarchyStore.selectedId (UUID) vs lightsStore.selectedLightId
+- Added `light.userData.lightId = lightData.id` in LightManager.ts for UUID→lightId bridging
+- Created `DynamicPropertiesPanel.tsx` (540+ lines) with dynamic routing:
+  - Light selected → syncs lightsStore.selectedLightId, renders full LightProperties
+  - Mesh selected → renders MeshProperties (Transform + Mesh Info: vertices, triangles, size, material, UVs, normals)
+  - Camera selected → renders GenericProperties + Camera Info (FOV, near, far)
+  - Group/Helper/Other → renders GenericProperties (Transform + Object Info)
+  - No selection → EmptyState placeholder
+  - Fallback: if lightsStore.selectedLightId set (from Light List), shows LightProperties
+- Replaced hardcoded `<LightProperties />` in AppLayout with `<DynamicPropertiesPanel sceneRef={sceneRef} />`
+- Updated SceneHierarchy handleSelect to always open right panel on Properties tab
+- Auto-switches right panel to Properties tab on any hierarchy selection
+
+Stage Summary:
+- Files: src/components/Properties/DynamicPropertiesPanel.tsx (NEW), src/components/Layout/AppLayout.tsx, src/three/LightManager.ts, src/components/Scene/SceneHierarchy.tsx
+- Right panel now dynamically updates based on hierarchy selection type
+- Zero new TypeScript errors

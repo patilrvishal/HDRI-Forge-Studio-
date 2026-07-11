@@ -715,7 +715,11 @@ const TreeNode: React.FC<{
 
   const handleSelect = useCallback(() => {
     select(node.object.uuid);
-    // Material integration for mesh
+    // Always show the right panel on Properties tab when selecting from hierarchy
+    useUIStore.getState().setRightPanelTab('properties');
+    useUIStore.getState().showPanel('rightPanel');
+
+    // Material integration for mesh — also switch to matEdit if a named material is found
     if (node.type === 'mesh' && node.object instanceof THREE.Mesh) {
       const matStore = useMaterialEditorStore.getState();
       const mat = node.object.material;
@@ -725,8 +729,6 @@ const TreeNode: React.FC<{
           const match = matStore.materials.find((m) => m.name === matName);
           if (match) {
             matStore.selectMaterial(match.id);
-            useUIStore.getState().setRightPanelTab('matEdit');
-            useUIStore.getState().showPanel('rightPanel');
           }
         }
       }
