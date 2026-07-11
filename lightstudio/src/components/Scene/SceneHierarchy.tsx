@@ -5,7 +5,7 @@ import { useMaterialEditorStore } from '../../store/materialEditorStore';
 import { useUIStore } from '../../store/uiStore';
 
 /* ═══════════════════════════════════════════════════════════════════
-   Types
+   Types & Interfaces
    ═══════════════════════════════════════════════════════════════════ */
 
 interface SceneHierarchyProps {
@@ -25,6 +25,11 @@ interface ContextMenuState {
   y: number;
   objectId: string;
   showSubmenu: boolean;
+}
+
+interface DragState {
+  dragUuid: string;
+  dragName: string;
 }
 
 /* ═══════════════════════════════════════════════════════════════════
@@ -112,6 +117,16 @@ function countCollections(scene: THREE.Scene): number {
   return count;
 }
 
+/** Check if targetId is a descendant of parentId (or the same object) */
+function isDescendantOf(parentObj: THREE.Object3D, checkObj: THREE.Object3D): boolean {
+  if (parentObj.uuid === checkObj.uuid) return true;
+  let found = false;
+  parentObj.traverse((child) => {
+    if (child.uuid === checkObj.uuid) found = true;
+  });
+  return found;
+}
+
 /* ═══════════════════════════════════════════════════════════════════
    Type colors & SVG icons (Blender-style small icons)
    ═══════════════════════════════════════════════════════════════════ */
@@ -127,7 +142,7 @@ const TYPE_COLORS: Record<string, string> = {
 };
 
 const TypeIcon: React.FC<{ type: string; isCollection?: boolean; size?: number }> = ({ type, isCollection: isColl, size = 13 }) => {
-  const c = isColl ? TYPE_COLORS.collection : (TYPE_COLORS[type] || 'var(--text-dim)');
+  const c = isColl ? TYPE_COLORS.collection : (TYPE_COLORS[type] || '#475569');
   if (isColl) {
     return (
       <svg width={size} height={size} viewBox="0 0 16 16" fill="none" style={{ color: c, flexShrink: 0 }}>
@@ -293,7 +308,6 @@ const ContextMenu: React.FC<{
   const handleIsolate = useCallback(() => {
     if (!obj || !scene) return;
     const s = useSceneHierarchyStore.getState();
-    // Toggle isolation
     if (s.isolatedId === obj.uuid) {
       s.showAll();
       scene.traverse((child) => {
@@ -320,6 +334,8 @@ const ContextMenu: React.FC<{
   const handleMoveToCollection = useCallback(
     (group: THREE.Group) => {
       if (!obj || !scene) return;
+      // Prevent moving a parent into its own descendant
+      if (isDescendantOf(obj, group)) return;
       obj.parent?.remove(obj);
       group.add(obj);
       refresh();
@@ -633,7 +649,7 @@ const RowIconButton: React.FC<{
 );
 
 /* ═══════════════════════════════════════════════════════════════════
-   Tree Node (Blender-style)
+   Tree Node (Blender-style with drag-and-drop support)
    ═══════════════════════════════════════════════════════════════════ */
 
 const TreeNode: React.FC<{
@@ -642,7 +658,11 @@ const TreeNode: React.FC<{
   sceneRef: React.MutableRefObject<THREE.Scene | null>;
   refresh: () => void;
   onContextMenu: (e: React.MouseEvent, uuid: string) => void;
-}> = ({ node, depth, sceneRef, refresh, onContextMenu }) => {
+  onDragStart: (uuid: string, name: string) => void;
+  onDragEnd: () => void;
+  onDropOnCollection: (collectionUuid: string) => void;
+  dropTargetId: string | null;
+}> = ({ node, depth, sceneRef, refresh, onContextMenu, onDragStart, onDragEnd, onDropOnCollection, dropTargetId }) => {
   const selectedId = useSceneHierarchyStore((s) => s.selectedId);
   const expandedIds = useSceneHierarchyStore((s) => s.expandedIds);
   const hiddenIds = useSceneHierarchyStore((s) => s.hiddenIds);
@@ -655,12 +675,14 @@ const TreeNode: React.FC<{
   const [renaming, setRenaming] = useState(false);
   const [renameValue, setRenameValue] = useState(node.object.name);
   const renameRef = useRef<HTMLInputElement>(null);
+  const rowRef = useRef<HTMLDivElement>(null);
 
   const hasChildren = node.children.length > 0;
   const isSelected = selectedId === node.object.uuid;
   const isHidden = hiddenIds.includes(node.object.uuid);
   const isExpanded = expandedIds.includes(node.object.uuid);
   const isColl = node.isCollection;
+  const isDropTarget = dropTargetId === node.object.uuid;
 
   // Filter by type
   if (filterType !== 'all') {
@@ -672,13 +694,17 @@ const TreeNode: React.FC<{
     };
     const allowed = typeMap[filterType] || [];
     if (allowed.length > 0 && !allowed.includes(node.type)) {
-      let hasMatch = false;
-      const checkDescendants = (n: HierarchyNode) => {
-        if (allowed.includes(n.type)) hasMatch = true;
-        n.children.forEach(checkDescendants);
-      };
-      checkDescendants(node);
-      if (!hasMatch) return null;
+      // Collections (which have type='group') should always show in 'group' filter
+      const isGroupMatch = isColl && filterType === 'group';
+      if (!isGroupMatch) {
+        let hasMatch = false;
+        const checkDescendants = (n: HierarchyNode) => {
+          if (allowed.includes(n.type) || (n.isCollection && filterType === 'group')) hasMatch = true;
+          n.children.forEach(checkDescendants);
+        };
+        checkDescendants(node);
+        if (!hasMatch) return null;
+      }
     }
   }
 
@@ -755,6 +781,67 @@ const TreeNode: React.FC<{
     [handleRenameCommit, node.object.name],
   );
 
+  // Drag handlers
+  const handleNodeDragStart = useCallback((e: React.DragEvent) => {
+    e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData('text/plain', node.object.uuid);
+    onDragStart(node.object.uuid, node.name);
+    if (rowRef.current) {
+      rowRef.current.style.opacity = '0.4';
+    }
+  }, [node.object.uuid, node.name, onDragStart]);
+
+  const handleNodeDragEnd = useCallback(() => {
+    onDragEnd();
+    if (rowRef.current) {
+      rowRef.current.style.opacity = '1';
+    }
+  }, [onDragEnd]);
+
+  const handleNodeDragOver = useCallback((e: React.DragEvent) => {
+    // Only allow drop on collection nodes
+    if (!isColl) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+  }, [isColl]);
+
+  const handleNodeDragEnter = useCallback((e: React.DragEvent) => {
+    if (!isColl) return;
+    e.preventDefault();
+    onDropOnCollection(node.object.uuid);
+  }, [isColl, node.object.uuid, onDropOnCollection]);
+
+  const handleNodeDragLeave = useCallback((e: React.DragEvent) => {
+    if (!isColl) return;
+    onDropOnCollection('');
+  }, [isColl, onDropOnCollection]);
+
+  const handleNodeDrop = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (!isColl || !sceneRef.current) return;
+    const dragUuid = e.dataTransfer.getData('text/plain');
+    if (!dragUuid || dragUuid === node.object.uuid) {
+      onDropOnCollection('');
+      return;
+    }
+    const scene = sceneRef.current;
+    const dragObj = findObjectByUuid(scene, dragUuid);
+    if (!dragObj) {
+      onDropOnCollection('');
+      return;
+    }
+    // Prevent moving a collection into its own descendant
+    if (isDescendantOf(dragObj, node.object)) {
+      onDropOnCollection('');
+      return;
+    }
+    dragObj.parent?.remove(dragObj);
+    node.object.add(dragObj);
+    onDropOnCollection('');
+    refresh();
+  }, [isColl, node.object, sceneRef, onDropOnCollection, refresh]);
+
   // Filter children
   const filteredChildren = useMemo(() => {
     return node.children.filter((child) => {
@@ -767,10 +854,11 @@ const TreeNode: React.FC<{
         };
         const allowed = typeMap[filterType] || [];
         if (allowed.length > 0) {
-          if (allowed.includes(child.type)) return true;
+          const isChildGroupMatch = child.isCollection && filterType === 'group';
+          if (allowed.includes(child.type) || isChildGroupMatch) return true;
           let hasMatch = false;
           const check = (n: HierarchyNode) => {
-            if (allowed.includes(n.type)) hasMatch = true;
+            if (allowed.includes(n.type) || (n.isCollection && filterType === 'group')) hasMatch = true;
             n.children.forEach(check);
           };
           check(child);
@@ -788,38 +876,53 @@ const TreeNode: React.FC<{
   return (
     <div>
       <div
+        ref={rowRef}
+        draggable={!renaming}
         style={{
           display: 'flex',
           alignItems: 'center',
           gap: 1,
           paddingLeft: 2 + depth * 16,
           paddingRight: 2,
-          height: 22,
+          height: 24,
           cursor: 'pointer',
-          background: isSelected
-            ? 'rgba(167, 139, 250, 0.12)'
-            : 'transparent',
+          background: isDropTarget
+            ? 'rgba(251, 191, 36, 0.15)'
+            : isSelected
+              ? 'rgba(167, 139, 250, 0.15)'
+              : 'transparent',
           borderLeft: isSelected ? '2px solid var(--accent)' : '2px solid transparent',
+          borderBottom: isDropTarget ? '1px solid rgba(251, 191, 36, 0.5)' : '1px solid transparent',
+          borderTop: isDropTarget ? '1px solid rgba(251, 191, 36, 0.5)' : '1px solid transparent',
           transition: 'background 0.1s',
+          userSelect: 'none',
         }}
         onClick={handleSelect}
         onContextMenu={handleContextMenu}
+        onDragStart={handleNodeDragStart}
+        onDragEnd={handleNodeDragEnd}
+        onDragOver={handleNodeDragOver}
+        onDragEnter={handleNodeDragEnter}
+        onDragLeave={handleNodeDragLeave}
+        onDrop={handleNodeDrop}
         onMouseEnter={(e) => {
-          if (!isSelected) {
-            (e.currentTarget as HTMLElement).style.background = 'var(--bg-card)';
+          if (!isSelected && !isDropTarget) {
+            (e.currentTarget as HTMLElement).style.background = 'rgba(255,255,255,0.03)';
           }
         }}
         onMouseLeave={(e) => {
-          (e.currentTarget as HTMLElement).style.background = isSelected
-            ? 'rgba(167, 139, 250, 0.12)'
-            : 'transparent';
+          if (!isSelected) {
+            (e.currentTarget as HTMLElement).style.background = 'transparent';
+          } else if (!isDropTarget) {
+            (e.currentTarget as HTMLElement).style.background = 'rgba(167, 139, 250, 0.15)';
+          }
         }}
       >
         {/* Chevron */}
         <span
           style={{
-            width: 12,
-            height: 12,
+            width: 14,
+            height: 14,
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
@@ -878,6 +981,7 @@ const TreeNode: React.FC<{
               fontStyle: isHidden ? 'italic' : 'normal',
               minWidth: 0,
               fontWeight: isColl ? 500 : 400,
+              lineHeight: '24px',
             }}
             title={node.name}
             onDoubleClick={(e) => {
@@ -922,6 +1026,10 @@ const TreeNode: React.FC<{
               sceneRef={sceneRef}
               refresh={refresh}
               onContextMenu={onContextMenu}
+              onDragStart={onDragStart}
+              onDragEnd={onDragEnd}
+              onDropOnCollection={onDropOnCollection}
+              dropTargetId={dropTargetId}
             />
           ))}
         </div>
@@ -931,7 +1039,7 @@ const TreeNode: React.FC<{
 };
 
 /* ═══════════════════════════════════════════════════════════════════
-   Number Input (Vec3)
+   Vec3 Input
    ═══════════════════════════════════════════════════════════════════ */
 
 const AXIS_COLORS = ['#f87171', '#4ade80', '#60a5fa'];
@@ -944,7 +1052,7 @@ const Vec3Input: React.FC<{
   decimals?: number;
 }> = ({ label, values, onChange, decimals = 3 }) => (
   <div style={{ display: 'flex', alignItems: 'center', gap: 3 }}>
-    <span style={{ fontSize: 9, color: 'var(--text-dim)', width: 32, flexShrink: 0, fontFamily: 'var(--font-mono)' }}>
+    <span style={{ fontSize: 9, color: 'var(--text-dim)', width: 40, flexShrink: 0, fontFamily: 'var(--font-mono)' }}>
       {label}
     </span>
     {[0, 1, 2].map((idx) => (
@@ -965,7 +1073,7 @@ const Vec3Input: React.FC<{
             border: '1px solid var(--border)',
             borderRadius: 2,
             color: 'var(--text-sec)',
-            padding: '1px 3px',
+            padding: '2px 3px',
             outline: 'none',
             flexShrink: 0,
           }}
@@ -993,9 +1101,10 @@ const CollapsibleSection: React.FC<{
           display: 'flex',
           alignItems: 'center',
           gap: 4,
-          padding: '3px 0',
+          padding: '4px 6px',
           cursor: 'pointer',
           userSelect: 'none',
+          background: 'rgba(255,255,255,0.02)',
         }}
         onClick={() => setOpen(!open)}
       >
@@ -1013,37 +1122,110 @@ const CollapsibleSection: React.FC<{
           {'\u25B6'}
         </span>
         {icon && <span style={{ display: 'flex', alignItems: 'center' }}>{icon}</span>}
-        <span style={{ fontSize: 9, color: 'var(--text-sec)', fontWeight: 500 }}>{title}</span>
+        <span style={{ fontSize: 9, color: 'var(--text-sec)', fontWeight: 500, letterSpacing: '0.02em' }}>{title}</span>
       </div>
-      {open && <div style={{ paddingLeft: 12, paddingBottom: 4, display: 'flex', flexDirection: 'column', gap: 2 }}>{children}</div>}
+      {open && (
+        <div style={{ padding: '4px 6px 6px 18px', display: 'flex', flexDirection: 'column', gap: 3 }}>
+          {children}
+        </div>
+      )}
     </div>
   );
 };
 
 /* ═══════════════════════════════════════════════════════════════════
-   Object Properties Panel (Enhanced — Blender-style bottom panel)
+   Info Row helper
+   ═══════════════════════════════════════════════════════════════════ */
+
+const InfoRow: React.FC<{
+  label: string;
+  value: React.ReactNode;
+  valueColor?: string;
+  title?: string;
+}> = ({ label, value, valueColor, title }) => (
+  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 9 }}>
+    <span style={{ color: 'var(--text-dim)' }}>{label}</span>
+    <span
+      style={{ color: valueColor || 'var(--text-sec)', fontFamily: 'var(--font-mono)', maxWidth: 120, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+      title={title}
+    >
+      {value}
+    </span>
+  </div>
+);
+
+/* ═══════════════════════════════════════════════════════════════════
+   Object Properties Panel (Enhanced — bottom panel with tick refresh)
    ═══════════════════════════════════════════════════════════════════ */
 
 const ObjectPropertiesPanel: React.FC<{
   sceneRef: React.MutableRefObject<THREE.Scene | null>;
   refresh: () => void;
-}> = ({ sceneRef, refresh }) => {
+  tick: number;
+}> = ({ sceneRef, refresh, tick }) => {
   const selectedId = useSceneHierarchyStore((s) => s.selectedId);
   const hiddenIds = useSceneHierarchyStore((s) => s.hiddenIds);
 
+  // Use useState + tick to force re-renders when external changes happen
+  const [localTick, setLocalTick] = useState(0);
+
+  // Re-read object from scene on each tick (not from stale ref)
   const selectedObj = useMemo(() => {
     if (!selectedId || !sceneRef.current) return null;
     return findObjectByUuid(sceneRef.current, selectedId);
-  }, [selectedId, sceneRef.current]);
+    // tick + localTick ensure we re-evaluate even if selectedId didn't change
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedId, tick, localTick]);
 
-  if (!selectedObj) return null;
+  // Periodic refresh to pick up external changes (gizmo transforms, etc.)
+  useEffect(() => {
+    if (!selectedId) return;
+    const interval = setInterval(() => {
+      setLocalTick((n) => n + 1);
+    }, 250);
+    return () => clearInterval(interval);
+  }, [selectedId]);
+
+  // Force re-render on selection change
+  useEffect(() => {
+    setLocalTick((n) => n + 1);
+  }, [selectedId]);
+
+  if (!selectedObj) {
+    return (
+      <div
+        style={{
+          flexShrink: 0,
+          borderTop: '1px solid var(--border)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          height: 48,
+          background: 'var(--bg-card)',
+        }}
+      >
+        <span style={{ fontSize: 10, color: 'var(--text-dim)', fontStyle: 'italic' }}>
+          No Selection
+        </span>
+      </div>
+    );
+  }
 
   const nodeType = getNodeType(selectedObj);
   const isHidden = hiddenIds.includes(selectedObj.uuid);
   const isColl = isCollection(selectedObj);
+  const isIsolated = useSceneHierarchyStore((s) => s.isolatedId === selectedObj.uuid);
 
   const toDeg = THREE.MathUtils.radToDeg;
   const toRad = THREE.MathUtils.degToRad;
+
+  // Snapshot current values for display
+  const pos: [number, number, number] = [selectedObj.position.x, selectedObj.position.y, selectedObj.position.z];
+  const rot: [number, number, number] = [toDeg(selectedObj.rotation.x), toDeg(selectedObj.rotation.y), toDeg(selectedObj.rotation.z)];
+  const scl: [number, number, number] = [selectedObj.scale.x, selectedObj.scale.y, selectedObj.scale.z];
+
+  const worldPos = new THREE.Vector3();
+  selectedObj.getWorldPosition(worldPos);
 
   const handlePositionChange = (idx: number, value: number) => {
     if (idx === 0) selectedObj.position.x = value;
@@ -1101,7 +1283,9 @@ const ObjectPropertiesPanel: React.FC<{
     refresh();
   };
 
-  const isIsolated = useSceneHierarchyStore((s) => s.isolatedId === selectedObj.uuid);
+  const handleDeselect = () => {
+    useSceneHierarchyStore.getState().select(null);
+  };
 
   // ── Mesh info ──
   let meshInfo: React.ReactNode = null;
@@ -1113,62 +1297,52 @@ const ObjectPropertiesPanel: React.FC<{
     const matNames = (Array.isArray(mat) ? mat : [mat])
       .map((m) => m.name || 'unnamed')
       .join(', ');
-    const matType = (Array.isArray(mat) ? mat[0] : mat)?.type || '—';
-    const hasVertexColors = geo.attributes.color ? true : false;
-    const hasUVs = geo.attributes.uv ? true : false;
-    const hasNormals = geo.attributes.normal ? true : false;
+    const matType = (Array.isArray(mat) ? mat[0] : mat)?.type || '\u2014';
+    const hasVertexColors = !!geo.attributes.color;
+    const hasUVs = !!geo.attributes.uv;
+    const hasNormals = !!geo.attributes.normal;
 
     // Get bounding box
     geo.computeBoundingBox();
     const bb = geo.boundingBox;
-    const size = bb ? new THREE.Vector3() : new THREE.Vector3();
+    const size = new THREE.Vector3();
     if (bb) bb.getSize(size);
 
     meshInfo = (
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 9 }}>
-          <span style={{ color: 'var(--text-dim)' }}>Vertices</span>
-          <span style={{ color: 'var(--text-sec)', fontFamily: 'var(--font-mono)' }}>{verts.toLocaleString()}</span>
-        </div>
-        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 9 }}>
-          <span style={{ color: 'var(--text-dim)' }}>Triangles</span>
-          <span style={{ color: 'var(--text-sec)', fontFamily: 'var(--font-mono)' }}>{Math.floor(tris).toLocaleString()}</span>
-        </div>
-        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 9 }}>
-          <span style={{ color: 'var(--text-dim)' }}>Size</span>
-          <span style={{ color: 'var(--text-sec)', fontFamily: 'var(--font-mono)' }}>
-            {size.x.toFixed(2)} x {size.y.toFixed(2)} x {size.z.toFixed(2)}
-          </span>
-        </div>
-        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 9 }}>
-          <span style={{ color: 'var(--text-dim)' }}>Material</span>
-          <span style={{ color: 'var(--accent-bright)', fontFamily: 'var(--font-mono)', maxWidth: 110, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={matNames}>
-            {matNames}
-          </span>
-        </div>
-        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 9 }}>
-          <span style={{ color: 'var(--text-dim)' }}>Mat. Type</span>
-          <span style={{ color: 'var(--text-sec)', fontFamily: 'var(--font-mono)' }}>{matType.replace('Material', '')}</span>
-        </div>
-        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 9 }}>
-          <span style={{ color: 'var(--text-dim)' }}>UVs</span>
-          <span style={{ color: hasUVs ? 'var(--success)' : 'var(--text-dim)', fontFamily: 'var(--font-mono)' }}>
-            {hasUVs ? 'Yes' : 'No'}
-          </span>
-        </div>
-        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 9 }}>
-          <span style={{ color: 'var(--text-dim)' }}>Normals</span>
-          <span style={{ color: hasNormals ? 'var(--success)' : 'var(--text-dim)', fontFamily: 'var(--font-mono)' }}>
-            {hasNormals ? 'Yes' : 'No'}
-          </span>
-        </div>
-        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 9 }}>
-          <span style={{ color: 'var(--text-dim)' }}>Vertex Colors</span>
-          <span style={{ color: hasVertexColors ? 'var(--success)' : 'var(--text-dim)', fontFamily: 'var(--font-mono)' }}>
-            {hasVertexColors ? 'Yes' : 'No'}
-          </span>
-        </div>
-      </div>
+      <CollapsibleSection title="Mesh Info" defaultOpen={false} icon={
+        <svg width="10" height="10" viewBox="0 0 16 16" fill="none" stroke="var(--text-dim)" strokeWidth="1.2">
+          <path d="M8 1.5L14.5 5v6L8 14.5 1.5 11V5z" />
+        </svg>
+      }>
+        <InfoRow label="Vertices" value={verts.toLocaleString()} />
+        <InfoRow label="Triangles" value={Math.floor(tris).toLocaleString()} />
+        <InfoRow
+          label="Size"
+          value={`${size.x.toFixed(2)} \u00d7 ${size.y.toFixed(2)} \u00d7 ${size.z.toFixed(2)}`}
+        />
+        <InfoRow
+          label="Material"
+          value={matNames}
+          valueColor="var(--accent-bright)"
+          title={matNames}
+        />
+        <InfoRow label="Mat. Type" value={matType.replace('Material', '')} />
+        <InfoRow
+          label="UVs"
+          value={hasUVs ? 'Yes' : 'No'}
+          valueColor={hasUVs ? 'var(--success)' : 'var(--text-dim)'}
+        />
+        <InfoRow
+          label="Normals"
+          value={hasNormals ? 'Yes' : 'No'}
+          valueColor={hasNormals ? 'var(--success)' : 'var(--text-dim)'}
+        />
+        <InfoRow
+          label="Vertex Colors"
+          value={hasVertexColors ? 'Yes' : 'No'}
+          valueColor={hasVertexColors ? 'var(--success)' : 'var(--text-dim)'}
+        />
+      </CollapsibleSection>
     );
   }
 
@@ -1176,64 +1350,78 @@ const ObjectPropertiesPanel: React.FC<{
   let lightInfo: React.ReactNode = null;
   if (selectedObj instanceof THREE.Light) {
     const lightColor = '#' + selectedObj.color.getHexString();
-    let intensity = 0;
-    if ('intensity' in selectedObj) {
-      intensity = (selectedObj as THREE.Light).intensity;
-    }
+    const intensity = selectedObj.intensity;
     const lightType = selectedObj.type.replace('Light', '');
+
+    let extraInfo: React.ReactNode = null;
+
+    if (selectedObj instanceof THREE.PointLight) {
+      const dist = selectedObj.distance;
+      extraInfo = (
+        <>
+          <InfoRow
+            label="Distance"
+            value={dist === 0 ? 'Infinite' : dist.toFixed(2)}
+          />
+          <InfoRow label="Decay" value={String(selectedObj.decay)} />
+        </>
+      );
+    } else if (selectedObj instanceof THREE.SpotLight) {
+      extraInfo = (
+        <>
+          <InfoRow
+            label="Distance"
+            value={selectedObj.distance === 0 ? 'Infinite' : selectedObj.distance.toFixed(2)}
+          />
+          <InfoRow label="Decay" value={String(selectedObj.decay)} />
+          <InfoRow label="Angle" value={`${toDeg(selectedObj.angle).toFixed(1)}\u00b0`} />
+          <InfoRow label="Penumbra" value={selectedObj.penumbra.toFixed(2)} />
+        </>
+      );
+    } else if (selectedObj instanceof THREE.DirectionalLight) {
+      extraInfo = (
+        <InfoRow label="Intensity" value={intensity.toFixed(3)} />
+      );
+    } else if (selectedObj instanceof THREE.HemisphereLight) {
+      const skyColor = '#' + selectedObj.color.getHexString();
+      const groundColor = '#' + selectedObj.groundColor.getHexString();
+      extraInfo = (
+        <>
+          <InfoRow label="Sky Color" value={skyColor} />
+          <InfoRow label="Ground Color" value={groundColor} />
+          <InfoRow label="Intensity" value={intensity.toFixed(3)} />
+        </>
+      );
+    }
+
     lightInfo = (
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 9 }}>
-          <span style={{ color: 'var(--text-dim)' }}>Type</span>
-          <span style={{ color: '#f0a868', fontFamily: 'var(--font-mono)', fontWeight: 500 }}>{lightType}</span>
-        </div>
+      <CollapsibleSection title="Light Info" defaultOpen={false} icon={
+        <svg width="10" height="10" viewBox="0 0 16 16" fill="none" stroke="var(--text-dim)" strokeWidth="1.2">
+          <circle cx="8" cy="8" r="3.5" />
+          <line x1="8" y1="2" x2="8" y2="3.5" />
+          <line x1="8" y1="12.5" x2="8" y2="14" />
+        </svg>
+      }>
+        <InfoRow label="Type" value={lightType} valueColor="#f0a868" />
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 9 }}>
           <span style={{ color: 'var(--text-dim)' }}>Color</span>
           <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
             <span
               style={{
-                width: 10,
-                height: 10,
+                width: 12,
+                height: 12,
                 borderRadius: 2,
                 background: lightColor,
                 border: '1px solid var(--border)',
                 display: 'inline-block',
+                boxShadow: `0 0 4px ${lightColor}40`,
               }}
             />
             <span style={{ color: 'var(--text-sec)', fontFamily: 'var(--font-mono)' }}>{lightColor}</span>
           </span>
         </div>
-        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 9 }}>
-          <span style={{ color: 'var(--text-dim)' }}>Intensity</span>
-          <span style={{ color: 'var(--text-sec)', fontFamily: 'var(--font-mono)' }}>{intensity.toFixed(3)}</span>
-        </div>
-        {selectedObj instanceof THREE.PointLight && (
-          <>
-            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 9 }}>
-              <span style={{ color: 'var(--text-dim)' }}>Distance</span>
-              <span style={{ color: 'var(--text-sec)', fontFamily: 'var(--font-mono)' }}>
-                {selectedObj.distance === 0 ? 'Infinite' : selectedObj.distance.toFixed(2)}
-              </span>
-            </div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 9 }}>
-              <span style={{ color: 'var(--text-dim)' }}>Decay</span>
-              <span style={{ color: 'var(--text-sec)', fontFamily: 'var(--font-mono)' }}>{selectedObj.decay}</span>
-            </div>
-          </>
-        )}
-        {selectedObj instanceof THREE.SpotLight && (
-          <>
-            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 9 }}>
-              <span style={{ color: 'var(--text-dim)' }}>Angle</span>
-              <span style={{ color: 'var(--text-sec)', fontFamily: 'var(--font-mono)' }}>{toDeg(selectedObj.angle).toFixed(1)} deg</span>
-            </div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 9 }}>
-              <span style={{ color: 'var(--text-dim)' }}>Penumbra</span>
-              <span style={{ color: 'var(--text-sec)', fontFamily: 'var(--font-mono)' }}>{selectedObj.penumbra.toFixed(2)}</span>
-            </div>
-          </>
-        )}
-      </div>
+        {extraInfo}
+      </CollapsibleSection>
     );
   }
 
@@ -1241,154 +1429,268 @@ const ObjectPropertiesPanel: React.FC<{
     (c) => !c.userData.isGrid && !c.userData.isProxy,
   ).length;
 
-  const worldPos = new THREE.Vector3();
-  selectedObj.getWorldPosition(worldPos);
+  const typeBadge = isColl ? 'Collection' : nodeType;
+  const typeBadgeColor = TYPE_COLORS[isColl ? 'collection' : nodeType] || 'var(--text-dim)';
 
   return (
     <div
       style={{
         borderTop: '1px solid var(--border)',
         background: 'var(--bg-card)',
-        maxHeight: '50%',
-        overflowY: 'auto',
         flexShrink: 0,
       }}
     >
-      {/* Header with type badge and name */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '4px 6px', borderBottom: '1px solid var(--border)' }}>
+      {/* ── Header: type icon + name + type badge + close button ── */}
+      <div style={{
+        display: 'flex',
+        alignItems: 'center',
+        gap: 5,
+        padding: '4px 6px',
+        borderBottom: '1px solid var(--border-light)',
+        background: 'rgba(255,255,255,0.02)',
+      }}>
         <TypeIcon type={nodeType} isCollection={isColl} size={12} />
-        <span style={{ fontSize: 10, color: 'var(--text)', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontWeight: 500 }} title={selectedObj.name || selectedObj.type}>
+        <span
+          style={{
+            fontSize: 10,
+            color: 'var(--text)',
+            flex: 1,
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+            whiteSpace: 'nowrap',
+            fontWeight: 500,
+          }}
+          title={selectedObj.name || selectedObj.type}
+        >
           {selectedObj.name || selectedObj.type}
         </span>
         <span
           style={{
             fontSize: 7,
-            color: TYPE_COLORS[isColl ? 'collection' : nodeType],
+            color: typeBadgeColor,
             background: 'var(--bg-input)',
-            border: '1px solid var(--border)',
+            border: `1px solid ${typeBadgeColor}30`,
             borderRadius: 3,
-            padding: '0 4px',
-            lineHeight: '14px',
+            padding: '0 5px',
+            lineHeight: '15px',
             textTransform: 'uppercase',
             fontFamily: 'var(--font-mono)',
             flexShrink: 0,
             fontWeight: 600,
+            letterSpacing: '0.03em',
           }}
         >
-          {isColl ? 'Collection' : nodeType}
+          {typeBadge}
         </span>
-      </div>
-
-      {/* Quick Actions Row */}
-      <div style={{ display: 'flex', gap: 4, padding: '4px 6px', borderBottom: '1px solid var(--border)' }}>
+        {/* Close / Deselect button */}
         <button
-          onClick={handleVisibleToggle}
+          onClick={handleDeselect}
+          title="Deselect (close properties)"
           style={{
-            flex: 1,
-            fontSize: 8,
-            padding: '2px 0',
-            borderRadius: 3,
+            width: 16,
+            height: 16,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            background: 'none',
+            border: 'none',
             cursor: 'pointer',
-            fontFamily: 'var(--font-mono)',
-            border: `1px solid ${isHidden ? 'var(--border)' : 'rgba(74, 222, 128, 0.3)'}`,
-            background: isHidden ? 'var(--bg-input)' : 'rgba(74, 222, 128, 0.1)',
-            color: isHidden ? 'var(--text-dim)' : 'var(--success)',
-            transition: 'all 0.1s',
+            color: 'var(--text-dim)',
+            borderRadius: 2,
+            padding: 0,
+            flexShrink: 0,
+          }}
+          onMouseEnter={(e) => {
+            (e.currentTarget as HTMLElement).style.color = 'var(--text)';
+            (e.currentTarget as HTMLElement).style.background = 'var(--accent-bg)';
+          }}
+          onMouseLeave={(e) => {
+            (e.currentTarget as HTMLElement).style.color = 'var(--text-dim)';
+            (e.currentTarget as HTMLElement).style.background = 'none';
           }}
         >
-          {isHidden ? 'Hidden' : 'Visible'}
-        </button>
-        <button
-          onClick={handleIsolate}
-          style={{
-            flex: 1,
-            fontSize: 8,
-            padding: '2px 0',
-            borderRadius: 3,
-            cursor: 'pointer',
-            fontFamily: 'var(--font-mono)',
-            border: `1px solid ${isIsolated ? 'rgba(167, 139, 250, 0.3)' : 'var(--border)'}`,
-            background: isIsolated ? 'rgba(167, 139, 250, 0.1)' : 'var(--bg-input)',
-            color: isIsolated ? 'var(--accent-bright)' : 'var(--text-dim)',
-            transition: 'all 0.1s',
-          }}
-        >
-          {isIsolated ? 'Isolated' : 'Isolate'}
+          <svg width="10" height="10" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2">
+            <path d="M4 4l8 8M12 4l-8 8" />
+          </svg>
         </button>
       </div>
 
-      {/* Transform */}
-      <CollapsibleSection title="Transform" defaultOpen={true}>
-        <Vec3Input
-          label="Location"
-          values={[selectedObj.position.x, selectedObj.position.y, selectedObj.position.z]}
-          onChange={handlePositionChange}
-        />
-        <Vec3Input
-          label="Rotation"
-          values={[
-            toDeg(selectedObj.rotation.x),
-            toDeg(selectedObj.rotation.y),
-            toDeg(selectedObj.rotation.z),
-          ]}
-          onChange={handleRotationChange}
-        />
-        <Vec3Input
-          label="Scale"
-          values={[selectedObj.scale.x, selectedObj.scale.y, selectedObj.scale.z]}
-          onChange={handleScaleChange}
-        />
-        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 9, marginTop: 1 }}>
-          <span style={{ color: 'var(--text-dim)' }}>World Pos</span>
-          <span style={{ color: 'var(--text-dim)', fontFamily: 'var(--font-mono)', fontSize: 8 }}>
-            {worldPos.x.toFixed(2)}, {worldPos.y.toFixed(2)}, {worldPos.z.toFixed(2)}
-          </span>
+      {/* ── Scrollable properties content ── */}
+      <div style={{ overflowY: 'auto', overflowX: 'hidden' }}>
+        {/* Quick Actions Row */}
+        <div style={{ display: 'flex', gap: 4, padding: '4px 6px', borderBottom: '1px solid var(--border-light)' }}>
+          <button
+            onClick={handleVisibleToggle}
+            style={{
+              flex: 1,
+              fontSize: 8,
+              padding: '3px 0',
+              borderRadius: 3,
+              cursor: 'pointer',
+              fontFamily: 'var(--font-mono)',
+              border: `1px solid ${isHidden ? 'var(--border)' : 'rgba(74, 222, 128, 0.3)'}`,
+              background: isHidden ? 'var(--bg-input)' : 'rgba(74, 222, 128, 0.1)',
+              color: isHidden ? 'var(--text-dim)' : 'var(--success)',
+              transition: 'all 0.1s',
+            }}
+          >
+            {isHidden ? 'Hidden' : 'Visible'}
+          </button>
+          <button
+            onClick={handleIsolate}
+            style={{
+              flex: 1,
+              fontSize: 8,
+              padding: '3px 0',
+              borderRadius: 3,
+              cursor: 'pointer',
+              fontFamily: 'var(--font-mono)',
+              border: `1px solid ${isIsolated ? 'rgba(167, 139, 250, 0.3)' : 'var(--border)'}`,
+              background: isIsolated ? 'rgba(167, 139, 250, 0.1)' : 'var(--bg-input)',
+              color: isIsolated ? 'var(--accent-bright)' : 'var(--text-dim)',
+              transition: 'all 0.1s',
+            }}
+          >
+            {isIsolated ? 'Isolated' : 'Isolate'}
+          </button>
         </div>
-      </CollapsibleSection>
 
-      {/* Object Info */}
-      <CollapsibleSection title="Object Info" defaultOpen={true} icon={
-        <svg width="10" height="10" viewBox="0 0 16 16" fill="none" stroke="var(--text-dim)" strokeWidth="1.2">
-          <circle cx="8" cy="8" r="6" />
-          <path d="M8 5v3.5M8 10.5v.5" />
-        </svg>
-      }>
-        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 9 }}>
-          <span style={{ color: 'var(--text-dim)' }}>Type</span>
-          <span style={{ color: 'var(--text-sec)', fontFamily: 'var(--font-mono)', textTransform: 'capitalize' }}>
-            {isColl ? 'Collection' : nodeType}
-          </span>
-        </div>
+        {/* Transform Section */}
+        <CollapsibleSection title="Transform" defaultOpen={true} icon={
+          <svg width="10" height="10" viewBox="0 0 16 16" fill="none" stroke="var(--text-dim)" strokeWidth="1.2">
+            <path d="M8 1v14M1 8h14M4 4l8 8M12 4l-8 8" />
+          </svg>
+        }>
+          <Vec3Input label="Location" values={pos} onChange={handlePositionChange} />
+          <Vec3Input label="Rotation" values={rot} onChange={handleRotationChange} />
+          <Vec3Input label="Scale" values={scl} onChange={handleScaleChange} />
+          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 9, marginTop: 1 }}>
+            <span style={{ color: 'var(--text-dim)' }}>World Pos</span>
+            <span style={{ color: 'var(--text-dim)', fontFamily: 'var(--font-mono)', fontSize: 8 }}>
+              {worldPos.x.toFixed(2)}, {worldPos.y.toFixed(2)}, {worldPos.z.toFixed(2)}
+            </span>
+          </div>
+        </CollapsibleSection>
+
+        {/* Object Info Section */}
+        <CollapsibleSection title="Object Info" defaultOpen={true} icon={
+          <svg width="10" height="10" viewBox="0 0 16 16" fill="none" stroke="var(--text-dim)" strokeWidth="1.2">
+            <circle cx="8" cy="8" r="6" />
+            <path d="M8 5v3.5M8 10.5v.5" />
+          </svg>
+        }>
+          <InfoRow
+            label="Type"
+            value={isColl ? 'Collection' : nodeType}
+          />
+          <InfoRow label="Children" value={String(childCount)} />
+          <InfoRow
+            label="UUID"
+            value={`${selectedObj.uuid.slice(0, 13)}\u2026`}
+            valueColor="var(--text-dim)"
+            title={selectedObj.uuid}
+          />
+        </CollapsibleSection>
+
+        {/* Mesh Info Section (conditional) */}
         {meshInfo}
+
+        {/* Light Info Section (conditional) */}
         {lightInfo}
-        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 9 }}>
-          <span style={{ color: 'var(--text-dim)' }}>Children</span>
-          <span style={{ color: 'var(--text-sec)', fontFamily: 'var(--font-mono)' }}>{childCount}</span>
-        </div>
-        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 9 }}>
-          <span style={{ color: 'var(--text-dim)' }}>UUID</span>
-          <span style={{ color: 'var(--text-dim)', fontFamily: 'var(--font-mono)', fontSize: 7, maxWidth: 120, overflow: 'hidden', textOverflow: 'ellipsis' }} title={selectedObj.uuid}>
-            {selectedObj.uuid.slice(0, 16)}...
-          </span>
-        </div>
-      </CollapsibleSection>
+      </div>
     </div>
   );
 };
 
 /* ═══════════════════════════════════════════════════════════════════
-   Main SceneHierarchy Component (Blender-style)
+   Resizable Split Handle
+   ═══════════════════════════════════════════════════════════════════ */
+
+const SplitHandle: React.FC<{
+  onDrag: (ratio: number) => void;
+  containerRef: React.RefObject<HTMLDivElement | null>;
+}> = ({ onDrag, containerRef }) => {
+  const handleMouseDown = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    const container = containerRef.current;
+    if (!container) return;
+    const rect = container.getBoundingClientRect();
+    const startY = e.clientY;
+    const startRatio = (e.clientY - rect.top) / rect.height;
+
+    const handleMouseMove = (moveEvent: MouseEvent) => {
+      const delta = moveEvent.clientY - startY;
+      const newRatio = Math.max(0.15, Math.min(0.85, startRatio + delta / rect.height));
+      onDrag(newRatio);
+    };
+
+    const handleMouseUp = () => {
+      document.removeEventListener('mousemove', handleMouseMove);
+      document.removeEventListener('mouseup', handleMouseUp);
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+    };
+
+    document.addEventListener('mousemove', handleMouseMove);
+    document.addEventListener('mouseup', handleMouseUp);
+    document.body.style.cursor = 'ns-resize';
+    document.body.style.userSelect = 'none';
+  }, [containerRef, onDrag]);
+
+  return (
+    <div
+      onMouseDown={handleMouseDown}
+      style={{
+        height: 4,
+        flexShrink: 0,
+        cursor: 'ns-resize',
+        background: 'var(--border-light)',
+        position: 'relative',
+        zIndex: 2,
+      }}
+      onMouseEnter={(e) => {
+        (e.currentTarget as HTMLElement).style.background = 'var(--accent)';
+      }}
+      onMouseLeave={(e) => {
+        (e.currentTarget as HTMLElement).style.background = 'var(--border-light)';
+      }}
+    >
+      {/* Center grip dots */}
+      <div style={{
+        position: 'absolute',
+        top: '50%',
+        left: '50%',
+        transform: 'translate(-50%, -50%)',
+        display: 'flex',
+        gap: 2,
+        pointerEvents: 'none',
+      }}>
+        <span style={{ width: 3, height: 1, background: 'var(--text-dim)', opacity: 0.5, borderRadius: 0.5 }} />
+        <span style={{ width: 3, height: 1, background: 'var(--text-dim)', opacity: 0.5, borderRadius: 0.5 }} />
+        <span style={{ width: 3, height: 1, background: 'var(--text-dim)', opacity: 0.5, borderRadius: 0.5 }} />
+      </div>
+    </div>
+  );
+};
+
+/* ═══════════════════════════════════════════════════════════════════
+   Main SceneHierarchy Component (Blender-style with resizable split)
    ═══════════════════════════════════════════════════════════════════ */
 
 export const SceneHierarchy: React.FC<SceneHierarchyProps> = ({ sceneRef }) => {
   const [tick, setTick] = useState(0);
   const [ctxMenu, setCtxMenu] = useState<ContextMenuState | null>(null);
+  const [splitRatio, setSplitRatio] = useState(0.6);
+  const [dropTargetId, setDropTargetId] = useState<string | null>(null);
+
+  const containerRef = useRef<HTMLDivElement>(null);
 
   const filterType = useSceneHierarchyStore((s) => s.filterType);
   const searchQuery = useSceneHierarchyStore((s) => s.searchQuery);
   const setFilterType = useSceneHierarchyStore((s) => s.setFilterType);
   const setSearchQuery = useSceneHierarchyStore((s) => s.setSearchQuery);
   const isolatedId = useSceneHierarchyStore((s) => s.isolatedId);
+  const selectedId = useSceneHierarchyStore((s) => s.selectedId);
 
   const refresh = useCallback(() => setTick((n) => n + 1), []);
 
@@ -1474,6 +1776,23 @@ export const SceneHierarchy: React.FC<SceneHierarchyProps> = ({ sceneRef }) => {
     }
   }, [ctxMenu, closeContextMenu]);
 
+  // Drag-and-drop handlers (lifted to parent for cross-tree-node drops)
+  const handleDragStart = useCallback((_uuid: string, _name: string) => {
+    // We don't need to do much here; the UUID is in dataTransfer
+  }, []);
+
+  const handleDragEnd = useCallback(() => {
+    setDropTargetId(null);
+  }, []);
+
+  const handleDropOnCollection = useCallback((collectionUuid: string) => {
+    setDropTargetId(collectionUuid || null);
+  }, []);
+
+  const handleSplitDrag = useCallback((ratio: number) => {
+    setSplitRatio(ratio);
+  }, []);
+
   const filterButtons: { label: string; value: HierarchyFilterType }[] = [
     { label: 'All', value: 'all' },
     { label: 'Mesh', value: 'mesh' },
@@ -1482,10 +1801,17 @@ export const SceneHierarchy: React.FC<SceneHierarchyProps> = ({ sceneRef }) => {
     { label: 'Group', value: 'group' },
   ];
 
+  // Calculate tree vs properties split
+  const showProperties = selectedId !== null;
+
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', position: 'relative' }}>
+    <div
+      ref={containerRef}
+      style={{ display: 'flex', flexDirection: 'column', height: '100%', position: 'relative' }}
+      onDragOver={(e) => e.preventDefault()}
+    >
       {/* ── Clean Toolbar ── */}
-      <div style={{ padding: '3px 4px', borderBottom: '1px solid var(--border)', display: 'flex', flexDirection: 'column', gap: 3 }}>
+      <div style={{ padding: '3px 4px', borderBottom: '1px solid var(--border)', display: 'flex', flexDirection: 'column', gap: 3, flexShrink: 0 }}>
         {/* Search bar — Blender-style at top */}
         <div style={{ position: 'relative' }}>
           <svg
@@ -1539,7 +1865,7 @@ export const SceneHierarchy: React.FC<SceneHierarchyProps> = ({ sceneRef }) => {
                 transition: 'all 0.1s',
                 outline: 'none',
               }}
-              title={`Filter: ${fb.label}`}
+              title={`Filter: ${fb.label}${fb.value === 'group' ? ' (includes Collections)' : ''}`}
             >
               {fb.label}
             </button>
@@ -1633,28 +1959,82 @@ export const SceneHierarchy: React.FC<SceneHierarchyProps> = ({ sceneRef }) => {
         </div>
       </div>
 
-      {/* ── Tree View ── */}
-      <div style={{ flex: 1, overflowY: 'auto', paddingTop: 1 }}>
-        {tree.length === 0 ? (
-          <div style={{ padding: 16, textAlign: 'center', fontSize: 10, color: 'var(--text-dim)' }}>
-            No objects in scene
+      {/* ── Resizable Split: Tree (top) + Properties (bottom) ── */}
+      {showProperties ? (
+        <>
+          {/* Tree view area */}
+          <div style={{ flex: splitRatio, overflowY: 'auto', overflowX: 'hidden', minHeight: 0, paddingTop: 1 }}>
+            {tree.length === 0 ? (
+              <div style={{ padding: 16, textAlign: 'center', fontSize: 10, color: 'var(--text-dim)' }}>
+                No objects in scene
+              </div>
+            ) : (
+              tree.map((node) => (
+                <TreeNode
+                  key={node.object.uuid}
+                  node={node}
+                  depth={0}
+                  sceneRef={sceneRef}
+                  refresh={refresh}
+                  onContextMenu={handleContextMenu}
+                  onDragStart={handleDragStart}
+                  onDragEnd={handleDragEnd}
+                  onDropOnCollection={handleDropOnCollection}
+                  dropTargetId={dropTargetId}
+                />
+              ))
+            )}
           </div>
-        ) : (
-          tree.map((node) => (
-            <TreeNode
-              key={node.object.uuid}
-              node={node}
-              depth={0}
-              sceneRef={sceneRef}
-              refresh={refresh}
-              onContextMenu={handleContextMenu}
-            />
-          ))
-        )}
-      </div>
 
-      {/* ── Properties Panel (bottom, shows on selection) ── */}
-      <ObjectPropertiesPanel sceneRef={sceneRef} refresh={refresh} />
+          {/* Resizable split handle */}
+          <SplitHandle onDrag={handleSplitDrag} containerRef={containerRef} />
+
+          {/* Properties panel area */}
+          <div style={{ flex: 1 - splitRatio, overflow: 'hidden', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+            <ObjectPropertiesPanel sceneRef={sceneRef} refresh={refresh} tick={tick} />
+          </div>
+        </>
+      ) : (
+        /* No selection — tree takes full remaining space */
+        <div style={{ flex: 1, overflowY: 'auto', overflowX: 'hidden', paddingTop: 1 }}>
+          {tree.length === 0 ? (
+            <div style={{ padding: 16, textAlign: 'center', fontSize: 10, color: 'var(--text-dim)' }}>
+              No objects in scene
+            </div>
+          ) : (
+            tree.map((node) => (
+              <TreeNode
+                key={node.object.uuid}
+                node={node}
+                depth={0}
+                sceneRef={sceneRef}
+                refresh={refresh}
+                onContextMenu={handleContextMenu}
+                onDragStart={handleDragStart}
+                onDragEnd={handleDragEnd}
+                onDropOnCollection={handleDropOnCollection}
+                dropTargetId={dropTargetId}
+              />
+            ))
+          )}
+          {/* No Selection placeholder at bottom */}
+          <div
+            style={{
+              borderTop: '1px solid var(--border)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              height: 48,
+              background: 'var(--bg-card)',
+              flexShrink: 0,
+            }}
+          >
+            <span style={{ fontSize: 10, color: 'var(--text-dim)', fontStyle: 'italic' }}>
+              No Selection
+            </span>
+          </div>
+        </div>
+      )}
 
       {/* ── Context Menu ── */}
       {ctxMenu && (
