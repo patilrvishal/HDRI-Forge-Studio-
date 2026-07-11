@@ -151,12 +151,30 @@ async function captureEnvironmentHDRI(
 
   // ── Method 3: WebGL PMREM capture ─────────────────────────────────────────
   if (scene.environment) {
-    console.log('[LightForge HDRI] Method 3: WebGL PMREM capture via CubeCamera');
+    // Method 3a: Render env texture as scene.background + CubeCamera
+    console.log('[LightForge HDRI] Method 3a: Capture env as scene.background + CubeCamera');
     try {
-      const pixels = capturePMREMAsEquirect(renderer, scene.environment, width, height);
-      if (pixels && hasValidData(pixels)) return pixels;
+      const pixels = captureEnvViaBackground(renderer, scene.environment, width, height);
+      if (pixels && hasValidData(pixels, 0.0001)) {
+        console.log('[LightForge HDRI] Method 3a succeeded');
+        return pixels;
+      }
+      console.log('[LightForge HDRI] Method 3a produced insufficient data, trying 3b');
     } catch (err) {
-      console.warn('[LightForge HDRI] Method 3 failed:', err);
+      console.warn('[LightForge HDRI] Method 3a failed:', err);
+    }
+
+    // Method 3b: Inverted mirror sphere with CubeCamera
+    console.log('[LightForge HDRI] Method 3b: Inverted mirror sphere + CubeCamera');
+    try {
+      const pixels = capturePMREMViaSphere(renderer, scene.environment, width, height);
+      if (pixels && hasValidData(pixels, 0.0001)) {
+        console.log('[LightForge HDRI] Method 3b succeeded');
+        return pixels;
+      }
+      console.log('[LightForge HDRI] Method 3b produced insufficient data');
+    } catch (err) {
+      console.warn('[LightForge HDRI] Method 3b failed:', err);
     }
   }
 
@@ -259,44 +277,34 @@ function renderTextureToEquirect(
   }
 }
 
-// ─── Method 3: WebGL CubeCamera + Cube-to-Equirect Capture ──────────────────
+// ─── Method 3a: Capture env as scene.background + CubeCamera ───────────────
 
 /**
- * Capture a PMREM environment texture as an equirectangular Float32 image.
- *
- * Strategy:
- *   1. Create an inverted sphere that displays the PMREM env via MeshStandardMaterial
- *   2. Use CubeCamera to capture 6 cube faces from inside
- *   3. Render cube faces to equirectangular via a fullscreen cube-sampling shader
- *   4. Read back Float32 pixels
+ * Capture an environment texture by setting it as scene.background on a
+ * temporary empty scene and using CubeCamera. This leverages Three.js's
+ * built-in background renderer which handles CubeUV/PMREM sampling.
  */
-function capturePMREMAsEquirect(
+function captureEnvViaBackground(
   renderer: THREE.WebGLRenderer,
   envTexture: THREE.Texture,
   width: number,
   height: number,
 ): Float32Array | null {
-  // Save renderer state
   const origToneMapping = renderer.toneMapping;
   const origToneMappingExposure = renderer.toneMappingExposure;
   const origOutputColorSpace = renderer.outputColorSpace;
   const currentRenderTarget = renderer.getRenderTarget();
 
-  // Disable tone mapping and color space for raw HDR capture
   renderer.toneMapping = THREE.NoToneMapping;
   renderer.toneMappingExposure = 1.0;
   renderer.outputColorSpace = THREE.LinearSRGBColorSpace;
 
   const cubeSize = Math.min(height, 1024);
-
-  // Create cube render target (Float32 for HDR)
   const cubeRT = new THREE.WebGLCubeRenderTarget(cubeSize, {
     type: THREE.FloatType,
     format: THREE.RGBAFormat,
     generateMipmaps: false,
   });
-
-  // Create equirect render target
   const equirectRT = new THREE.WebGLRenderTarget(width, height, {
     type: THREE.FloatType,
     format: THREE.RGBAFormat,
@@ -306,14 +314,78 @@ function capturePMREMAsEquirect(
   });
 
   try {
-    // Step 1: Create environment-only scene with inverted sphere
+    // Empty scene with environment as background
+    const bgScene = new THREE.Scene();
+    bgScene.background = envTexture;
+
+    // Capture 6 cube faces of the background
+    const cubeCamera = new THREE.CubeCamera(0.1, 100, cubeRT);
+    bgScene.add(cubeCamera);
+    cubeCamera.update(renderer, bgScene);
+
+    // Convert cube → equirectangular
+    const pixels = cubeToEquirect(renderer, cubeRT, equirectRT, width, height);
+
+    cubeRT.dispose();
+    equirectRT.dispose();
+    return pixels;
+  } catch (err) {
+    console.error('[LightForge HDRI] Background capture failed:', err);
+    cubeRT.dispose();
+    equirectRT.dispose();
+    return null;
+  } finally {
+    renderer.toneMapping = origToneMapping;
+    renderer.toneMappingExposure = origToneMappingExposure;
+    renderer.outputColorSpace = origOutputColorSpace;
+    renderer.setRenderTarget(currentRenderTarget);
+  }
+}
+
+// ─── Method 3b: Inverted mirror sphere + CubeCamera ─────────────────────────
+
+/**
+ * Capture a PMREM environment texture using an inverted sphere with
+ * metalness=1 (perfect mirror) and CubeCamera.
+ */
+function capturePMREMViaSphere(
+  renderer: THREE.WebGLRenderer,
+  envTexture: THREE.Texture,
+  width: number,
+  height: number,
+): Float32Array | null {
+  const origToneMapping = renderer.toneMapping;
+  const origToneMappingExposure = renderer.toneMappingExposure;
+  const origOutputColorSpace = renderer.outputColorSpace;
+  const currentRenderTarget = renderer.getRenderTarget();
+
+  renderer.toneMapping = THREE.NoToneMapping;
+  renderer.toneMappingExposure = 1.0;
+  renderer.outputColorSpace = THREE.LinearSRGBColorSpace;
+
+  const cubeSize = Math.min(height, 1024);
+  const cubeRT = new THREE.WebGLCubeRenderTarget(cubeSize, {
+    type: THREE.FloatType,
+    format: THREE.RGBAFormat,
+    generateMipmaps: false,
+  });
+  const equirectRT = new THREE.WebGLRenderTarget(width, height, {
+    type: THREE.FloatType,
+    format: THREE.RGBAFormat,
+    minFilter: THREE.LinearFilter,
+    magFilter: THREE.LinearFilter,
+    generateMipmaps: false,
+  });
+
+  try {
     const envScene = new THREE.Scene();
 
+    // metalness=1.0 for 100% environment reflection (dielectric only reflects ~4%)
     const sphereGeo = new THREE.SphereGeometry(50, 128, 64);
     const sphereMat = new THREE.MeshStandardMaterial({
       side: THREE.BackSide,
       roughness: 0.0,
-      metalness: 0.0,
+      metalness: 1.0,
       color: 0xffffff,
       envMap: envTexture,
       envMapIntensity: 1.0,
@@ -321,100 +393,111 @@ function capturePMREMAsEquirect(
     const sphere = new THREE.Mesh(sphereGeo, sphereMat);
     envScene.add(sphere);
 
-    // Small ambient so MeshStandardMaterial is "active"
     const ambient = new THREE.AmbientLight(0xffffff, 0.001);
     envScene.add(ambient);
 
-    // Step 2: Capture with CubeCamera
     const cubeCamera = new THREE.CubeCamera(0.1, 100, cubeRT);
     envScene.add(cubeCamera);
     cubeCamera.update(renderer, envScene);
 
-    // Step 3: Convert cube faces to equirectangular
-    const convertScene = new THREE.Scene();
-    const convertCamera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
-
-    const quadGeo = new THREE.PlaneGeometry(2, 2);
-    const quadMat = new THREE.ShaderMaterial({
-      depthTest: false,
-      depthWrite: false,
-      uniforms: {
-        tCubeMap: { value: cubeRT.texture },
-      },
-      vertexShader: /* glsl */ `
-        varying vec2 vUv;
-        void main() {
-          vUv = uv;
-          gl_Position = vec4(position.xy, 0.0, 1.0);
-        }
-      `,
-      fragmentShader: /* glsl */ `
-        uniform samplerCube tCubeMap;
-        varying vec2 vUv;
-
-        const float PI = 3.141592653589793;
-
-        void main() {
-          // Convert equirectangular UV to 3D direction
-          float theta = vUv.x * 2.0 * PI;
-          float phi = vUv.y * PI;
-
-          vec3 dir = vec3(
-            sin(phi) * sin(theta),
-            cos(phi),
-            sin(phi) * cos(theta)
-          );
-
-          vec4 color = textureCube(tCubeMap, dir);
-          gl_FragColor = vec4(color.rgb, 1.0);
-        }
-      `,
-    });
-
-    const quad = new THREE.Mesh(quadGeo, quadMat);
-    convertScene.add(quad);
-
-    // Render cube → equirectangular
-    renderer.setRenderTarget(equirectRT);
-    renderer.render(convertScene, convertCamera);
-
-    // Step 4: Read back pixels
-    const pixels = new Float32Array(width * height * 4);
-    renderer.readRenderTargetPixels(equirectRT, 0, 0, width, height, pixels);
-
-    // Flip bottom-to-top → top-to-bottom
-    flipVertical(pixels, width, height);
+    // Convert cube → equirectangular
+    const pixels = cubeToEquirect(renderer, cubeRT, equirectRT, width, height);
 
     // Cleanup
     sphereGeo.dispose();
     sphereMat.dispose();
-    quadGeo.dispose();
-    quadMat.dispose();
 
-    // Verify
+    // Log max value for diagnostics
     let maxVal = 0;
     for (let i = 0; i < pixels.length; i += 4) {
       const m = Math.max(pixels[i], pixels[i + 1], pixels[i + 2]);
       if (m > maxVal) maxVal = m;
     }
-    console.log(`[LightForge HDRI] CubeCamera capture: max value = ${maxVal.toFixed(4)}`);
-    if (maxVal < 0.0001) {
-      console.warn('[LightForge HDRI] CubeCamera capture produced near-zero values');
-      return null;
-    }
+    console.log(`[LightForge HDRI] Sphere capture: max value = ${maxVal.toFixed(4)}`);
 
+    cubeRT.dispose();
+    equirectRT.dispose();
     return pixels;
   } catch (err) {
-    console.error('[LightForge HDRI] CubeCamera capture error:', err);
+    console.error('[LightForge HDRI] Sphere capture error:', err);
+    cubeRT.dispose();
+    equirectRT.dispose();
     return null;
   } finally {
     renderer.toneMapping = origToneMapping;
     renderer.toneMappingExposure = origToneMappingExposure;
     renderer.outputColorSpace = origOutputColorSpace;
-    cubeRT.dispose();
-    equirectRT.dispose();
     renderer.setRenderTarget(currentRenderTarget);
   }
+}
+
+// ─── Shared: Cube → Equirectangular Conversion ──────────────────────────────
+
+/**
+ * Convert a cube render target to an equirectangular Float32 pixel array.
+ * Uses a fullscreen shader with standard samplerCube sampling.
+ */
+function cubeToEquirect(
+  renderer: THREE.WebGLRenderer,
+  cubeRT: THREE.WebGLCubeRenderTarget,
+  equirectRT: THREE.WebGLRenderTarget,
+  width: number,
+  height: number,
+): Float32Array {
+  const convertScene = new THREE.Scene();
+  const convertCamera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+
+  const quadGeo = new THREE.PlaneGeometry(2, 2);
+  const quadMat = new THREE.ShaderMaterial({
+    depthTest: false,
+    depthWrite: false,
+    uniforms: {
+      tCubeMap: { value: cubeRT.texture },
+    },
+    vertexShader: /* glsl */ `
+      varying vec2 vUv;
+      void main() {
+        vUv = uv;
+        gl_Position = vec4(position.xy, 0.0, 1.0);
+      }
+    `,
+    fragmentShader: /* glsl */ `
+      uniform samplerCube tCubeMap;
+      varying vec2 vUv;
+
+      const float PI = 3.141592653589793;
+
+      void main() {
+        float theta = vUv.x * 2.0 * PI;
+        float phi = vUv.y * PI;
+
+        vec3 dir = vec3(
+          sin(phi) * sin(theta),
+          cos(phi),
+          sin(phi) * cos(theta)
+        );
+
+        vec4 color = textureCube(tCubeMap, dir);
+        gl_FragColor = vec4(color.rgb, 1.0);
+      }
+    `,
+  });
+
+  const quad = new THREE.Mesh(quadGeo, quadMat);
+  convertScene.add(quad);
+
+  renderer.setRenderTarget(equirectRT);
+  renderer.render(convertScene, convertCamera);
+
+  const pixels = new Float32Array(width * height * 4);
+  renderer.readRenderTargetPixels(equirectRT, 0, 0, width, height, pixels);
+
+  flipVertical(pixels, width, height);
+
+  quadGeo.dispose();
+  quadMat.dispose();
+
+  return pixels;
 }
 
 // ─── Method 4: Analytical Light Radiance (Fallback) ──────────────────────────
@@ -1141,11 +1224,12 @@ function flipVertical(pixels: Float32Array, width: number, height: number): void
 
 /**
  * Check if pixel data has any meaningful non-zero values.
+ * @param threshold Minimum max-channel value to count as "valid" (default 0.001).
  */
-function hasValidData(pixels: Float32Array): boolean {
+function hasValidData(pixels: Float32Array, threshold: number = 0.001): boolean {
   for (let i = 0; i < pixels.length; i += 4) {
     const m = Math.max(pixels[i], pixels[i + 1], pixels[i + 2]);
-    if (m > 0.001) return true;
+    if (m > threshold) return true;
   }
   return false;
 }

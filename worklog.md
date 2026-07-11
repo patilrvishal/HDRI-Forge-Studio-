@@ -343,3 +343,27 @@ Stage Summary:
 - /home/z/my-project/download/test_hdri_export.hdr: Valid test HDR file
 - /home/z/my-project/download/test_hdri_export.exr: Valid test EXR file
 
+---
+Task ID: 2
+Agent: Main Agent
+Task: Fix HDRI export producing black/noise output (capture pipeline)
+
+Work Log:
+- Analyzed user screenshot: mostly black with thin noise strip at top = analytical fallback
+- Root cause: Method 3 (PMREM capture) used metalness=0.0 (dielectric), reflecting only ~4% of environment
+- The 4% reflection was below hasValidData threshold (0.001), so Method 3 returned null
+- Fell through to Method 4 (analytical) which produces light-source-only output
+
+Fixes applied:
+1. Split Method 3 into two sub-methods:
+   - Method 3a: Sets envTexture as scene.background on temp scene + CubeCamera (leverages Three.js built-in background renderer for CubeUV/PMREM)
+   - Method 3b: Inverted sphere with metalness=1.0 (perfect mirror, 100% reflection)
+2. Extracted cubeToEquirect() as shared helper function
+3. Made hasValidData() accept configurable threshold (0.0001 for PMREM methods vs 0.001 for texture methods)
+4. Added detailed console logging for which method succeeds/fails
+
+Stage Summary:
+- /home/z/my-project/lightstudio/src/three/HDRIExporter.ts: Updated PMREM capture pipeline
+- Both approaches (3a background, 3b mirror sphere) now tried before falling back to analytical
+- TypeScript: 0 errors, encoding tests: ALL PASSED
+
