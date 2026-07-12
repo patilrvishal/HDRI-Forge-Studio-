@@ -199,23 +199,33 @@ export class SceneManager {
 
     if (merged.reflections) {
       // ── CubeCamera for real-time planar reflections ──
-      const dpr = Math.min(window.devicePixelRatio, 2);
-      const cubeRTSize = Math.max(128, Math.round(512 * dpr));
+      try {
+        const dpr = Math.min(window.devicePixelRatio, 2);
+        const cubeRTSize = Math.max(128, Math.round(512 * dpr));
 
-      this._floorCubeRT = new THREE.WebGLCubeRenderTarget(cubeRTSize, {
-        generateMipmaps: true,
-        minFilter: THREE.LinearMipmapLinearFilter,
-        magFilter: THREE.LinearFilter,
-      });
+        this._floorCubeRT = new THREE.WebGLCubeRenderTarget(cubeRTSize, {
+          generateMipmaps: true,
+          minFilter: THREE.LinearMipmapLinearFilter,
+          magFilter: THREE.LinearFilter,
+        });
 
-      this._floorCubeCamera = new THREE.CubeCamera(0.1, 100, this._floorCubeRT);
-      this._floorCubeCamera.position.set(0, 0.01, 0); // slightly above floor
-      this._floorCubeCamera.userData.isProxy = true; // hide from SceneHierarchy
-      this.scene.add(this._floorCubeCamera);
+        this._floorCubeCamera = new THREE.CubeCamera(0.1, 100, this._floorCubeRT);
+        this._floorCubeCamera.position.set(0, 0.01, 0); // slightly above floor
+        this._floorCubeCamera.userData.isProxy = true; // hide from SceneHierarchy
+        this.scene.add(this._floorCubeCamera);
 
-      // Use CubeCamera texture as envMap; roughness controls blur via mip levels
-      groundMat.envMap = this._floorCubeRT.texture;
-      groundMat.envMapIntensity = merged.reflectionSharpness;
+        // Use CubeCamera texture as envMap; roughness controls blur via mip levels
+        groundMat.envMap = this._floorCubeRT.texture;
+        groundMat.envMapIntensity = merged.reflectionSharpness;
+      } catch (e) {
+        console.warn('[LightForge] CubeCamera creation failed, falling back to env-only reflections:', e);
+        this._floorCubeCamera = null;
+        if (this._floorCubeRT) { this._floorCubeRT.dispose(); this._floorCubeRT = null; }
+        if (this.scene.environment) {
+          groundMat.envMap = this.scene.environment;
+        }
+        groundMat.envMapIntensity = 0.5;
+      }
     } else {
       // No real-time reflections — use scene environment map if available
       if (this.scene.environment) {

@@ -263,13 +263,28 @@ export const Viewport: React.FC<ViewportProps> = ({ sceneManagerRef, onScreensho
 
       // ── Update CubeCamera for PBR floor reflections ───────────────────
       if (sceneManager._floorCubeCamera && sceneManager.ground && sceneManager._groundSettings?.reflections) {
-        sceneManager.ground.visible = false;
-        sceneManager._floorCubeCamera.update(sceneManager.renderer, sceneManager.scene);
-        sceneManager.ground.visible = true;
+        try {
+          sceneManager.ground.visible = false;
+          sceneManager._floorCubeCamera.update(sceneManager.renderer, sceneManager.scene);
+          sceneManager.ground.visible = true;
+        } catch (e) {
+          sceneManager.ground.visible = true;
+          console.warn('[LightForge] CubeCamera update failed, disabling reflections:', e);
+          if (sceneManager._floorCubeCamera) {
+            sceneManager.scene.remove(sceneManager._floorCubeCamera);
+            sceneManager._floorCubeCamera.dispose();
+            sceneManager._floorCubeCamera = null;
+          }
+        }
       }
 
       sceneManager.controls.update();
-      renderPipeline.render();
+      try {
+        renderPipeline.render();
+      } catch (e) {
+        console.error('[LightForge] Render failed, falling back to direct render:', e);
+        sceneManager.renderer.render(sceneManager.scene, sceneManager.camera);
+      }
       sceneManager._animationId = requestAnimationFrame(loop);
     };
     sceneManager._animationId = requestAnimationFrame(loop);
@@ -367,7 +382,11 @@ export const Viewport: React.FC<ViewportProps> = ({ sceneManagerRef, onScreensho
   useEffect(() => {
     const sm = sceneManagerRef.current;
     if (!sm) return;
-    sm.updateGround(renderSettings.ground);
+    try {
+      sm.updateGround(renderSettings.ground);
+    } catch (e) {
+      console.error('[LightForge] Failed to update ground:', e);
+    }
   }, [renderSettings.ground, sceneManagerRef]);
 
   // Phase 9: Sync environment preset to 3D scene (built-in presets only)
@@ -383,11 +402,15 @@ export const Viewport: React.FC<ViewportProps> = ({ sceneManagerRef, onScreensho
     el.clearEquirectTexture();
     el.setBackgroundFromEnv(sm.scene, false);
 
-    const preset = getHDRIPresetById(environment.presetId);
-    if (!preset) return;
+    try {
+      const preset = getHDRIPresetById(environment.presetId);
+      if (!preset) return;
 
-    const envTexture = el.generateFromPreset(preset, sm.pmremGenerator, environment.rotation);
-    el.setEnvironmentTexture(sm.scene, envTexture, environment.intensity);
+      const envTexture = el.generateFromPreset(preset, sm.pmremGenerator, environment.rotation);
+      el.setEnvironmentTexture(sm.scene, envTexture, environment.intensity);
+    } catch (e) {
+      console.error('[LightForge] Failed to sync environment preset:', e);
+    }
   }, [environment.presetId, environment.rotation, environment.intensity, sceneManagerRef, envLoaderRef]);
 
   // Phase 9: Load custom HDRI file into the 3D scene
@@ -479,33 +502,37 @@ export const Viewport: React.FC<ViewportProps> = ({ sceneManagerRef, onScreensho
   useEffect(() => {
     const rp = renderPipelineRef.current;
     if (!rp) return;
-    rp.setEngine(renderSettings.engine);
-    rp.setToneMapping(renderSettings.tonemapping);
-    rp.setExposure(renderSettings.exposure);
-    rp.setQuality(renderSettings.quality);
-    rp.setShadowQuality(renderSettings.shadowQuality);
-    rp.setBloom(
-      renderSettings.bloom.enabled,
-      renderSettings.bloom.intensity,
-      renderSettings.bloom.threshold,
-      renderSettings.bloom.radius
-    );
-    rp.setAO(
-      renderSettings.ao.enabled,
-      renderSettings.ao.radius,
-      renderSettings.ao.intensity
-    );
-    rp.setAntialiasing(renderSettings.antialiasing);
-    rp.setVignette(
-      renderSettings.vignette.enabled,
-      renderSettings.vignette.intensity
-    );
-    rp.setColorGrading(
-      renderSettings.colorGrading.enabled,
-      renderSettings.colorGrading.brightness,
-      renderSettings.colorGrading.contrast,
-      renderSettings.colorGrading.saturation
-    );
+    try {
+      rp.setEngine(renderSettings.engine);
+      rp.setToneMapping(renderSettings.tonemapping);
+      rp.setExposure(renderSettings.exposure);
+      rp.setQuality(renderSettings.quality);
+      rp.setShadowQuality(renderSettings.shadowQuality);
+      rp.setBloom(
+        renderSettings.bloom.enabled,
+        renderSettings.bloom.intensity,
+        renderSettings.bloom.threshold,
+        renderSettings.bloom.radius
+      );
+      rp.setAO(
+        renderSettings.ao.enabled,
+        renderSettings.ao.radius,
+        renderSettings.ao.intensity
+      );
+      rp.setAntialiasing(renderSettings.antialiasing);
+      rp.setVignette(
+        renderSettings.vignette.enabled,
+        renderSettings.vignette.intensity
+      );
+      rp.setColorGrading(
+        renderSettings.colorGrading.enabled,
+        renderSettings.colorGrading.brightness,
+        renderSettings.colorGrading.contrast,
+        renderSettings.colorGrading.saturation
+      );
+    } catch (e) {
+      console.error('[LightForge] Failed to sync render settings:', e);
+    }
   }, [renderSettings, renderPipelineRef]);
 
   // Sync lights to scene

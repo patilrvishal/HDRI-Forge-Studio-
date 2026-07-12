@@ -381,7 +381,9 @@ export const AppLayout: React.FC = () => {
               position: 'relative',
             }}
           >
-            <Viewport sceneManagerRef={sceneManagerRef} onScreenshot={handleScreenshot} onReady={handleViewportReady} />
+            <ErrorBoundary>
+              <Viewport sceneManagerRef={sceneManagerRef} onScreenshot={handleScreenshot} onReady={handleViewportReady} />
+            </ErrorBoundary>
 
             {/* Viewport Design Panel — floating overlay */}
             {viewportDesignVisible && !focusMode && <ViewportDesignPanel />}

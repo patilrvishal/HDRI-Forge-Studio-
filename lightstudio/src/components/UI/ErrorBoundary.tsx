@@ -40,6 +40,9 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
         return this.props.fallback;
       }
 
+      const errMsg = this.state.error?.message || 'Unknown error';
+      const errStack = this.state.error?.stack || '';
+
       return (
         <div
           style={{
@@ -64,15 +67,35 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
               fontSize: 9,
               color: 'var(--danger)',
               fontFamily: 'var(--font-mono)',
-              maxWidth: '90%',
+              maxWidth: '95%',
               overflow: 'hidden',
-              textOverflow: 'ellipsis',
-              whiteSpace: 'nowrap',
+              wordBreak: 'break-all',
+              lineHeight: 1.4,
             }}
-            title={this.state.error?.message}
+            title={errMsg}
           >
-            {this.state.error?.message || 'Unknown error'}
+            {errMsg}
           </span>
+          {errStack && (
+            <pre
+              style={{
+                fontSize: 8,
+                color: 'var(--text-dim)',
+                fontFamily: 'var(--font-mono)',
+                maxWidth: '95%',
+                maxHeight: 120,
+                overflow: 'auto',
+                background: 'rgba(0,0,0,0.3)',
+                padding: '4px 8px',
+                borderRadius: 4,
+                lineHeight: 1.3,
+                whiteSpace: 'pre-wrap',
+                wordBreak: 'break-all',
+              }}
+            >
+              {errStack}
+            </pre>
+          )}
           <button
             onClick={this.handleRetry}
             style={{
