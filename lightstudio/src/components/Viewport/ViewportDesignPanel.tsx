@@ -420,8 +420,9 @@ export const ViewportDesignPanel: React.FC = () => {
           </div>
         </div>
         <MiniSlider label="Reflection" value={renderSettings.ground.reflectionSharpness} min={0} max={1} step={0.01} onChange={(v) => setRenderSettings({ ground: { ...renderSettings.ground, reflectionSharpness: v } })} />
-        <MiniSlider label="Fade Radius" value={renderSettings.ground.fadeRadius} min={0} max={20} step={0.5} onChange={(v) => setRenderSettings({ ground: { ...renderSettings.ground, fadeRadius: v } })} />
         <MiniSlider label="Roughness" value={renderSettings.ground.roughness} min={0} max={1} step={0.01} onChange={(v) => setRenderSettings({ ground: { ...renderSettings.ground, roughness: v } })} />
+        <MiniSlider label="Metalness" value={renderSettings.ground.metalness} min={0} max={1} step={0.01} onChange={(v) => setRenderSettings({ ground: { ...renderSettings.ground, metalness: v } })} />
+        <MiniSlider label="Fade Radius" value={renderSettings.ground.fadeRadius} min={0} max={20} step={0.5} onChange={(v) => setRenderSettings({ ground: { ...renderSettings.ground, fadeRadius: v } })} />
       </Section>
     </div>
   );

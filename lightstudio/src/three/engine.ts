@@ -10,7 +10,6 @@ import { SMAAPass } from 'three/addons/postprocessing/SMAAPass.js';
 import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
 import { SSAOPass } from 'three/addons/postprocessing/SSAOPass.js';
 import { FXAAShader } from 'three/addons/shaders/FXAAShader.js';
-import { Reflector } from 'three/addons/objects/Reflector.js';
 import type { GroundSettings } from '../types/Scene';
 
 let _rectAreaLibInitialized = false;
@@ -34,8 +33,7 @@ export class SceneManager {
   renderer: THREE.WebGLRenderer;
   controls: OrbitControls;
   container: HTMLElement | null = null;
-  ground: THREE.Mesh | Reflector | null = null;
-  groundReflector: Reflector | null = null;
+  ground: THREE.Mesh | null = null;
   groundOverlay: THREE.Mesh | null = null;
   grid: THREE.GridHelper | null = null;
   _groundSettings: GroundSettings | null = null;
@@ -45,6 +43,10 @@ export class SceneManager {
   _onFrame: ((delta: number) => void) | null = null;
   _turntableActive = false;
   _turntableSpeed = 1.0;
+  /** CubeCamera for real-time PBR floor reflections */
+  _floorCubeCamera: THREE.CubeCamera | null = null;
+  _floorCubeRT: THREE.WebGLCubeRenderTarget | null = null;
+  _floorMaterial: THREE.MeshStandardMaterial | null = null;
 
   constructor() {
     this.scene = new THREE.Scene();
@@ -93,8 +95,10 @@ export class SceneManager {
 
     // Ground plane (placeholder — will be replaced by updateGround)
     this.ground = null;
-    this.groundReflector = null;
     this.groundOverlay = null;
+    this._floorCubeCamera = null;
+    this._floorCubeRT = null;
+    this._floorMaterial = null;
 
     this.setGrid(true);
     this.resize();
@@ -128,12 +132,6 @@ export class SceneManager {
 
   /** Remove existing ground objects from the scene and dispose their resources. */
   private _disposeGround(): void {
-    if (this.groundReflector) {
-      this.scene.remove(this.groundReflector);
-      this.groundReflector.geometry.dispose();
-      (this.groundReflector.material as THREE.Material).dispose();
-      this.groundReflector = null;
-    }
     if (this.groundOverlay) {
       this.scene.remove(this.groundOverlay);
       this.groundOverlay.geometry.dispose();
@@ -150,12 +148,22 @@ export class SceneManager {
       }
       this.ground = null;
     }
+    if (this._floorCubeCamera) {
+      this._floorCubeCamera.dispose();
+      this._floorCubeCamera = null;
+    }
+    if (this._floorCubeRT) {
+      this._floorCubeRT.dispose();
+      this._floorCubeRT = null;
+    }
+    this._floorMaterial = null;
   }
 
   /**
    * Rebuild the ground plane according to the given settings.
-   * - reflections=true  → Three.js Reflector (mirror) + fade overlay
-   * - reflections=false → MeshStandardMaterial with configurable PBR properties
+   * Always uses MeshStandardMaterial (PBR) so roughness/metalness work correctly.
+   * - reflections=true  → CubeCamera real-time reflections via envMap
+   * - reflections=false → Scene environment only (or none)
    */
   updateGround(settings?: GroundSettings | null): void {
     if (!settings) return;
@@ -179,110 +187,84 @@ export class SceneManager {
     const groundGeo = new THREE.PlaneGeometry(GROUND_SIZE, GROUND_SIZE);
     const color = new THREE.Color(merged.color);
 
+    // ── PBR ground material (always MeshStandardMaterial) ──
+    const groundMat = new THREE.MeshStandardMaterial({
+      color: color.getHex(),
+      metalness: merged.metalness,
+      roughness: merged.roughness,
+      envMapIntensity: 1.0,
+      side: THREE.FrontSide,
+    });
+    this._floorMaterial = groundMat;
+
     if (merged.reflections) {
-      // ── Reflective ground (mirror floor) ──
+      // ── CubeCamera for real-time planar reflections ──
       const dpr = Math.min(window.devicePixelRatio, 2);
-      // Lower resolution = blurrier reflection. Sharpness 1 → full res, 0 → 1/4 res.
-      const resScale = 0.25 + 0.75 * merged.reflectionSharpness;
+      const cubeRTSize = Math.max(128, Math.round(512 * dpr));
 
-      this.groundReflector = new Reflector(groundGeo, {
-        clipBias: 0.003,
-        textureWidth: Math.max(128, Math.round(1920 * resScale * dpr)),
-        textureHeight: Math.max(128, Math.round(1080 * resScale * dpr)),
-        color: color.getHex(),
-        multisample: merged.reflectionSharpness > 0.5 ? 4 : 0,
+      this._floorCubeRT = new THREE.WebGLCubeRenderTarget(cubeRTSize, {
+        generateMipmaps: true,
+        minFilter: THREE.LinearMipmapLinearFilter,
+        magFilter: THREE.LinearFilter,
       });
-      this.groundReflector.rotation.x = -Math.PI / 2;
-      this.groundReflector.position.y = -0.005;
-      this.scene.add(this.groundReflector);
 
-      // ── Fade overlay: fades ground edges into background ──
-      if (merged.fadeRadius > 0) {
-        const overlayGeo = new THREE.PlaneGeometry(GROUND_SIZE, GROUND_SIZE);
-        const overlayMat = new THREE.ShaderMaterial({
-          transparent: true,
-          depthWrite: false,
-          uniforms: {
-            uFadeRadius: { value: merged.fadeRadius },
-            uGroundSize: { value: GROUND_SIZE / 2 },
-          },
-          vertexShader: /* glsl */ `
-            varying vec2 vWorldPos;
-            void main() {
-              vec4 worldPos = modelMatrix * vec4(position, 1.0);
-              vWorldPos = worldPos.xz;
-              gl_Position = projectionMatrix * viewMatrix * worldPos;
-            }
-          `,
-          fragmentShader: /* glsl */ `
-            uniform float uFadeRadius;
-            uniform float uGroundSize;
-            varying vec2 vWorldPos;
-            void main() {
-              float dist = length(vWorldPos);
-              float alpha = 1.0 - smoothstep(uFadeRadius, uGroundSize, dist);
-              gl_FragColor = vec4(0.0, 0.0, 0.0, 1.0 - alpha);
-            }
-          `,
-        });
-        this.groundOverlay = new THREE.Mesh(overlayGeo, overlayMat);
-        this.groundOverlay.rotation.x = -Math.PI / 2;
-        this.groundOverlay.position.y = -0.003;
-        this.scene.add(this.groundOverlay);
-      }
+      this._floorCubeCamera = new THREE.CubeCamera(0.1, 100, this._floorCubeRT);
+      this._floorCubeCamera.position.set(0, 0.01, 0); // slightly above floor
+      this.scene.add(this._floorCubeCamera);
 
-      this.ground = this.groundReflector;
+      // Use CubeCamera texture as envMap; roughness controls blur via mip levels
+      groundMat.envMap = this._floorCubeRT.texture;
+      groundMat.envMapIntensity = merged.reflectionSharpness;
     } else {
-      // ── Standard PBR ground (no reflections) ──
-      const groundMat = new THREE.MeshStandardMaterial({
-        color: color.getHex(),
-        metalness: merged.metalness,
-        roughness: merged.roughness,
-        envMapIntensity: 0.5,
-      });
-      this.ground = new THREE.Mesh(groundGeo, groundMat);
-      this.ground.rotation.x = -Math.PI / 2;
-      this.ground.position.y = -0.01;
-      this.ground.receiveShadow = true;
-
-      // Fade overlay for non-reflective ground too
-      if (merged.fadeRadius > 0) {
-        const overlayGeo = new THREE.PlaneGeometry(GROUND_SIZE, GROUND_SIZE);
-        const overlayMat = new THREE.ShaderMaterial({
-          transparent: true,
-          depthWrite: false,
-          uniforms: {
-            uFadeRadius: { value: merged.fadeRadius },
-            uGroundSize: { value: GROUND_SIZE / 2 },
-            uBgColor: { value: new THREE.Color('#0d0d1a') },
-          },
-          vertexShader: /* glsl */ `
-            varying vec2 vWorldPos;
-            void main() {
-              vec4 worldPos = modelMatrix * vec4(position, 1.0);
-              vWorldPos = worldPos.xz;
-              gl_Position = projectionMatrix * viewMatrix * worldPos;
-            }
-          `,
-          fragmentShader: /* glsl */ `
-            uniform float uFadeRadius;
-            uniform float uGroundSize;
-            uniform vec3 uBgColor;
-            varying vec2 vWorldPos;
-            void main() {
-              float dist = length(vWorldPos);
-              float fade = 1.0 - smoothstep(uFadeRadius, uGroundSize, dist);
-              gl_FragColor = vec4(uBgColor, 1.0 - fade);
-            }
-          `,
-        });
-        this.groundOverlay = new THREE.Mesh(overlayGeo, overlayMat);
-        this.groundOverlay.rotation.x = -Math.PI / 2;
-        this.groundOverlay.position.y = -0.003;
-        this.scene.add(this.groundOverlay);
+      // No real-time reflections — use scene environment map if available
+      if (this.scene.environment) {
+        groundMat.envMap = this.scene.environment;
       }
+      groundMat.envMapIntensity = 0.5;
+    }
 
-      this.scene.add(this.ground);
+    this.ground = new THREE.Mesh(groundGeo, groundMat);
+    this.ground.rotation.x = -Math.PI / 2;
+    this.ground.position.y = -0.005;
+    this.ground.receiveShadow = true;
+    this.ground.name = '__floor__';
+    this.scene.add(this.ground);
+
+    // ── Fade overlay: fades ground edges into background ──
+    if (merged.fadeRadius > 0) {
+      const overlayGeo = new THREE.PlaneGeometry(GROUND_SIZE, GROUND_SIZE);
+      const overlayMat = new THREE.ShaderMaterial({
+        transparent: true,
+        depthWrite: false,
+        uniforms: {
+          uFadeRadius: { value: merged.fadeRadius },
+          uGroundSize: { value: GROUND_SIZE / 2 },
+          uBgColor: { value: new THREE.Color('#0d0d1a') },
+        },
+        vertexShader: /* glsl */ `
+          varying vec2 vWorldPos;
+          void main() {
+            vec4 worldPos = modelMatrix * vec4(position, 1.0);
+            vWorldPos = worldPos.xz;
+            gl_Position = projectionMatrix * viewMatrix * worldPos;
+          }
+        `,
+        fragmentShader: /* glsl */ `
+          uniform float uFadeRadius;
+          uniform float uGroundSize;
+          uniform vec3 uBgColor;
+          varying vec2 vWorldPos;
+          void main() {
+            float dist = length(vWorldPos);
+            float fade = 1.0 - smoothstep(uFadeRadius, uGroundSize, dist);
+            gl_FragColor = vec4(uBgColor, 1.0 - fade);
+          }
+        `,
+      });
+      this.groundOverlay = new THREE.Mesh(overlayGeo, overlayMat);
+      this.groundOverlay.rotation.x = -Math.PI / 2;
+      this.groundOverlay.position.y = -0.003;
+      this.scene.add(this.groundOverlay);
     }
   }
 
@@ -357,6 +339,13 @@ export class SceneManager {
         }
       }
 
+      // Update CubeCamera for PBR floor reflections (hide floor to avoid self-reflection)
+      if (this._floorCubeCamera && this.ground && this._groundSettings?.reflections) {
+        this.ground.visible = false;
+        this._floorCubeCamera.update(this.renderer, this.scene);
+        this.ground.visible = true;
+      }
+
       if (this._onFrame) this._onFrame(delta);
       this.controls.update();
       this.renderer.render(this.scene, this.camera);
@@ -370,7 +359,8 @@ export class SceneManager {
         child.type === 'Group' &&
         !(child instanceof THREE.GridHelper) &&
         !child.userData.isHelper &&
-        child !== this.ground
+        child !== this.ground &&
+        child !== this._floorCubeCamera
       ) {
         return child;
       }

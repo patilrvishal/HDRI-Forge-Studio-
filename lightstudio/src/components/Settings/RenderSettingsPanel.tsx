@@ -268,14 +268,10 @@ export const RenderSettingsPanel: React.FC<RenderSettingsPanelProps> = ({ onClos
               <>
                 <Toggle label="Floor Reflections" checked={rs.ground.reflections} onChange={handleGroundReflections} />
                 {rs.ground.reflections && (
-                  <Slider label="Reflection Sharpness" value={rs.ground.reflectionSharpness} min={0} max={1} step={0.05} onChange={handleGroundSharpness} />
+                  <Slider label="Reflection Intensity" value={rs.ground.reflectionSharpness} min={0} max={1} step={0.05} onChange={handleGroundSharpness} />
                 )}
-                {!rs.ground.reflections && (
-                  <>
-                    <Slider label="Roughness" value={rs.ground.roughness} min={0} max={1} step={0.05} onChange={handleGroundRoughness} />
-                    <Slider label="Metalness" value={rs.ground.metalness} min={0} max={1} step={0.05} onChange={handleGroundMetalness} />
-                  </>
-                )}
+                <Slider label="Roughness" value={rs.ground.roughness} min={0} max={1} step={0.05} onChange={handleGroundRoughness} />
+                <Slider label="Metalness" value={rs.ground.metalness} min={0} max={1} step={0.05} onChange={handleGroundMetalness} />
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                   <span className="slider-label">Color</span>
                   <input

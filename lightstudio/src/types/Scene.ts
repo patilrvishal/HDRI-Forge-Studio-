@@ -35,9 +35,9 @@ export interface AOSettings {
 export interface GroundSettings {
   /** Show the ground plane */
   visible: boolean;
-  /** Enable mirror-like floor reflections (Reflector) */
+  /** Enable real-time floor reflections (CubeCamera + PBR) */
   reflections: boolean;
-  /** Reflection sharpness 0–1 (0 = blurry, 1 = mirror) */
+  /** Reflection intensity 0–1 (controls envMapIntensity of reflections) */
   reflectionSharpness: number;
   /** Ground color (hex) */
   color: string;
