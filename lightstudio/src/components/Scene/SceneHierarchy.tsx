@@ -108,9 +108,6 @@ function getAllCollections(scene: THREE.Scene): THREE.Group[] {
 
 function countCollections(scene: THREE.Scene): number {
   let count = 0;
-  for (const child of scene.children) {
-    if (isCollection(child)) count++;
-  }
   scene.traverse((child) => {
     if (child !== scene && isCollection(child)) count++;
   });
@@ -1737,6 +1734,7 @@ export const SceneHierarchy: React.FC<SceneHierarchyProps> = ({ sceneRef }) => {
     if (!scene) return;
     useSceneHierarchyStore.getState().showAll();
     scene.traverse((child) => {
+      if (child.userData.isGrid || child.userData.isProxy) return;
       child.visible = true;
     });
     refresh();

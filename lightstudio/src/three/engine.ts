@@ -210,6 +210,7 @@ export class SceneManager {
 
       this._floorCubeCamera = new THREE.CubeCamera(0.1, 100, this._floorCubeRT);
       this._floorCubeCamera.position.set(0, 0.01, 0); // slightly above floor
+      this._floorCubeCamera.userData.isProxy = true; // hide from SceneHierarchy
       this.scene.add(this._floorCubeCamera);
 
       // Use CubeCamera texture as envMap; roughness controls blur via mip levels
@@ -264,6 +265,7 @@ export class SceneManager {
       this.groundOverlay = new THREE.Mesh(overlayGeo, overlayMat);
       this.groundOverlay.rotation.x = -Math.PI / 2;
       this.groundOverlay.position.y = -0.003;
+      this.groundOverlay.userData.isProxy = true; // hide from SceneHierarchy
       this.scene.add(this.groundOverlay);
     }
   }
@@ -272,6 +274,7 @@ export class SceneManager {
     if (visible && !this.grid) {
       this.grid = new THREE.GridHelper(20, 40, 0x444466, 0x2a2a44);
       this.grid.position.y = 0.005;
+      this.grid.userData.isGrid = true; // hide from SceneHierarchy
       this.scene.add(this.grid);
     } else if (!visible && this.grid) {
       this.scene.remove(this.grid);
@@ -403,6 +406,7 @@ export class SceneManager {
   dispose(): void {
     this.stopRenderLoop();
     this.detach();
+    this._disposeGround(); // properly clean up CubeCamera + render targets
     this.pmremGenerator.dispose();
     this.scene.traverse((obj) => {
       if (obj instanceof THREE.Mesh) {

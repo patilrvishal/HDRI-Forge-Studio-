@@ -52,6 +52,15 @@ export interface SceneFile {
       shadowQuality: string;
       bloom: { enabled: boolean; intensity: number; threshold: number; radius: number };
       ao: { enabled: boolean; radius: number; intensity: number };
+      ground: {
+        visible: boolean;
+        reflections: boolean;
+        reflectionSharpness: number;
+        color: string;
+        roughness: number;
+        metalness: number;
+        fadeRadius: number;
+      };
       vignette: { enabled: boolean; intensity: number };
       colorGrading: { enabled: boolean; brightness: number; contrast: number; saturation: number };
       exportFormat: string;

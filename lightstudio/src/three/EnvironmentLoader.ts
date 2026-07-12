@@ -137,9 +137,9 @@ export class EnvironmentLoader {
       scene.environment = null;
     }
 
-    // Set envMapIntensity on all PBR materials
+    // Set envMapIntensity on all PBR materials (skip floor — it has its own envMap from CubeCamera)
     scene.traverse((child) => {
-      if (child instanceof THREE.Mesh && child.material) {
+      if (child instanceof THREE.Mesh && child.material && child.name !== '__floor__') {
         const materials = Array.isArray(child.material)
           ? child.material
           : [child.material];

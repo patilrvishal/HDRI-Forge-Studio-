@@ -1,0 +1,759 @@
+     1→     1→import React, { useRef, useEffect, useState, useCallback } from 'react';
+     2→     2→import * as THREE from 'three';
+     3→     3→import { useSceneStore } from '../../store/sceneStore';
+     4→     4→import { useLightsStore } from '../../store/lightsStore';
+     5→     5→import { useAnimationStore } from '../../store/animationStore';
+     6→     6→import { ThreeSceneProvider } from '../../hooks/useThreeScene';
+     7→     7→import { SceneManager, RenderPipeline, LightManager, ModelLoader } from '../../three/engine';
+     8→     8→import { animationEngine, AnimationEngine } from '../../three/AnimationEngine';
+     9→     9→import { EnvironmentLoader } from '../../three/EnvironmentLoader';
+    10→    10→import { getHDRIPresetById } from '../../types/Environment';
+    11→    11→import { base64ToArrayBuffer } from '../../store/modelDataStore';
+    12→    12→import { hdriBase64ToArrayBuffer, setRawHDRIData } from '../../store/hdriDataStore';
+    13→    13→import { ViewportToolbar } from './ViewportToolbar';
+    14→    14→import { CameraBookmarks } from './CameraBookmarks';
+    15→    15→import type { AnimatedProperty } from '../../types/Animation';
+    16→    16→import { MaterialManager } from '../../three/MaterialManager';
+    17→    17→import { useMaterialEditorStore } from '../../store/materialEditorStore';
+    18→    18→import { useUIStore } from '../../store/uiStore';
+    19→    19→
+    20→    20→interface ViewportProps {
+    21→    21→  sceneManagerRef: React.MutableRefObject<SceneManager | null>;
+    22→    22→  onScreenshot: (dataUrl: string) => void;
+    23→    23→  onReady?: (renderPipeline: RenderPipeline | null, materialManager: MaterialManager | null) => void;
+    24→    24→}
+    25→    25→
+    26→    26→export const Viewport: React.FC<ViewportProps> = ({ sceneManagerRef, onScreenshot, onReady }) => {
+    27→    27→  const containerRef = useRef<HTMLDivElement>(null);
+    28→    28→  const resizeObserverRef = useRef<ResizeObserver | null>(null);
+    29→    29→  const renderPipelineRef = useRef<RenderPipeline | null>(null);
+    30→    30→  const lightManagerRef = useRef<LightManager | null>(null);
+    31→    31→  const modelLoaderRef = useRef<ModelLoader | null>(null);
+    32→    32→  const envLoaderRef = useRef<EnvironmentLoader | null>(null);
+    33→    33→  const materialManagerRef = useRef<MaterialManager | null>(null);
+    34→    34→  const fileInputRef = useRef<HTMLInputElement>(null);
+    35→    35→  const animAccumulatorRef = useRef(0);
+    36→    36→  const mouseDownPos = useRef<{ x: number; y: number } | null>(null);
+    37→    37→
+    38→    38→  const [isDragging, setIsDragging] = useState(false);
+    39→    39→  const [loadProgress, setLoadProgress] = useState(0);
+    40→    40→  const [isLoading, setIsLoading] = useState(false);
+    41→    41→  const [loadError, setLoadError] = useState<string | null>(null);
+    42→    42→
+    43→    43→  // Store selectors
+    44→    44→  const showGrid = useSceneStore((s) => s.showGrid);
+    45→    45→  const turntable = useSceneStore((s) => s.turntable);
+    46→    46→  const environment = useSceneStore((s) => s.environment);
+    47→    47→  const renderSettings = useSceneStore((s) => s.renderSettings);
+    48→    48→  const setModel = useSceneStore((s) => s.setModel);
+    49→    49→  const setExposure = useSceneStore((s) => s.setExposure);
+    50→    50→  const setBloom = useSceneStore((s) => s.setBloom);
+    51→    51→  const pendingModelData = useSceneStore((s) => s._pendingModelDataBase64);
+    52→    52→  const pendingModelFileName = useSceneStore((s) => s._pendingModelFileName);
+    53→    53→  const clearPendingModelData = useSceneStore((s) => s.clearPendingModelData);
+    54→    54→  const pendingHDRIData = useSceneStore((s) => s._pendingHDRIDataBase64);
+    55→    55→  const clearPendingHDRIData = useSceneStore((s) => s.clearPendingHDRIData);
+    56→    56→  const backplate = useSceneStore((s) => s.environment.backplate);
+    57→    57→  const backplateOpacity = useSceneStore((s) => s.environment.backplateOpacity);
+    58→    58→
+    59→    59→  const lights = useLightsStore((s) => s.lights);
+    60→    60→  const updateLight = useLightsStore((s) => s.updateLight);
+    61→    61→
+    62→    62→  // Animation store selectors (non-reactive — read inside the loop via getState)
+    63→    63→  // We only use isPlaying for the dependency to know if animation is active
+    64→    64→
+    65→    65→  // Initialize the 3D scene on mount
+    66→    66→  useEffect(() => {
+    67→    67→    if (!containerRef.current) return;
+    68→    68→
+    69→    69→    const sceneManager = new SceneManager();
+    70→    70→    sceneManagerRef.current = sceneManager;
+    71→    71→    sceneManager.attach(containerRef.current);
+    72→    72→
+    73→    73→    const lightManager = new LightManager(sceneManager.scene);
+    74→    74→    lightManagerRef.current = lightManager;
+    75→    75→
+    76→    76→    const modelLoader = new ModelLoader(sceneManager.scene);
+    77→    77→    modelLoaderRef.current = modelLoader;
+    78→    78→
+    79→    79→    // Material Manager
+    80→    80→    const materialManager = new MaterialManager();
+    81→    81→    materialManagerRef.current = materialManager;
+    82→    82→
+    83→    83→    // Phase 9: Environment loader
+    84→    84→    const envLoader = new EnvironmentLoader();
+    85→    85→    envLoaderRef.current = envLoader;
+    86→    86→
+    87→    87→    modelLoader.setCallbacks({
+    88→    88→      onProgress: (p) => setLoadProgress(p),
+    89→    89→      onLoaded: (name) => {
+    90→    90→        setIsLoading(false);
+    91→    91→        setLoadProgress(100);
+    92→    92→        setModel('', name);
+    93→    93→
+    94→    94→        // Extract materials from the loaded model
+    95→    95→        setTimeout(() => {
+    96→    96→          const model = modelLoader.getCurrentModel?.();
+    97→    97→          if (model && materialManager) {
+    98→    98→            // Check if we have saved material states (from a scene file restore)
+    99→    99→            const savedMaterials = useMaterialEditorStore.getState().materials;
+   100→   100→            const hasSavedStates = savedMaterials.length > 0;
+   101→   101→
+   102→   102→            const matStates = materialManager.extractMaterials(model);
+   103→   103→
+   104→   104→            if (hasSavedStates) {
+   105→   105→              // Merge saved edits over the freshly extracted defaults
+   106→   106→              const merged = matStates.map((extracted) => {
+   107→   107→                const saved = savedMaterials.find((s) => s.name === extracted.name);
+   108→   108→                if (saved) {
+   109→   109→                  // Keep the extracted ID (it's linked to the materialMap), but use saved values
+   110→   110→                  return { ...extracted, ...saved, id: extracted.id };
+   111→   111→                }
+   112→   112→                return extracted;
+   113→   113→              });
+   114→   114→              useMaterialEditorStore.getState().setMaterials(merged);
+   115→   115→
+   116→   116→              requestAnimationFrame(() => {
+   117→   117→                materialManager.rebuildMaterialMap(sceneManager.scene, merged);
+   118→   118→                // Apply saved property overrides to Three.js materials
+   119→   119→                for (const state of merged) {
+   120→   120→                  materialManager.applyMaterialState(state, sceneManager.scene);
+   121→   121→                }
+   122→   122→              });
+   123→   123→            } else {
+   124→   124→              useMaterialEditorStore.getState().setMaterials(matStates);
+   125→   125→              requestAnimationFrame(() => {
+   126→   126→                materialManager.rebuildMaterialMap(sceneManager.scene, matStates);
+   127→   127→              });
+   128→   128→            }
+   129→   129→          }
+   130→   130→        }, 100);
+   131→   131→
+   132→   132→        setTimeout(() => setLoadProgress(0), 1000);
+   133→   133→      },
+   134→   134→      onError: (err) => {
+   135→   135→        setIsLoading(false);
+   136→   136→        setLoadProgress(0);
+   137→   137→        setLoadError(err);
+   138→   138→        setTimeout(() => setLoadError(null), 4000);
+   139→   139→      },
+   140→   140→    });
+   141→   141→
+   142→   142→    sceneManager.setGrid(true);
+   143→   143→
+   144→   144→    const renderPipeline = new RenderPipeline(sceneManager);
+   145→   145→    renderPipelineRef.current = renderPipeline;
+   146→   146→    renderPipeline.build();
+   147→   147→
+   148→   148→    // Phase 9: Apply default environment preset
+   149→   149→    const defaultPreset = getHDRIPresetById(useSceneStore.getState().environment.presetId);
+   150→   150→    if (defaultPreset && defaultPreset.id !== 'none') {
+   151→   151→      const envTexture = envLoader.generateFromPreset(defaultPreset, sceneManager.pmremGenerator, useSceneStore.getState().environment.rotation);
+   152→   152→      envLoader.setEnvironmentTexture(sceneManager.scene, envTexture, useSceneStore.getState().environment.intensity);
+   153→   153→    }
+   154→   154→
+   155→   155→    // Notify parent that the render pipeline is ready (for export)
+   156→   156→    onReady?.(renderPipeline, materialManager);
+   157→   157→
+   158→   158→    // ── Animation frame accumulator & tick callback ─────────────────────
+   159→   159→    const clock = new THREE.Clock();
+   160→   160→    animAccumulatorRef.current = 0;
+   161→   161→
+   162→   162→    const loop = () => {
+   163→   163→      const delta = clock.getDelta();
+   164→   164→
+   165→   165→      // ── Animation tick (frame-accurate playback) ──────────────────────
+   166→   166→      const animState = useAnimationStore.getState();
+   167→   167→      if (animState.isPlaying && animState.tracks.length > 0) {
+   168→   168→        animAccumulatorRef.current += delta;
+   169→   169→        const frameDuration = 1 / animState.fps;
+   170→   170→
+   171→   171→        while (animAccumulatorRef.current >= frameDuration) {
+   172→   172→          animAccumulatorRef.current -= frameDuration;
+   173→   173→          const wrapped = animState.tick();
+   174→   174→
+   175→   175→          // Evaluate animation at the new frame
+   176→   176→          const evaluated = animationEngine.evaluate(animState.tracks, animState.currentFrame);
+   177→   177→
+   178→   178→          // Apply evaluated values to stores
+   179→   179→          if (evaluated.values.size > 0) {
+   180→   180→            AnimationEngine.applyToScene(evaluated, {
+   181→   181→              updateLightProperty: (lightId: string, property: string, value: number) => {
+   182→   182→                const prop = property as AnimatedProperty;
+   183→   183→                const currentLight = useLightsStore.getState().lights.find((l) => l.id === lightId);
+   184→   184→                if (!currentLight) return;
+   185→   185→                const t = currentLight.transform;
+   186→   186→                switch (prop) {
+   187→   187→                  case 'light.brightness':
+   188→   188→                    updateLight(lightId, { brightness: value });
+   189→   189→                    break;
+   190→   190→                  case 'light.positionX':
+   191→   191→                    updateLight(lightId, { transform: { ...t, position: { ...t.position, x: value } } });
+   192→   192→                    break;
+   193→   193→                  case 'light.positionY':
+   194→   194→                    updateLight(lightId, { transform: { ...t, position: { ...t.position, y: value } } });
+   195→   195→                    break;
+   196→   196→                  case 'light.positionZ':
+   197→   197→                    updateLight(lightId, { transform: { ...t, position: { ...t.position, z: value } } });
+   198→   198→                    break;
+   199→   199→                  case 'light.rotationX':
+   200→   200→                    updateLight(lightId, { transform: { ...t, rotation: { ...t.rotation, x: value, enabled: true } } });
+   201→   201→                    break;
+   202→   202→                  case 'light.rotationY':
+   203→   203→                    updateLight(lightId, { transform: { ...t, rotation: { ...t.rotation, y: value, enabled: true } } });
+   204→   204→                    break;
+   205→   205→                  case 'light.rotationZ':
+   206→   206→                    updateLight(lightId, { transform: { ...t, rotation: { ...t.rotation, z: value, enabled: true } } });
+   207→   207→                    break;
+   208→   208→                }
+   209→   209→              },
+   210→   210→              updateCameraProperty: (_property: string, _value: number) => {
+   211→   211→                // Camera animation applied to SceneManager directly
+   212→   212→                const cam = sceneManager.camera;
+   213→   213→                const prop = _property as AnimatedProperty;
+   214→   214→                switch (prop) {
+   215→   215→                  case 'camera.positionX':
+   216→   216→                    cam.position.x = _value;
+   217→   217→                    break;
+   218→   218→                  case 'camera.positionY':
+   219→   219→                    cam.position.y = _value;
+   220→   220→                    break;
+   221→   221→                  case 'camera.positionZ':
+   222→   222→                    cam.position.z = _value;
+   223→   223→                    break;
+   224→   224→                  case 'camera.fov':
+   225→   225→                    cam.fov = _value;
+   226→   226→                    cam.updateProjectionMatrix();
+   227→   227→                    break;
+   228→   228→                  default:
+   229→   229→                    break;
+   230→   230→                }
+   231→   231→                sceneManager.controls.update();
+   232→   232→              },
+   233→   233→              updateTurntableProperty: (property: string, value: number) => {
+   234→   234→                if (property === 'turntable.speed') {
+   235→   235→                  sceneManager._turntableSpeed = value;
+   236→   236→                } else if (property === 'turntable.rotation') {
+   237→   237→                  const model = sceneManager._findModel();
+   238→   238→                  if (model) {
+   239→   239→                    model.rotation.y = (value * Math.PI) / 180;
+   240→   240→                  }
+   241→   241→                }
+   242→   242→              },
+   243→   243→              updateRenderProperty: (property: string, value: number) => {
+   244→   244→                if (property === 'render.exposure') {
+   245→   245→                  setExposure(value);
+   246→   246→                } else if (property === 'render.bloomIntensity') {
+   247→   247→                  setBloom({ intensity: value });
+   248→   248→                }
+   249→   249→              },
+   250→   250→            }, animState.tracks);
+   251→   251→          }
+   252→   252→        }
+   253→   253→      } else {
+   254→   254→        // Reset accumulator when not playing
+   255→   255→        animAccumulatorRef.current = 0;
+   256→   256→      }
+   257→   257→
+   258→   258→      // ── Turntable (non-animated, manual rotation) ─────────────────────
+   259→   259→      if (sceneManager._turntableActive) {
+   260→   260→        const model = sceneManager._findModel();
+   261→   261→        if (model) model.rotation.y += delta * sceneManager._turntableSpeed * 0.5;
+   262→   262→      }
+   263→   263→
+   264→   264→      sceneManager.controls.update();
+   265→   265→      renderPipeline.render();
+   266→   266→      sceneManager._animationId = requestAnimationFrame(loop);
+   267→   267→    };
+   268→   268→    sceneManager._animationId = requestAnimationFrame(loop);
+   269→   269→
+   270→   270→    // Set up resize observer
+   271→   271→    const observer = new ResizeObserver(() => {
+   272→   272→      sceneManager.resize();
+   273→   273→      renderPipeline.resize();
+   274→   274→    });
+   275→   275→    observer.observe(containerRef.current);
+   276→   276→    resizeObserverRef.current = observer;
+   277→   277→
+   278→   278→    return () => {
+   279→   279→      observer.disconnect();
+   280→   280→      sceneManager.stopRenderLoop();
+   281→   281→      renderPipeline.dispose();
+   282→   282→      modelLoader.dispose();
+   283→   283→      lightManager.dispose();
+   284→   284→      envLoader.dispose();
+   285→   285→      materialManager.dispose();
+   286→   286→      sceneManager.dispose();
+   287→   287→      sceneManagerRef.current = null;
+   288→   288→      renderPipelineRef.current = null;
+   289→   289→      lightManagerRef.current = null;
+   290→   290→      modelLoaderRef.current = null;
+   291→   291→      envLoaderRef.current = null;
+   292→   292→    };
+   293→   293→    // eslint-disable-next-line react-hooks/exhaustive-deps
+   294→   294→  }, []);
+   295→   295→
+   296→   296→  // Sync grid visibility
+   297→   297→  useEffect(() => {
+   298→   298→    sceneManagerRef.current?.setGrid(showGrid);
+   299→   299→  }, [showGrid, sceneManagerRef]);
+   300→   300→
+   301→   301→  // Backplate: render as scene.background when set
+   302→   302→  const backplateTextureRef = useRef<THREE.Texture | null>(null);
+   303→   303→
+   304→   304→  useEffect(() => {
+   305→   305→    const sm = sceneManagerRef.current;
+   306→   306→    if (!sm) return;
+   307→   307→
+   308→   308→    if (backplate) {
+   309→   309→      // Load backplate as texture for background
+   310→   310→      if (backplateTextureRef.current) {
+   311→   311→        backplateTextureRef.current.dispose();
+   312→   312→        backplateTextureRef.current = null;
+   313→   313→      }
+   314→   314→      const loader = new THREE.TextureLoader();
+   315→   315→      loader.load(backplate, (tex) => {
+   316→   316→        tex.colorSpace = THREE.SRGBColorSpace;
+   317→   317→        tex.minFilter = THREE.LinearFilter;
+   318→   318→        tex.magFilter = THREE.LinearFilter;
+   319→   319→        backplateTextureRef.current = tex;
+   320→   320→        if (backplateOpacity >= 0.99) {
+   321→   321→          sm.scene.background = tex;
+   322→   322→        }
+   323→   323→      });
+   324→   324→    } else {
+   325→   325→      if (backplateTextureRef.current) {
+   326→   326→        backplateTextureRef.current.dispose();
+   327→   327→        backplateTextureRef.current = null;
+   328→   328→      }
+   329→   329→      // Restore normal background behavior
+   330→   330→      sm.setBackground(
+   331→   331→        useSceneStore.getState().environment.background,
+   332→   332→        useSceneStore.getState().environment.showBackground,
+   333→   333→      );
+   334→   334→    }
+   335→   335→
+   336→   336→    return () => {
+   337→   337→      if (backplateTextureRef.current) {
+   338→   338→        backplateTextureRef.current.dispose();
+   339→   339→        backplateTextureRef.current = null;
+   340→   340→      }
+   341→   341→    };
+   342→   342→  }, [backplate, backplateOpacity, sceneManagerRef]);
+   343→   343→
+   344→   344→  // Sync environment background (only when no backplate and no custom HDRI backplate)
+   345→   345→  useEffect(() => {
+   346→   346→    const sm = sceneManagerRef.current;
+   347→   347→    const el = envLoaderRef.current;
+   348→   348→    if (!sm || backplate) return; // Skip if backplate is active
+   349→   349→
+   350→   350→    // If a custom HDRI is loaded, let it manage the background via setBackgroundFromEnv
+   351→   351→    if (environment.presetId === '__custom__' && el?.getEquirectTexture()) {
+   352→   352→      el.setBackgroundFromEnv(sm.scene, environment.showBackground);
+   353→   353→      return;
+   354→   354→    }
+   355→   355→
+   356→   356→    sm.setBackground(environment.background, environment.showBackground);
+   357→   357→  }, [environment.background, environment.showBackground, environment.presetId, sceneManagerRef, envLoaderRef, backplate]);
+   358→   358→
+   359→   359→  // Sync ground settings (reflections, fade, color, PBR)
+   360→   360→  useEffect(() => {
+   361→   361→    const sm = sceneManagerRef.current;
+   362→   362→    if (!sm) return;
+   363→   363→    sm.updateGround(renderSettings.ground);
+   364→   364→  }, [renderSettings.ground, sceneManagerRef]);
+   365→   365→
+   366→   366→  // Phase 9: Sync environment preset to 3D scene (built-in presets only)
+   367→   367→  useEffect(() => {
+   368→   368→    const sm = sceneManagerRef.current;
+   369→   369→    const el = envLoaderRef.current;
+   370→   370→    if (!sm || !el) return;
+   371→   371→
+   372→   372→    // Skip custom HDRI — handled by the separate effect below
+   373→   373→    if (environment.presetId === '__custom__') return;
+   374→   374→
+   375→   375→    // Built-in presets: clear any custom equirect, no 360° background
+   376→   376→    el.clearEquirectTexture();
+   377→   377→    el.setBackgroundFromEnv(sm.scene, false);
+   378→   378→
+   379→   379→    const preset = getHDRIPresetById(environment.presetId);
+   380→   380→    if (!preset) return;
+   381→   381→
+   382→   382→    const envTexture = el.generateFromPreset(preset, sm.pmremGenerator, environment.rotation);
+   383→   383→    el.setEnvironmentTexture(sm.scene, envTexture, environment.intensity);
+   384→   384→  }, [environment.presetId, environment.rotation, environment.intensity, sceneManagerRef, envLoaderRef]);
+   385→   385→
+   386→   386→  // Phase 9: Load custom HDRI file into the 3D scene
+   387→   387→  useEffect(() => {
+   388→   388→    const sm = sceneManagerRef.current;
+   389→   389→    const el = envLoaderRef.current;
+   390→   390→    if (!sm || !el) return;
+   391→   391→
+   392→   392→    if (environment.presetId === '__custom__' && environment.hdri) {
+   393→   393→      el.loadHDRI(environment.hdri, sm.pmremGenerator)
+   394→   394→        .then((envTexture) => {
+   395→   395→          el.setEnvironmentTexture(sm.scene, envTexture, environment.intensity);
+   396→   396→          // Show the HDRI as a 360° backplate in the viewport
+   397→   397→          el.setBackgroundFromEnv(sm.scene, environment.showBackground);
+   398→   398→        })
+   399→   399→        .catch(() => {
+   400→   400→          // Fallback to neutral studio on error
+   401→   401→          const fallback = getHDRIPresetById('studio-neutral');
+   402→   402→          if (fallback) {
+   403→   403→            const envTexture = el.generateFromPreset(fallback, sm.pmremGenerator, 0);
+   404→   404→            el.setEnvironmentTexture(sm.scene, envTexture, environment.intensity);
+   405→   405→          }
+   406→   406→        });
+   407→   407→    } else if (environment.presetId !== '__custom__') {
+   408→   408→      // Not custom — clear any HDRI backplate
+   409→   409→      el.setBackgroundFromEnv(sm.scene, false);
+   410→   410→    }
+   411→   411→  }, [environment.presetId, environment.hdri, environment.intensity, environment.showBackground, sceneManagerRef, envLoaderRef]);
+   412→   412→
+   413→   413→  // Restore model from scene file (triggered when _pendingModelDataBase64 is set)
+   414→   414→  useEffect(() => {
+   415→   415→    if (!pendingModelData) return;
+   416→   416→    const ml = modelLoaderRef.current;
+   417→   417→    if (!ml) return;
+   418→   418→
+   419→   419→    setIsLoading(true);
+   420→   420→    setLoadError(null);
+   421→   421→    setLoadProgress(0);
+   422→   422→
+   423→   423→    try {
+   424→   424→      const arrayBuffer = base64ToArrayBuffer(pendingModelData);
+   425→   425→      ml.loadFromBuffer(arrayBuffer, pendingModelFileName);
+   426→   426→    } catch {
+   427→   427→      setLoadError('Failed to restore model from scene file');
+   428→   428→      setIsLoading(false);
+   429→   429→    }
+   430→   430→
+   431→   431→    clearPendingModelData();
+   432→   432→  }, [pendingModelData, pendingModelFileName, modelLoaderRef, clearPendingModelData]);
+   433→   433→
+   434→   434→  // Restore custom HDRI from scene file
+   435→   435→  useEffect(() => {
+   436→   436→    if (!pendingHDRIData) return;
+   437→   437→    const sm = sceneManagerRef.current;
+   438→   438→    const el = envLoaderRef.current;
+   439→   439→    if (!sm || !el) return;
+   440→   440→
+   441→   441→    try {
+   442→   442→      const arrayBuffer = hdriBase64ToArrayBuffer(pendingHDRIData);
+   443→   443→      setRawHDRIData(arrayBuffer, 'custom.hdr');
+   444→   444→      const blob = new Blob([arrayBuffer], { type: 'application/octet-stream' });
+   445→   445→      const url = URL.createObjectURL(blob);
+   446→   446→      el.loadHDRI(url, sm.pmremGenerator)
+   447→   447→        .then((envTexture) => {
+   448→   448→          const envState = useSceneStore.getState().environment;
+   449→   449→          el.setEnvironmentTexture(sm.scene, envTexture, envState.intensity);
+   450→   450→          // Restore 360° HDRI backplate — always show when custom HDRI is loaded
+   451→   451→          if (!envState.showBackground) {
+   452→   452→            useSceneStore.getState().setEnvironment({ showBackground: true });
+   453→   453→          }
+   454→   454→          el.setBackgroundFromEnv(sm.scene, true);
+   455→   455→        })
+   456→   456→        .catch(() => {
+   457→   457→          // Fallback to neutral studio
+   458→   458→          const fallback = getHDRIPresetById('studio-neutral');
+   459→   459→          if (fallback) {
+   460→   460→            const tex = el.generateFromPreset(fallback, sm.pmremGenerator, 0);
+   461→   461→            el.setEnvironmentTexture(sm.scene, tex, 1);
+   462→   462→          }
+   463→   463→        });
+   464→   464→    } catch {
+   465→   465→      // ignore
+   466→   466→    }
+   467→   467→
+   468→   468→    clearPendingHDRIData();
+   469→   469→  }, [pendingHDRIData, sceneManagerRef, envLoaderRef, clearPendingHDRIData]);
+   470→   470→
+   471→   471→  // Sync render settings
+   472→   472→  useEffect(() => {
+   473→   473→    const rp = renderPipelineRef.current;
+   474→   474→    if (!rp) return;
+   475→   475→    rp.setEngine(renderSettings.engine);
+   476→   476→    rp.setToneMapping(renderSettings.tonemapping);
+   477→   477→    rp.setExposure(renderSettings.exposure);
+   478→   478→    rp.setQuality(renderSettings.quality);
+   479→   479→    rp.setShadowQuality(renderSettings.shadowQuality);
+   480→   480→    rp.setBloom(
+   481→   481→      renderSettings.bloom.enabled,
+   482→   482→      renderSettings.bloom.intensity,
+   483→   483→      renderSettings.bloom.threshold,
+   484→   484→      renderSettings.bloom.radius
+   485→   485→    );
+   486→   486→    rp.setAO(
+   487→   487→      renderSettings.ao.enabled,
+   488→   488→      renderSettings.ao.radius,
+   489→   489→      renderSettings.ao.intensity
+   490→   490→    );
+   491→   491→    rp.setAntialiasing(renderSettings.antialiasing);
+   492→   492→    rp.setVignette(
+   493→   493→      renderSettings.vignette.enabled,
+   494→   494→      renderSettings.vignette.intensity
+   495→   495→    );
+   496→   496→    rp.setColorGrading(
+   497→   497→      renderSettings.colorGrading.enabled,
+   498→   498→      renderSettings.colorGrading.brightness,
+   499→   499→      renderSettings.colorGrading.contrast,
+   500→   500→      renderSettings.colorGrading.saturation
+   501→   501→    );
+   502→   502→  }, [renderSettings, renderPipelineRef]);
+   503→   503→
+   504→   504→  // Sync lights to scene
+   505→   505→  useEffect(() => {
+   506→   506→    lightManagerRef.current?.syncLights(
+   507→   507→      lights.map((l) => ({
+   508→   508→        id: l.id,
+   509→   509→        type: l.type,
+   510→   510→        color: l.color,
+   511→   511→        brightness: l.brightness,
+   512→   512→        opacity: l.opacity,
+   513→   513→        visible: l.visible,
+   514→   514→        solo: l.solo,
+   515→   515→        falloff: l.falloff,
+   516→   516→        gearVisible: l.gearVisible,
+   517→   517→        transform: l.transform,
+   518→   518→        spotAngle: l.spotAngle,
+   519→   519→        spotPenumbra: l.spotPenumbra,
+   520→   520→        spotDecay: 2,
+   521→   521→        areaWidth: l.areaWidth,
+   522→   522→        areaHeight: l.areaHeight,
+   523→   523→      }))
+   524→   524→    );
+   525→   525→  }, [lights, lightManagerRef]);
+   526→   526→
+   527→   527→  // Sync turntable state to SceneManager
+   528→   528→  useEffect(() => {
+   529→   529→    const sm = sceneManagerRef.current;
+   530→   530→    if (!sm) return;
+   531→   531→    sm._turntableActive = turntable.active;
+   532→   532→    sm._turntableSpeed = turntable.speed;
+   533→   533→  }, [turntable.active, turntable.speed, sceneManagerRef]);
+   534→   534→
+   535→   535→  // Click-to-select material from viewport
+   536→   536→  const handleViewportClick = useCallback((event: React.MouseEvent) => {
+   537→   537→    // Only work with select tool
+   538→   538→    if (useUIStore.getState().activeTool !== 'select') return;
+   539→   539→
+   540→   540→    const container = containerRef.current;
+   541→   541→    const sm = sceneManagerRef.current;
+   542→   542→    if (!container || !sm) return;
+   543→   543→
+   544→   544→    const rect = container.getBoundingClientRect();
+   545→   545→    const mouse = new THREE.Vector2(
+   546→   546→      ((event.clientX - rect.left) / rect.width) * 2 - 1,
+   547→   547→      -((event.clientY - rect.top) / rect.height) * 2 + 1
+   548→   548→    );
+   549→   549→
+   550→   550→    const raycaster = new THREE.Raycaster();
+   551→   551→    raycaster.setFromCamera(mouse, sm.camera);
+   552→   552→
+   553→   553→    const meshes: THREE.Mesh[] = [];
+   554→   554→    sm.scene.traverse((obj) => {
+   555→   555→      if (obj instanceof THREE.Mesh && !(obj as any).userData?.isHelper) {
+   556→   556→        meshes.push(obj);
+   557→   557→      }
+   558→   558→    });
+   559→   559→
+   560→   560→    const hits = raycaster.intersectObjects(meshes, false);
+   561→   561→    if (hits.length > 0) {
+   562→   562→      const mesh = hits[0].object as THREE.Mesh;
+   563→   563→      // Get material name from Three.js material
+   564→   564→      const material = Array.isArray(mesh.material) ? mesh.material[0] : mesh.material;
+   565→   565→      const matName = material.name || mesh.name;
+   566→   566→
+   567→   567→      // Find matching material in store by name or mesh name
+   568→   568→      const matState = useMaterialEditorStore.getState().materials;
+   569→   569→      const match = matState.find((m) =>
+   570→   570→        m.name === matName || m.meshNames.includes(mesh.name)
+   571→   571→      );
+   572→   572→
+   573→   573→      if (match) {
+   574→   574→        useMaterialEditorStore.getState().selectMaterial(match.id);
+   575→   575→
+   576→   576→        // Open right panel and switch to matEdit tab
+   577→   577→        const ui = useUIStore.getState();
+   578→   578→        if (!ui.rightPanelOpen) ui.showPanel('rightPanel');
+   579→   579→        ui.setRightPanelTab('matEdit');
+   580→   580→
+   581→   581→        // Visual feedback: brief emissive flash on the mesh
+   582→   582→        if (material && 'emissive' in material) {
+   583→   583→          const mat = material as THREE.MeshStandardMaterial;
+   584→   584→          const origEmissive = mat.emissive.clone();
+   585→   585→          mat.emissive.set(0x444466);
+   586→   586→          setTimeout(() => {
+   587→   587→            mat.emissive.copy(origEmissive);
+   588→   588→            mat.needsUpdate = true;
+   589→   589→          }, 200);
+   590→   590→        }
+   591→   591→      }
+   592→   592→    }
+   593→   593→  }, [sceneManagerRef]);
+   594→   594→
+   595→   595→  // Drag and drop handlers
+   596→   596→  const handleDragEnter = useCallback((e: React.DragEvent) => {
+   597→   597→    e.preventDefault();
+   598→   598→    e.stopPropagation();
+   599→   599→    setIsDragging(true);
+   600→   600→  }, []);
+   601→   601→
+   602→   602→  const handleDragLeave = useCallback((e: React.DragEvent) => {
+   603→   603→    e.preventDefault();
+   604→   604→    e.stopPropagation();
+   605→   605→    if (e.currentTarget === e.target) {
+   606→   606→      setIsDragging(false);
+   607→   607→    }
+   608→   608→  }, []);
+   609→   609→
+   610→   610→  const handleDragOver = useCallback((e: React.DragEvent) => {
+   611→   611→    e.preventDefault();
+   612→   612→    e.stopPropagation();
+   613→   613→    e.dataTransfer.dropEffect = 'copy';
+   614→   614→  }, []);
+   615→   615→
+   616→   616→  const handleDrop = useCallback(
+   617→   617→    (e: React.DragEvent) => {
+   618→   618→      e.preventDefault();
+   619→   619→      e.stopPropagation();
+   620→   620→      setIsDragging(false);
+   621→   621→
+   622→   622→      const files = e.dataTransfer.files;
+   623→   623→      if (files.length === 0) return;
+   624→   624→
+   625→   625→      const file = files[0];
+   626→   626→      const ext = file.name.toLowerCase().split('.').pop();
+   627→   627→      if (ext === 'glb' || ext === 'gltf') {
+   628→   628→        loadModelFile(file);
+   629→   629→      }
+   630→   630→    },
+   631→   631→    // eslint-disable-next-line react-hooks/exhaustive-deps
+   632→   632→    [modelLoaderRef]
+   633→   633→  );
+   634→   634→
+   635→   635→  // Load model from file
+   636→   636→  const loadModelFile = useCallback(
+   637→   637→    (file: File) => {
+   638→   638→      if (!modelLoaderRef.current) return;
+   639→   639→      setIsLoading(true);
+   640→   640→      setLoadError(null);
+   641→   641→      setLoadProgress(0);
+   642→   642→      modelLoaderRef.current.loadFromFile(file);
+   643→   643→    },
+   644→   644→    [modelLoaderRef]
+   645→   645→  );
+   646→   646→
+   647→   647→  // File picker
+   648→   648→  const handleFileInput = useCallback(
+   649→   649→    (e: React.ChangeEvent<HTMLInputElement>) => {
+   650→   650→      const file = e.target.files?.[0];
+   651→   651→      if (file) loadModelFile(file);
+   652→   652→      e.target.value = '';
+   653→   653→    },
+   654→   654→    [loadModelFile]
+   655→   655→  );
+   656→   656→
+   657→   657→  const handleOpenFilePicker = useCallback(() => {
+   658→   658→    fileInputRef.current?.click();
+   659→   659→  }, []);
+   660→   660→
+   661→   661→  // Screenshot handler
+   662→   662→  const handleScreenshot = useCallback(() => {
+   663→   663→    const dataUrl = renderPipelineRef.current
+   664→   664→      ? renderPipelineRef.current.capture()
+   665→   665→      : sceneManagerRef.current?.takeScreenshot() ?? '';
+   666→   666→    if (dataUrl) onScreenshot(dataUrl);
+   667→   667→  }, [sceneManagerRef, renderPipelineRef, onScreenshot]);
+   668→   668→
+   669→   669→  return (
+   670→   670→    <ThreeSceneProvider>
+   671→   671→      <div style={{ display: 'flex', flexDirection: 'column', width: '100%', height: '100%' }}>
+   672→   672→        <ViewportToolbar
+   673→   673→          sceneManagerRef={sceneManagerRef}
+   674→   674→          onScreenshot={handleScreenshot}
+   675→   675→          onLoadModel={handleOpenFilePicker}
+   676→   676→        />
+   677→   677→        <div
+   678→   678→          ref={containerRef}
+   679→   679→          style={{
+   680→   680→            position: 'relative',
+   681→   681→            flex: 1,
+   682→   682→            overflow: 'hidden',
+   683→   683→            background: 'var(--bg-deep)',
+   684→   684→          }}
+   685→   685→          onMouseDown={(e) => { mouseDownPos.current = { x: e.clientX, y: e.clientY }; }}
+   686→   686→          onClick={(e) => {
+   687→   687→            if (mouseDownPos.current) {
+   688→   688→              const dx = e.clientX - mouseDownPos.current.x;
+   689→   689→              const dy = e.clientY - mouseDownPos.current.y;
+   690→   690→              if (Math.sqrt(dx*dx + dy*dy) < 3) {
+   691→   691→                handleViewportClick(e);
+   692→   692→              }
+   693→   693→            }
+   694→   694→            mouseDownPos.current = null;
+   695→   695→          }}
+   696→   696→          onDragEnter={handleDragEnter}
+   697→   697→          onDragLeave={handleDragLeave}
+   698→   698→          onDragOver={handleDragOver}
+   699→   699→          onDrop={handleDrop}
+   700→   700→        >
+   701→   701→          {isDragging && (
+   702→   702→            <div className="drop-overlay">
+   703→   703→              <span>Drop .glb file to load model</span>
+   704→   704→            </div>
+   705→   705→          )}
+   706→   706→
+   707→   707→          {isLoading && loadProgress < 100 && (
+   708→   708→            <div
+   709→   709→              style={{
+   710→   710→                position: 'absolute',
+   711→   711→                top: 0,
+   712→   712→                left: 0,
+   713→   713→                right: 0,
+   714→   714→                zIndex: 10,
+   715→   715→                padding: '6px 12px',
+   716→   716→              }}
+   717→   717→            >
+   718→   718→              <div className="progress-bar">
+   719→   719→                <div
+   720→   720→                  className="progress-bar-fill"
+   721→   721→                  style={{ width: `${loadProgress}%` }}
+   722→   722→                />
+   723→   723→              </div>
+   724→   724→            </div>
+   725→   725→          )}
+   726→   726→
+   727→   727→          {loadError && (
+   728→   728→            <div
+   729→   729→              style={{
+   730→   730→                position: 'absolute',
+   731→   731→                bottom: 12,
+   732→   732→                left: '50%',
+   733→   733→                transform: 'translateX(-50%)',
+   734→   734→                zIndex: 10,
+   735→   735→                background: 'var(--danger)',
+   736→   736→                color: '#fff',
+   737→   737→                padding: '4px 12px',
+   738→   738→                borderRadius: 'var(--radius-sm)',
+   739→   739→                fontSize: 11,
+   740→   740→              }}
+   741→   741→            >
+   742→   742→              {loadError}
+   743→   743→            </div>
+   744→   744→          )}
+   745→   745→
+   746→   746→          <input
+   747→   747→            ref={fileInputRef}
+   748→   748→            type="file"
+   749→   749→            accept=".glb,.gltf"
+   750→   750→            style={{ display: 'none' }}
+   751→   751→            onChange={handleFileInput}
+   752→   752→          />
+   753→   753→
+   754→   754→          <CameraBookmarks sceneManagerRef={sceneManagerRef} />
+   755→   755→        </div>
+   756→   756→      </div>
+   757→   757→    </ThreeSceneProvider>
+   758→   758→  );
+   759→   759→};

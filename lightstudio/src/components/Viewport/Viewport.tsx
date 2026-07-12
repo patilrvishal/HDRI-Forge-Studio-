@@ -261,6 +261,13 @@ export const Viewport: React.FC<ViewportProps> = ({ sceneManagerRef, onScreensho
         if (model) model.rotation.y += delta * sceneManager._turntableSpeed * 0.5;
       }
 
+      // ── Update CubeCamera for PBR floor reflections ───────────────────
+      if (sceneManager._floorCubeCamera && sceneManager.ground && sceneManager._groundSettings?.reflections) {
+        sceneManager.ground.visible = false;
+        sceneManager._floorCubeCamera.update(sceneManager.renderer, sceneManager.scene);
+        sceneManager.ground.visible = true;
+      }
+
       sceneManager.controls.update();
       renderPipeline.render();
       sceneManager._animationId = requestAnimationFrame(loop);
@@ -552,7 +559,7 @@ export const Viewport: React.FC<ViewportProps> = ({ sceneManagerRef, onScreensho
 
     const meshes: THREE.Mesh[] = [];
     sm.scene.traverse((obj) => {
-      if (obj instanceof THREE.Mesh && !(obj as any).userData?.isHelper) {
+      if (obj instanceof THREE.Mesh && !(obj as any).userData?.isHelper && !(obj as any).userData?.isProxy && obj.name !== '__floor__') {
         meshes.push(obj);
       }
     });
