@@ -1,8 +1,9 @@
-import React, { useEffect, useRef, useCallback, useState, useMemo } from 'react';
+﻿import React, { useEffect, useRef, useCallback, useState, useMemo } from 'react';
 import { useUIStore } from '../../store/uiStore';
 import type { PanelKey, PanelVisibilityState } from '../../store/uiStore';
 import { useSceneStore } from '../../store/sceneStore';
 import { useLightsStore } from '../../store/lightsStore';
+import { useCameraStore } from '../../store/cameraStore';
 import { useHistoryStore } from '../../store/historyStore';
 import { SceneExporter } from '../../three/SceneExporter';
 import { exportSceneAsHDR, exportSceneAsEXR } from '../../three/HDRIExporter';
@@ -28,7 +29,7 @@ interface TopMenubarProps {
 }
 
 function checkLabel(label: string, checked: boolean): string {
-  return checked ? `✓ ${label}` : label;
+  return checked ? `${label}` : label;
 }
 
 const MENU_DEFINITIONS = (
@@ -170,15 +171,33 @@ const MENU_DEFINITIONS = (
     },
   },
   Create: {
-    pointLight: { label: 'Point Light', action: () => useLightsStore.getState().addLight('point') },
-    spotLight: { label: 'Spot Light', action: () => useLightsStore.getState().addLight('spot') },
-    areaLight: { label: 'Area Light', action: () => useLightsStore.getState().addLight('area') },
-    directionalLight: { label: 'Directional Light', action: () => useLightsStore.getState().addLight('directional') },
-    iesLight: { label: 'IES Light', action: () => useLightsStore.getState().addLight('ies') },
-    overheadLight: { label: 'Overhead Light', action: () => useLightsStore.getState().addLight('overhead') },
-    underlight: { label: 'Under Light', action: () => useLightsStore.getState().addLight('underlight') },
-    rimLight: { label: 'Rim Light', action: () => useLightsStore.getState().addLight('rim') },
-    fillLight: { label: 'Fill Light', action: () => useLightsStore.getState().addLight('fill') },
+    lights: {
+      label: 'Lights',
+      submenu: {
+        pointLight: { label: 'Point Light', action: () => useLightsStore.getState().addLight('point') },
+        spotLight: { label: 'Spot Light', action: () => useLightsStore.getState().addLight('spot') },
+        areaLight: { label: 'Area Light', action: () => useLightsStore.getState().addLight('area') },
+        directionalLight: { label: 'Directional Light', action: () => useLightsStore.getState().addLight('directional') },
+        iesLight: { label: 'IES Light', action: () => useLightsStore.getState().addLight('ies') },
+        overheadLight: { label: 'Overhead Light', action: () => useLightsStore.getState().addLight('overhead') },
+        underlight: { label: 'Under Light', action: () => useLightsStore.getState().addLight('underlight') },
+        rimLight: { label: 'Rim Light', action: () => useLightsStore.getState().addLight('rim') },
+        fillLight: { label: 'Fill Light', action: () => useLightsStore.getState().addLight('fill') },
+      },
+    },
+    camera: {
+      label: 'Camera',
+      submenu: {
+        freeCamera: {
+          label: 'Free Camera',
+          action: () => useCameraStore.getState().addCamera({ targetId: null }),
+        },
+        targetCamera: {
+          label: 'Target Camera',
+          action: () => useCameraStore.getState().addCamera({ targetId: 'model' }),
+        },
+      },
+    },
   },
   Canvas: {
     resetView: {

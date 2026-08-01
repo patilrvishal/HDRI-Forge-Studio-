@@ -4,7 +4,6 @@ import tailwindcss from 'tailwindcss'
 import autoprefixer from 'autoprefixer'
 
 export default defineConfig({
-  root: '/home/z/my-project/lightstudio',
   css: {
     postcss: {
       plugins: [

@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo } from 'react';
+﻿import React, { useCallback, useMemo, useState, useRef, useEffect } from 'react';
 import { useLightsStore } from '../../store/lightsStore';
 import type { Light, LightType, ColorProfile, FalloffType } from '../../types/Light';
 import { Slider } from '../UI/Slider';
@@ -45,7 +45,7 @@ export const LightProperties: React.FC = () => {
     [lights, selectedLightId],
   );
 
-  // Safe accessor for spherical values — guards against NaN/undefined
+  // Safe accessor for spherical values â€” guards against NaN/undefined
   const safeSpherical = useMemo(() => {
     if (!light) return { lat: 0, lng: 0, radius: 5, height: 3 };
     const s = light.transform.spherical;
@@ -80,12 +80,59 @@ export const LightProperties: React.FC = () => {
     };
   }, [light]);
 
+  // Area light uniform scale.
+  // The slider is sticky: it holds its own value, and the base W/H are captured
+  // whenever a different light is selected. Without this the slider snaps back
+  // to 1 on every drag and the dimensions compound (1.5x then 1.5x = 2.25x).
+  const [areaScale, setAreaScale] = useState(1);
+  const areaBaseRef = useRef<{ w: number; h: number }>({ w: 2, h: 2 });
+
+  useEffect(() => {
+    if (!light) return;
+    areaBaseRef.current = {
+      w: light.areaWidth ?? 2,
+      h: light.areaHeight ?? 2,
+    };
+    setAreaScale(1);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [light?.id]);
+
   const handleUpdate = useCallback(
     (updates: Partial<Light>) => {
       if (!selectedLightId) return;
       updateLight(selectedLightId, updates);
     },
     [selectedLightId, updateLight],
+  );
+
+  const handleAreaScale = useCallback(
+    (scale: number) => {
+      const base = areaBaseRef.current;
+      setAreaScale(scale);
+      handleUpdate({
+        areaWidth: Math.min(20, Math.max(0.1, base.w * scale)),
+        areaHeight: Math.min(20, Math.max(0.1, base.h * scale)),
+      });
+    },
+    [handleUpdate],
+  );
+
+  const handleAreaWidth = useCallback(
+    (v: number) => {
+      areaBaseRef.current = { w: v, h: light?.areaHeight ?? 2 };
+      setAreaScale(1);
+      handleUpdate({ areaWidth: v });
+    },
+    [handleUpdate, light?.areaHeight],
+  );
+
+  const handleAreaHeight = useCallback(
+    (v: number) => {
+      areaBaseRef.current = { w: light?.areaWidth ?? 2, h: v };
+      setAreaScale(1);
+      handleUpdate({ areaHeight: v });
+    },
+    [handleUpdate, light?.areaWidth],
   );
 
   const handleTypeChange = useCallback(
@@ -305,8 +352,55 @@ export const LightProperties: React.FC = () => {
       {isAreaLike && (
         <div className="props-section">
           <div className="section-header">Area Dimensions</div>
-          <NumericInput label="Width" value={light.areaWidth} min={0.1} max={20} step={0.1} onChange={(v) => handleUpdate({ areaWidth: v })} />
-          <NumericInput label="Height" value={light.areaHeight} min={0.1} max={20} step={0.1} onChange={(v) => handleUpdate({ areaHeight: v })} />
+          <NumericInput
+            label="Width"
+            value={light.areaWidth}
+            min={0.1}
+            max={20}
+            step={0.1}
+            onChange={handleAreaWidth}
+          />
+          <Slider
+            label="Width"
+            value={light.areaWidth ?? 2}
+            min={0.1}
+            max={20}
+            step={0.1}
+            onChange={handleAreaWidth}
+          />
+          <NumericInput
+            label="Height"
+            value={light.areaHeight}
+            min={0.1}
+            max={20}
+            step={0.1}
+            onChange={handleAreaHeight}
+          />
+          <Slider
+            label="Height"
+            value={light.areaHeight ?? 2}
+            min={0.1}
+            max={20}
+            step={0.1}
+            onChange={handleAreaHeight}
+          />
+          <Slider
+            label="Edge Softness"
+            value={light.edgeSoftness ?? 50}
+            min={0}
+            max={100}
+            step={1}
+            onChange={(v) => handleUpdate({ edgeSoftness: v })}
+          />
+          <Slider
+            label="Scale"
+            value={areaScale}
+            min={0.1}
+            max={5}
+            step={0.05}
+            onChange={handleAreaScale}
+            unit="x"
+          />
         </div>
       )}
 

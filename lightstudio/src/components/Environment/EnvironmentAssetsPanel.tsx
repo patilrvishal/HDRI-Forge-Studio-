@@ -208,8 +208,26 @@ export const EnvironmentAssetsPanel: React.FC = () => {
   const handleUpdateAsset = useCallback(
     (id: string, updates: Partial<Pick<HDRIAsset, 'name' | 'intensity' | 'rotation' | 'active'>>) => {
       updateAsset(id, updates);
+
       const asset = useHDRIAssetStore.getState().assets.find((a) => a.id === id);
-      if (asset?.active && asset.blobUrl) {
+      if (!asset) return;
+
+      // Active toggled OFF → tear the HDRI out of the scene
+      if (updates.active === false) {
+        setEnvironment({ hdri: null, presetId: 'none', showBackground: false });
+        return;
+      }
+
+      // Active toggled ON → push this asset into the scene
+      if (updates.active === true && asset.blobUrl) {
+        setEnvironment({ hdri: asset.blobUrl, presetId: '__custom__', showBackground: true });
+        setEnvironmentRotation(asset.rotation);
+        setEnvironment({ intensity: asset.intensity });
+        return;
+      }
+
+      // Intensity / rotation edits only apply to the asset that is live
+      if (asset.active) {
         if (updates.intensity !== undefined) {
           setEnvironment({ intensity: updates.intensity });
         }

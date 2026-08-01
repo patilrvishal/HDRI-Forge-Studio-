@@ -6,6 +6,9 @@ interface LightEntry {
   light: THREE.Light;
   helper: THREE.Mesh | null;
   target?: THREE.Object3D;
+  /** Cached helper dimensions so geometry is only rebuilt when the size actually changes. */
+  helperW?: number;
+  helperH?: number;
 }
 
 // Initialize RectAreaLight uniforms once
@@ -52,11 +55,19 @@ export class LightManager {
         effectiveVisible = soloIds.has(lightData.id);
       }
 
-      if (this.lights.has(lightData.id)) {
-        // Update existing light
-        this.updateExistingLight(lightData, effectiveVisible);
+      const entry = this.lights.get(lightData.id);
+
+      if (entry) {
+        // If the TYPE changed, the underlying THREE object is the wrong class.
+        // Tear it down and rebuild — this is the B1 fix.
+        const currentType = this.getLightType(entry.light);
+        if (currentType !== lightData.type) {
+          this.removeLightFromScene(lightData.id, scene);
+          this.createAndAddLight(lightData, scene, effectiveVisible);
+        } else {
+          this.updateExistingLight(lightData, effectiveVisible);
+        }
       } else {
-        // Create new light
         this.createAndAddLight(lightData, scene, effectiveVisible);
       }
     }
@@ -72,8 +83,10 @@ export class LightManager {
 
     // Bridge: store lightId so hierarchy selection can find the lightsStore entry
     light.userData.lightId = lightData.id;
+    // Store the logical type so getLightType() never has to guess
+    light.userData.lightType = lightData.type;
 
-    // Set color and intensity
+    // Set color, intensity, and (for area lights) width/height
     this.applyLightProperties(light, lightData);
 
     // Set position from spherical coordinates
@@ -88,19 +101,14 @@ export class LightManager {
       target = new THREE.Object3D();
       target.position.set(0, 0, 0);
       scene.add(target);
-
-      if (light instanceof THREE.SpotLight) {
-        light.target = target;
-      } else {
-        light.target = target;
-      }
+      light.target = target;
     }
 
     // Configure shadows for applicable light types
     this.configureShadows(light, lightData.type);
 
-    // Create helper mesh
-    const helper = this.createHelperMesh(lightData.type, lightData.color);
+    // Create helper mesh sized to the actual light
+    const helper = this.createHelperMesh(lightData);
 
     // Add to scene
     scene.add(light);
@@ -109,8 +117,17 @@ export class LightManager {
       scene.add(helper);
     }
 
-    // Store entry
-    this.lights.set(lightData.id, { light, helper, target });
+    // Store entry with cached helper dimensions
+    this.lights.set(lightData.id, {
+      light,
+      helper,
+      target,
+      helperW: lightData.areaWidth ?? 2,
+      helperH: lightData.areaHeight ?? 2,
+    });
+
+    // Sync helper transform to the light
+    this.syncHelperTransform(lightData.id, lightData);
   }
 
   private updateExistingLight(
@@ -120,22 +137,12 @@ export class LightManager {
     const entry = this.lights.get(lightData.id);
     if (!entry) return;
 
-    const { light, helper } = entry;
-
-    // Check if type changed — if so, we need to recreate
-    const currentType = this.getLightType(light);
-    if (currentType !== lightData.type) {
-      // Type changed: mark for recreation by removing and re-adding
-      // We can't easily recreate here since we need the scene reference,
-      // so we set a flag and let the next sync handle it
-      // For now, we'll just update what we can
-      // The caller should handle type changes by calling syncLights with the new type
-    }
+    const { light } = entry;
 
     // Update visibility
     light.visible = visible;
 
-    // Update color and intensity
+    // Update color, intensity, and area dimensions
     this.applyLightProperties(light, lightData);
 
     // Update position
@@ -144,24 +151,40 @@ export class LightManager {
     // Update shadow properties
     this.configureShadows(light, lightData.type);
 
-    // Update helper visibility and color
-    if (helper) {
-      helper.visible = lightData.gearVisible;
-      const helperMat = helper.material as THREE.MeshBasicMaterial;
-      if (helperMat) {
-        helperMat.color.set(lightData.color);
-      }
-      // Keep helper in sync with light position
-      helper.position.copy(light.position);
-    }
+    // Rebuild helper geometry if the area dimensions changed, then re-sync
+    this.refreshHelperGeometry(lightData);
+    this.syncHelperTransform(lightData.id, lightData);
   }
 
+  /**
+   * Apply colour, intensity, and — critically — the RectAreaLight width/height.
+   * Without the width/height assignment, area lights never resize in the viewport
+   * even though the store value changes.
+   */
   private applyLightProperties(light: THREE.Light, lightData: Light): void {
     light.color.set(lightData.color);
 
     // Map brightness 0-1000 to intensity 0-10
     const intensity = (lightData.brightness / 1000) * 10;
     light.intensity = intensity;
+
+    // Area / overhead lights: push the dimensions onto the actual THREE light
+    if (light instanceof THREE.RectAreaLight) {
+      const w = lightData.areaWidth ?? 2;
+      const h = lightData.areaHeight ?? 2;
+      light.width = Math.max(0.01, w);
+      light.height = Math.max(0.01, h);
+    }
+
+    // Spot / rim: cone angle and penumbra
+    if (light instanceof THREE.SpotLight) {
+      if (lightData.spotAngle !== undefined) {
+        light.angle = (lightData.spotAngle * Math.PI) / 180;
+      }
+      if (lightData.spotPenumbra !== undefined) {
+        light.penumbra = lightData.spotPenumbra;
+      }
+    }
   }
 
   createLightFromType(type: LightType): THREE.Light {
@@ -206,16 +229,13 @@ export class LightManager {
   }
 
   updateLightPosition(light: THREE.Light, transform: LightTransform): void {
-    const { spherical } = transform;
+    const { spherical, rotation } = transform;
 
     // Convert degrees to radians
     const latRad = (spherical.lat * Math.PI) / 180;
     const lngRad = (spherical.lng * Math.PI) / 180;
 
     // Convert spherical to cartesian
-    // x = radius * cos(lat) * cos(lng)
-    // y = height
-    // z = radius * cos(lat) * sin(lng)
     const cosLat = Math.cos(latRad);
     const x = spherical.radius * cosLat * Math.cos(lngRad);
     const y = spherical.height;
@@ -231,11 +251,17 @@ export class LightManager {
       light.target?.position.set(0, 0, 0);
     }
 
-    // For overhead light, point it downward
+    // Area lights: aim at the origin by default, then apply the manual
+    // rotation override if the user has enabled it.
     if (light instanceof THREE.RectAreaLight) {
-      const lightType = this.getLightType(light);
-      if (lightType === 'overhead') {
-        light.lookAt(x, y - 1, z);
+      if (rotation?.enabled) {
+        light.rotation.set(
+          (rotation.x * Math.PI) / 180,
+          (rotation.y * Math.PI) / 180,
+          (rotation.z * Math.PI) / 180,
+        );
+      } else {
+        light.lookAt(0, 0, 0);
       }
     }
   }
@@ -269,66 +295,106 @@ export class LightManager {
     }
   }
 
-  private createHelperMesh(
-    type: LightType,
-    color: string,
-  ): THREE.Mesh | null {
+  /**
+   * Build the helper mesh. Area lights get a plane matching their REAL
+   * dimensions (the old code hard-coded 0.3 x 0.3, so the helper never
+   * reflected the light's size).
+   */
+  private createHelperMesh(lightData: Light): THREE.Mesh | null {
     const helperMaterial = new THREE.MeshBasicMaterial({
-      color,
+      color: lightData.color,
       transparent: true,
       opacity: 0.6,
+      side: THREE.DoubleSide,
       depthTest: false,
     });
 
-    let geometry: THREE.BufferGeometry;
-
-    switch (type) {
-      case 'point':
-      case 'underlight':
-      case 'ies':
-        // Sphere helper for point-like lights
-        geometry = new THREE.SphereGeometry(0.08, 8, 8);
-        break;
-
-      case 'area':
-      case 'overhead':
-        // Plane helper for area lights
-        geometry = new THREE.PlaneGeometry(0.3, 0.3);
-        break;
-
-      case 'spot':
-      case 'rim':
-        // Cone-like indicator using a small sphere
-        geometry = new THREE.SphereGeometry(0.06, 8, 8);
-        break;
-
-      case 'directional':
-        // Arrow-like indicator using a small sphere
-        geometry = new THREE.SphereGeometry(0.1, 8, 8);
-        break;
-
-      default:
-        return null;
-    }
+    const geometry = this.buildHelperGeometry(lightData);
+    if (!geometry) return null;
 
     const helper = new THREE.Mesh(geometry, helperMaterial);
     helper.renderOrder = 999;
+    helper.userData.lightId = lightData.id;
 
     return helper;
   }
 
-  private getLightType(light: THREE.Light): LightType | null {
-    if (light instanceof THREE.RectAreaLight) {
-      // We can't easily distinguish area vs overhead without storing metadata
-      // Check the light's width/height as a heuristic
-      if (
-        (light as THREE.RectAreaLight).width === 4 &&
-        (light as THREE.RectAreaLight).height === 4
-      ) {
-        return 'overhead';
+  /** Geometry factory — kept separate so it can be re-run on resize. */
+  private buildHelperGeometry(lightData: Light): THREE.BufferGeometry | null {
+    switch (lightData.type) {
+      case 'point':
+      case 'underlight':
+      case 'ies':
+        return new THREE.SphereGeometry(0.08, 12, 12);
+
+      case 'area':
+      case 'overhead': {
+        const w = Math.max(0.01, lightData.areaWidth ?? 2);
+        const h = Math.max(0.01, lightData.areaHeight ?? 2);
+        return new THREE.PlaneGeometry(w, h);
       }
-      return 'area';
+
+      case 'spot':
+      case 'rim':
+        return new THREE.SphereGeometry(0.06, 12, 12);
+
+      case 'directional':
+        return new THREE.SphereGeometry(0.1, 12, 12);
+
+      default:
+        return null;
     }
+  }
+
+  /**
+   * Rebuild the helper's geometry when the area dimensions change.
+   * BufferGeometry is immutable — mutating PlaneGeometry.parameters does
+   * nothing, so the old geometry must be disposed and replaced.
+   */
+  private refreshHelperGeometry(lightData: Light): void {
+    const entry = this.lights.get(lightData.id);
+    if (!entry?.helper) return;
+
+    const isArea = lightData.type === 'area' || lightData.type === 'overhead';
+    if (!isArea) return;
+
+    const w = Math.max(0.01, lightData.areaWidth ?? 2);
+    const h = Math.max(0.01, lightData.areaHeight ?? 2);
+
+    // Only rebuild when the size actually changed — this runs on every sync
+    if (entry.helperW === w && entry.helperH === h) return;
+
+    const newGeo = this.buildHelperGeometry(lightData);
+    if (!newGeo) return;
+
+    entry.helper.geometry.dispose();
+    entry.helper.geometry = newGeo;
+    entry.helperW = w;
+    entry.helperH = h;
+  }
+
+  /** Keep the helper glued to its light: position, orientation, and colour. */
+  private syncHelperTransform(id: string, lightData: Light): void {
+    const entry = this.lights.get(id);
+    if (!entry?.helper) return;
+
+    const { light, helper } = entry;
+
+    helper.visible = lightData.gearVisible;
+    helper.position.copy(light.position);
+    helper.quaternion.copy(light.quaternion);
+
+    const mat = helper.material as THREE.MeshBasicMaterial;
+    if (mat) mat.color.set(lightData.color);
+  }
+
+  private getLightType(light: THREE.Light): LightType | null {
+    // Prefer the stored logical type — the old width===4 heuristic broke as
+    // soon as the user resized an area light to 4x4.
+    const stored = light.userData?.lightType as LightType | undefined;
+    if (stored) return stored;
+
+    if (light instanceof THREE.RectAreaLight) return 'area';
     if (light instanceof THREE.SpotLight) return 'spot';
     if (light instanceof THREE.DirectionalLight) return 'directional';
     if (light instanceof THREE.PointLight) return 'point';
@@ -385,6 +451,7 @@ export class LightManager {
     for (const [, entry] of this.lights) {
       if (entry.helper) {
         entry.helper.position.copy(entry.light.position);
+        entry.helper.quaternion.copy(entry.light.quaternion);
       }
     }
   }

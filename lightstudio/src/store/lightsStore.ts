@@ -1,4 +1,4 @@
-import { create } from 'zustand';
+﻿import { create } from 'zustand';
 import type { Light } from '../types/Light';
 import { createDefaultLight, LIGHT_TEMPLATES } from '../types/Light';
 import { history } from './historyStore';
@@ -93,7 +93,7 @@ export const useLightsStore = create<LightsState>((set, get) => ({
   },
 
   selectLight: (id) => {
-    // Selection changes are NOT recorded — they don't mutate scene data
+    // Selection changes are NOT recorded â€” they don't mutate scene data
     set({ selectedLightId: id });
   },
 
@@ -131,7 +131,7 @@ export const useLightsStore = create<LightsState>((set, get) => ({
   },
 
   setCollectionFilter: (collectionId) => {
-    // Filter changes are NOT recorded — they are UI-only
+    // Filter changes are NOT recorded â€” they are UI-only
     set({ collectionFilter: collectionId });
   },
 
@@ -153,7 +153,13 @@ export const useLightsStore = create<LightsState>((set, get) => ({
 
   setLightsFromPreset: (lights) => {
     history.record('Apply Preset');
-    set({ lights, selectedLightId: lights.length > 0 ? lights[0].id : null });
+    // ADDITIVE: preset lights stack on top of whatever is already in the scene.
+    // The old behaviour replaced the array outright, silently wiping the user's
+    // existing rig. Use clearAllLights() first if a clean slate is wanted.
+    set((state) => ({
+      lights: [...state.lights, ...lights],
+      selectedLightId: lights.length > 0 ? lights[0].id : state.selectedLightId,
+    }));
   },
 
   clearAllLights: () => {

@@ -1,4 +1,4 @@
-import React, { useRef, useEffect, useState, useCallback } from 'react';
+﻿import React, { useRef, useEffect, useState, useCallback } from 'react';
 import * as THREE from 'three';
 import { useSceneStore } from '../../store/sceneStore';
 import { useLightsStore } from '../../store/lightsStore';
@@ -11,6 +11,14 @@ import { getHDRIPresetById } from '../../types/Environment';
 import { base64ToArrayBuffer } from '../../store/modelDataStore';
 import { hdriBase64ToArrayBuffer, setRawHDRIData } from '../../store/hdriDataStore';
 import { ViewportToolbar } from './ViewportToolbar';
+import { GizmoToolbar } from './GizmoToolbar';
+import { useCameraStore } from '../../store/cameraStore';
+import { CameraSwitcher } from './CameraSwitcher';
+import { ViewportPropertiesPanel } from './ViewportPropertiesPanel';
+import { CameraPanel } from './CameraPanel';
+import { GizmoManager, type GizmoMode } from '../../three/GizmoManager';
+import { solveLightPaint, smoothNormalAt, computeLightDistance, type PaintMode } from '../../three/LightPaint';
+import { cartesianToSpherical } from '../../utils/math';
 import { CameraBookmarks } from './CameraBookmarks';
 import type { AnimatedProperty } from '../../types/Animation';
 import { MaterialManager } from '../../three/MaterialManager';
@@ -57,9 +65,10 @@ export const Viewport: React.FC<ViewportProps> = ({ sceneManagerRef, onScreensho
   const backplateOpacity = useSceneStore((s) => s.environment.backplateOpacity);
 
   const lights = useLightsStore((s) => s.lights);
+  const selectedLightId = useLightsStore((s) => s.selectedLightId);
   const updateLight = useLightsStore((s) => s.updateLight);
 
-  // Animation store selectors (non-reactive — read inside the loop via getState)
+  // Animation store selectors (non-reactive â€” read inside the loop via getState)
   // We only use isPlaying for the dependency to know if animation is active
 
   // Initialize the 3D scene on mount
@@ -68,6 +77,12 @@ export const Viewport: React.FC<ViewportProps> = ({ sceneManagerRef, onScreensho
 
     const sceneManager = new SceneManager();
     sceneManagerRef.current = sceneManager;
+    // Expose camera store so engine.applyActiveCamera() can read it each frame
+    // without creating a circular import between engine.ts and the store.
+    (window as unknown as { __cameraStore?: unknown }).__cameraStore = useCameraStore;
+    // Expose the scene globally so panels outside ThreeSceneProvider
+    // (e.g. the bottom HDRI preview dock) can reach it.
+    (window as unknown as { __lightforgeScene?: unknown }).__lightforgeScene = sceneManager;
     sceneManager.attach(containerRef.current);
 
     const lightManager = new LightManager(sceneManager.scene);
@@ -155,14 +170,14 @@ export const Viewport: React.FC<ViewportProps> = ({ sceneManagerRef, onScreensho
     // Notify parent that the render pipeline is ready (for export)
     onReady?.(renderPipeline, materialManager);
 
-    // ── Animation frame accumulator & tick callback ─────────────────────
+    // â”€â”€ Animation frame accumulator & tick callback â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     const clock = new THREE.Clock();
     animAccumulatorRef.current = 0;
 
     const loop = () => {
       const delta = clock.getDelta();
 
-      // ── Animation tick (frame-accurate playback) ──────────────────────
+      // â”€â”€ Animation tick (frame-accurate playback) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
       const animState = useAnimationStore.getState();
       if (animState.isPlaying && animState.tracks.length > 0) {
         animAccumulatorRef.current += delta;
@@ -255,13 +270,13 @@ export const Viewport: React.FC<ViewportProps> = ({ sceneManagerRef, onScreensho
         animAccumulatorRef.current = 0;
       }
 
-      // ── Turntable (non-animated, manual rotation) ─────────────────────
+      // â”€â”€ Turntable (non-animated, manual rotation) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
       if (sceneManager._turntableActive) {
         const model = sceneManager._findModel();
         if (model) model.rotation.y += delta * sceneManager._turntableSpeed * 0.5;
       }
 
-      // ── Update CubeCamera for PBR floor reflections ───────────────────
+      // â”€â”€ Update CubeCamera for PBR floor reflections â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
       if (sceneManager._floorCubeCamera && sceneManager.ground && sceneManager._groundSettings?.reflections) {
         try {
           sceneManager.ground.visible = false;
@@ -369,6 +384,12 @@ export const Viewport: React.FC<ViewportProps> = ({ sceneManagerRef, onScreensho
     const el = envLoaderRef.current;
     if (!sm || backplate) return; // Skip if backplate is active
 
+    // Gradient background takes priority over the flat colour / limbo default.
+    if (environment.gradientBackground?.enabled) {
+      sm.setGradientBackground(environment.gradientBackground);
+      return;
+    }
+
     // If a custom HDRI is loaded, let it manage the background via setBackgroundFromEnv
     if (environment.presetId === '__custom__' && el?.getEquirectTexture()) {
       el.setBackgroundFromEnv(sm.scene, environment.showBackground);
@@ -376,7 +397,7 @@ export const Viewport: React.FC<ViewportProps> = ({ sceneManagerRef, onScreensho
     }
 
     sm.setBackground(environment.background, environment.showBackground);
-  }, [environment.background, environment.showBackground, environment.presetId, sceneManagerRef, envLoaderRef, backplate]);
+  }, [environment.background, environment.showBackground, environment.presetId, environment.gradientBackground, sceneManagerRef, envLoaderRef, backplate]);
 
   // Sync ground settings (reflections, fade, color, PBR)
   useEffect(() => {
@@ -395,12 +416,17 @@ export const Viewport: React.FC<ViewportProps> = ({ sceneManagerRef, onScreensho
     const el = envLoaderRef.current;
     if (!sm || !el) return;
 
-    // Skip custom HDRI — handled by the separate effect below
+    // Skip custom HDRI â€” handled by the separate effect below
     if (environment.presetId === '__custom__') return;
 
-    // Built-in presets: clear any custom equirect, no 360° background
+    // Built-in presets: clear any custom equirect, no 360Â° background
     el.clearEquirectTexture();
     el.setBackgroundFromEnv(sm.scene, false);
+
+    // Built-in presets bake rotation into the generated scene, so the
+    // native scene rotation must be reset to avoid double-rotating.
+    sm.scene.environmentRotation = new THREE.Euler(0, 0, 0);
+    sm.scene.backgroundRotation = new THREE.Euler(0, 0, 0);
 
     try {
       const preset = getHDRIPresetById(environment.presetId);
@@ -414,6 +440,9 @@ export const Viewport: React.FC<ViewportProps> = ({ sceneManagerRef, onScreensho
   }, [environment.presetId, environment.rotation, environment.intensity, sceneManagerRef, envLoaderRef]);
 
   // Phase 9: Load custom HDRI file into the 3D scene
+  // NOTE: intensity is deliberately NOT a dependency â€” it is applied by the
+  // effect below without reloading. Reloading on every slider tick was making
+  // the HDRI vanish mid-drag.
   useEffect(() => {
     const sm = sceneManagerRef.current;
     const el = envLoaderRef.current;
@@ -423,22 +452,41 @@ export const Viewport: React.FC<ViewportProps> = ({ sceneManagerRef, onScreensho
       el.loadHDRI(environment.hdri, sm.pmremGenerator)
         .then((envTexture) => {
           el.setEnvironmentTexture(sm.scene, envTexture, environment.intensity);
-          // Show the HDRI as a 360° backplate in the viewport
+
+          // Rotate the HDRI natively (equirect textures are not re-baked)
+          const rad = (environment.rotation * Math.PI) / 180;
+          sm.scene.environmentRotation = new THREE.Euler(0, rad, 0);
+          sm.scene.backgroundRotation = new THREE.Euler(0, rad, 0);
+
+          // Show the HDRI as a 360Â° backplate in the viewport
           el.setBackgroundFromEnv(sm.scene, environment.showBackground);
         })
-        .catch(() => {
-          // Fallback to neutral studio on error
-          const fallback = getHDRIPresetById('studio-neutral');
-          if (fallback) {
-            const envTexture = el.generateFromPreset(fallback, sm.pmremGenerator, 0);
-            el.setEnvironmentTexture(sm.scene, envTexture, environment.intensity);
-          }
+        .catch((e) => {
+          // Do NOT fall back to a built-in preset â€” that silently replaces the
+          // user's custom HDRI with studio-neutral.
+          console.error('[LightForge] Custom HDRI load failed:', e);
         });
     } else if (environment.presetId !== '__custom__') {
-      // Not custom — clear any HDRI backplate
+      // Not custom â€” clear any HDRI backplate
       el.setBackgroundFromEnv(sm.scene, false);
     }
-  }, [environment.presetId, environment.hdri, environment.intensity, environment.showBackground, sceneManagerRef, envLoaderRef]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    environment.presetId,
+    environment.hdri,
+    environment.rotation,
+    environment.showBackground,
+    sceneManagerRef,
+    envLoaderRef,
+  ]);
+
+  // Apply environment intensity WITHOUT reloading the texture
+  useEffect(() => {
+    const sm = sceneManagerRef.current;
+    if (!sm) return;
+    sm.scene.environmentIntensity = environment.intensity;
+    sm.scene.backgroundIntensity = environment.intensity;
+  }, [environment.intensity, sceneManagerRef]);
 
   // Restore model from scene file (triggered when _pendingModelDataBase64 is set)
   useEffect(() => {
@@ -477,7 +525,7 @@ export const Viewport: React.FC<ViewportProps> = ({ sceneManagerRef, onScreensho
         .then((envTexture) => {
           const envState = useSceneStore.getState().environment;
           el.setEnvironmentTexture(sm.scene, envTexture, envState.intensity);
-          // Restore 360° HDRI backplate — always show when custom HDRI is loaded
+          // Restore 360Â° HDRI backplate â€” always show when custom HDRI is loaded
           if (!envState.showBackground) {
             useSceneStore.getState().setEnvironment({ showBackground: true });
           }
@@ -535,8 +583,90 @@ export const Viewport: React.FC<ViewportProps> = ({ sceneManagerRef, onScreensho
     }
   }, [renderSettings, renderPipelineRef]);
 
+  // -- Transform gizmo --------------------------------------------------------
+  const gizmoRef = useRef<GizmoManager | null>(null);
+  const [gizmoMode, setGizmoMode] = useState<GizmoMode>(null);
+
+  const selectedLight = lights.find((l) => l.id === selectedLightId) ?? null;
+  const scaleAllowed = selectedLight?.type === 'area' || selectedLight?.type === 'overhead';
+
+  useEffect(() => {
+    const sm = sceneManagerRef.current;
+    if (!sm || gizmoRef.current) return;
+
+    gizmoRef.current = new GizmoManager(
+      sm.camera,
+      sm.renderer.domElement,
+      sm.scene,
+      sm.controls,
+      {
+        onTransform: (lightId, data) => {
+          const st = useLightsStore.getState();
+          const l = st.lights.find((x) => x.id === lightId);
+          if (!l) return;
+
+          // Push cartesian back AND recompute spherical, so the properties
+          // panel sliders stay in step with what the gizmo just did.
+          const sph = cartesianToSpherical(data.position.x, data.position.y, data.position.z);
+          st.updateLightTransform(lightId, {
+            position: data.position,
+            spherical: { lat: sph.lat, lng: sph.lng, radius: sph.radius, height: sph.height },
+            rotation: {
+              ...l.transform.rotation,
+              x: data.rotation.x,
+              y: data.rotation.y,
+              z: data.rotation.z,
+              enabled: true,
+            },
+          });
+
+          if (l.type === 'area' || l.type === 'overhead') {
+            st.updateLight(lightId, {
+              areaWidth: Math.max(0.1, (l.areaWidth ?? 2) * data.scale.x),
+              areaHeight: Math.max(0.1, (l.areaHeight ?? 2) * data.scale.y),
+            });
+          }
+        },
+      },
+    );
+
+    return () => {
+      gizmoRef.current?.dispose();
+      gizmoRef.current = null;
+    };
+  }, [sceneManagerRef]);
+
+  useEffect(() => {
+    gizmoRef.current?.setMode(gizmoMode);
+    gizmoRef.current?.attachToLight(selectedLightId);
+  }, [gizmoMode, selectedLightId, lights]);
+
+  useEffect(() => {
+    gizmoRef.current?.setScaleAllowed(scaleAllowed);
+    if (!scaleAllowed && gizmoMode === 'scale') setGizmoMode('translate');
+  }, [scaleAllowed, gizmoMode]);
+
+  // W / E / R -- same bindings as Blender and Unity
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const el = e.target as HTMLElement;
+      if (el?.tagName === 'INPUT' || el?.tagName === 'TEXTAREA' || el?.isContentEditable) return;
+      if (e.ctrlKey || e.metaKey || e.altKey) return;
+
+      if (e.key === 'w' || e.key === 'W') setGizmoMode('translate');
+      if (e.key === 'e' || e.key === 'E') setGizmoMode('rotate');
+      if ((e.key === 'r' || e.key === 'R') && scaleAllowed) setGizmoMode('scale');
+      if (e.key === 'Escape') setGizmoMode(null);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [scaleAllowed]);
+
   // Sync lights to scene
   useEffect(() => {
+    const smForLights = sceneManagerRef.current;
+    if (!smForLights) return;
+
     lightManagerRef.current?.syncLights(
       lights.map((l) => ({
         id: l.id,
@@ -554,9 +684,11 @@ export const Viewport: React.FC<ViewportProps> = ({ sceneManagerRef, onScreensho
         spotDecay: 2,
         areaWidth: l.areaWidth,
         areaHeight: l.areaHeight,
-      }))
+        edgeSoftness: l.edgeSoftness,
+      })),
+      smForLights.scene
     );
-  }, [lights, lightManagerRef]);
+  }, [lights, lightManagerRef, sceneManagerRef]);
 
   // Sync turntable state to SceneManager
   useEffect(() => {
@@ -565,6 +697,160 @@ export const Viewport: React.FC<ViewportProps> = ({ sceneManagerRef, onScreensho
     sm._turntableActive = turntable.active;
     sm._turntableSpeed = turntable.speed;
   }, [turntable.active, turntable.speed, sceneManagerRef]);
+
+  // -- LightPaint -------------------------------------------------------------
+  // Click a point on the car and the selected light is repositioned so that its
+  // reflection lands exactly there. This is the reverse-reflection problem:
+  // reflect the VIEW ray about the surface normal, then walk the light out
+  // along that reflected direction. Same idea as HDR Light Studio's LightPaint.
+  const [paintActive, setPaintActive] = useState(false);
+  const [paintMode, setPaintMode] = useState<PaintMode>('reflection');
+  const [distanceScale, setDistanceScale] = useState(1.0);
+  const paintPivotRef = useRef<THREE.Vector3 | null>(null);
+  const paintBoundsRef = useRef<{ center: THREE.Vector3; distance: number } | null>(null);
+  const paintRafRef = useRef<number | null>(null);
+  const paintPosRef = useRef<{ x: number; y: number } | null>(null);
+  const paintingRef = useRef(false);
+
+  const paintAt = useCallback((clientX: number, clientY: number) => {
+    const container = containerRef.current;
+    const sm = sceneManagerRef.current;
+    const lightId = useLightsStore.getState().selectedLightId;
+    if (!container || !sm || !lightId) return;
+
+    const rect = container.getBoundingClientRect();
+    const mouse = new THREE.Vector2(
+      ((clientX - rect.left) / rect.width) * 2 - 1,
+      -((clientY - rect.top) / rect.height) * 2 + 1,
+    );
+
+    const raycaster = new THREE.Raycaster();
+    raycaster.setFromCamera(mouse, sm.camera);
+
+    const meshes: THREE.Mesh[] = [];
+    sm.scene.traverse((obj) => {
+      if (
+        obj instanceof THREE.Mesh &&
+        !obj.userData?.isHelper &&
+        !obj.userData?.isProxy &&
+        obj.name !== '__floor__'
+      ) {
+        meshes.push(obj);
+      }
+    });
+
+    const hits = raycaster.intersectObjects(meshes, false);
+
+    // Rim ignores the model entirely - it rides the camera ray out past the scene.
+    if (paintMode !== 'rim' && hits.length === 0) return;
+
+    if (!paintBoundsRef.current) {
+      paintBoundsRef.current = computeLightDistance(sm.scene, distanceScale);
+    }
+    const { center, distance } = paintBoundsRef.current;
+
+    const hit = hits[0];
+    const P = hit ? hit.point.clone() : center.clone();
+    const N = hit ? smoothNormalAt(hit) : new THREE.Vector3(0, 1, 0);
+
+    const result = solveLightPaint(
+      paintMode,
+      P,
+      N,
+      sm.camera,
+      center,
+      distance,
+      paintPivotRef.current ?? undefined,
+    );
+
+    // Reflection and Illumination set the pivot that Shadow later swings around.
+    if (paintMode === 'reflection' || paintMode === 'illumination') {
+      paintPivotRef.current = P.clone();
+    }
+
+    const lp = result.position;
+    const sphDbg = cartesianToSpherical(lp.x, lp.y, lp.z);
+    console.log('[LP]', paintMode,
+      '| dist:', distance.toFixed(1),
+      '| center:', center.x.toFixed(1), center.y.toFixed(1), center.z.toFixed(1),
+      '| lightPos:', lp.x.toFixed(1), lp.y.toFixed(1), lp.z.toFixed(1),
+      '| sph lat:', sphDbg.lat.toFixed(1), 'lng:', sphDbg.lng.toFixed(1),
+      'rad:', sphDbg.radius.toFixed(1), 'h:', sphDbg.height.toFixed(1));
+    const st = useLightsStore.getState();
+    const l = st.lights.find((x) => x.id === lightId);
+    if (!l) return;
+
+    const sph = cartesianToSpherical(lp.x, lp.y, lp.z);
+    st.updateLightTransform(lightId, {
+      position: { x: lp.x, y: lp.y, z: lp.z },
+      spherical: { lat: sph.lat, lng: sph.lng, radius: sph.radius, height: sph.height },
+      // Leave rotation.enabled alone. Forcing it true makes engine.ts abandon
+      // lookAt() and apply these raw Eulers instead - and a RectAreaLight is
+      // single-sided, so if the face ends up pointing away from the scene the
+      // light emits into the void and simply disappears.
+      // Hand the engine the POINT to look at, not a precomputed Euler. Euler
+      // angles are applied as a LOCAL rotation, so they silently break the moment
+      // a light sits under a parent transform. Overhead the discrepancy is tiny;
+      // beside the car it is not - which is exactly why door paints drifted while
+      // roof paints looked fine. lookAt() sets the quaternion directly and is
+      // immune to the whole problem.
+      aimTarget: { x: P.x, y: P.y, z: P.z },
+      rotation: { ...l.transform.rotation, enabled: false },
+    } as never);
+  }, [paintMode, distanceScale, containerRef, sceneManagerRef]);
+
+  // Pointer handling lives on the container so no JSX surgery is needed.
+  useEffect(() => {
+    const container = containerRef.current;
+    const sm = sceneManagerRef.current;
+    if (!container || !sm || !paintActive) return;
+
+    const down = (e: PointerEvent) => {
+      if (e.button !== 0) return;
+      paintingRef.current = true;
+      paintBoundsRef.current = null;
+      sm.controls.enabled = false;
+      paintAt(e.clientX, e.clientY);
+    };
+    const move = (e: PointerEvent) => {
+      if (!paintingRef.current) return;
+
+      // pointermove fires far faster than the renderer draws. Raycasting on every
+      // event means several raycasts per frame, all but the last one thrown away -
+      // that is what makes the drag feel heavy and jumpy. Keep only the newest
+      // cursor position and resolve it once per animation frame.
+      paintPosRef.current = { x: e.clientX, y: e.clientY };
+      if (paintRafRef.current !== null) return;
+
+      paintRafRef.current = requestAnimationFrame(() => {
+        paintRafRef.current = null;
+        const p = paintPosRef.current;
+        if (p) paintAt(p.x, p.y);
+      });
+    };
+    const up = () => {
+      paintingRef.current = false;
+      paintBoundsRef.current = null;
+      if (paintRafRef.current !== null) {
+        cancelAnimationFrame(paintRafRef.current);
+        paintRafRef.current = null;
+      }
+      sm.controls.enabled = true;
+    };
+
+    container.addEventListener('pointerdown', down);
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', up);
+    container.style.cursor = 'crosshair';
+
+    return () => {
+      container.removeEventListener('pointerdown', down);
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', up);
+      container.style.cursor = '';
+      sm.controls.enabled = true;
+    };
+  }, [paintActive, paintAt, containerRef, sceneManagerRef]);
 
   // Click-to-select material from viewport
   const handleViewportClick = useCallback((event: React.MouseEvent) => {
@@ -702,6 +988,16 @@ export const Viewport: React.FC<ViewportProps> = ({ sceneManagerRef, onScreensho
 
   return (
     <ThreeSceneProvider>
+      <CameraSwitcher />
+      <ViewportPropertiesPanel />
+      <GizmoToolbar
+        mode={gizmoMode}
+        onModeChange={setGizmoMode}
+        scaleAllowed={scaleAllowed}
+        disabled={!selectedLightId}
+        paintActive={paintActive}
+        onPaintToggle={() => { setPaintActive((p) => !p); setGizmoMode(null); }}
+      />
       <div style={{ display: 'flex', flexDirection: 'column', width: '100%', height: '100%' }}>
         <ViewportToolbar
           sceneManagerRef={sceneManagerRef}

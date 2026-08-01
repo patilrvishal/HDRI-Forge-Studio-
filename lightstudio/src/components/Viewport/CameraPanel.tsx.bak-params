@@ -1,0 +1,167 @@
+﻿import React, { useCallback } from 'react';
+import { useCameraStore, type SceneCamera } from '../../store/cameraStore';
+import { useLightsStore } from '../../store/lightsStore';
+
+interface TargetOption {
+  id: string;
+  label: string;
+}
+
+export const CameraPanel: React.FC = () => {
+  const cameras = useCameraStore((s) => s.cameras);
+  const activeCameraId = useCameraStore((s) => s.activeCameraId);
+  const addCamera = useCameraStore((s) => s.addCamera);
+  const removeCamera = useCameraStore((s) => s.removeCamera);
+  const renameCamera = useCameraStore((s) => s.renameCamera);
+  const updateCamera = useCameraStore((s) => s.updateCamera);
+  const setActiveCamera = useCameraStore((s) => s.setActiveCamera);
+  const lights = useLightsStore((s) => s.lights);
+
+  const targetOptions: TargetOption[] = [
+    { id: 'model', label: 'Model (car)' },
+    { id: 'origin', label: 'Scene origin' },
+    ...lights.map((l) => ({ id: `light:${l.id}`, label: l.name || 'Light' })),
+  ];
+
+  const active = cameras.find((c) => c.id === activeCameraId) ?? null;
+
+  const patch = useCallback(
+    (updates: Partial<SceneCamera>) => {
+      if (!active) return;
+      updateCamera(active.id, updates);
+    },
+    [active, updateCamera],
+  );
+
+  const num = (v: number) => (Number.isFinite(v) ? Math.round(v * 100) / 100 : 0);
+
+  return (
+    <div style={{ padding: 10, display: 'flex', flexDirection: 'column', gap: 10, overflowY: 'auto' }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        <div className="section-header">Cameras</div>
+        <button
+          onClick={() => addCamera()}
+          style={{
+            fontSize: 11, padding: '4px 10px', borderRadius: 4, cursor: 'pointer',
+            background: 'var(--accent)', color: '#fff', border: 'none',
+          }}
+        >
+          + Add
+        </button>
+      </div>
+
+      {cameras.length === 0 && (
+        <div style={{ fontSize: 11, color: 'var(--text-dim)', lineHeight: 1.5 }}>
+          No cameras yet. Add one to frame a fixed shot.
+        </div>
+      )}
+
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+        {cameras.map((c) => {
+          const isActive = c.id === activeCameraId;
+          return (
+            <div
+              key={c.id}
+              onClick={() => setActiveCamera(isActive ? null : c.id)}
+              style={{
+                display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                padding: '6px 8px', borderRadius: 4, cursor: 'pointer',
+                background: isActive ? 'var(--accent)' : 'var(--bg-deep, #17171c)',
+                border: '1px solid ' + (isActive ? 'var(--accent)' : 'var(--border)'),
+              }}
+            >
+              <span style={{ fontSize: 11, color: isActive ? '#fff' : 'var(--text-sec)' }}>
+                {c.name}
+              </span>
+              <button
+                onClick={(e) => { e.stopPropagation(); removeCamera(c.id); }}
+                style={{
+                  fontSize: 12, lineHeight: 1, background: 'transparent', border: 'none',
+                  color: isActive ? '#fff' : 'var(--text-dim)', cursor: 'pointer', padding: '0 2px',
+                }}
+              >×</button>
+            </div>
+          );
+        })}
+      </div>
+
+      {active && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, borderTop: '1px solid var(--border)', paddingTop: 10 }}>
+          <input
+            value={active.name}
+            onChange={(e) => renameCamera(active.id, e.target.value)}
+            style={{
+              fontSize: 11, padding: '4px 6px', borderRadius: 4,
+              background: 'var(--bg-deep, #17171c)', border: '1px solid var(--border)',
+              color: 'var(--text-sec)',
+            }}
+          />
+
+          <div>
+            <div style={{ fontSize: 10, color: 'var(--text-dim)', marginBottom: 3 }}>Target</div>
+            <select
+              value={active.targetId ?? ''}
+              onChange={(e) => patch({ targetId: e.target.value || null })}
+              style={{
+                width: '100%', fontSize: 11, padding: '4px 6px', borderRadius: 4,
+                background: 'var(--bg-deep, #17171c)', border: '1px solid var(--border)',
+                color: 'var(--text-sec)',
+              }}
+            >
+              <option value="">Free rotation</option>
+              {targetOptions.map((t) => (
+                <option key={t.id} value={t.id}>{t.label}</option>
+              ))}
+            </select>
+          </div>
+
+          <div style={{ fontSize: 10, color: 'var(--text-dim)' }}>Position</div>
+          {(['x', 'y', 'z'] as const).map((axis) => (
+            <div key={'p' + axis} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <span style={{ fontSize: 10, width: 12, color: 'var(--text-dim)' }}>{axis.toUpperCase()}</span>
+              <input type="range" min={-30} max={30} step={0.1}
+                value={active.position[axis]}
+                onChange={(e) => patch({ position: { ...active.position, [axis]: parseFloat(e.target.value) } })}
+                style={{ flex: 1 }}
+              />
+              <span style={{ fontSize: 10, width: 34, textAlign: 'right', fontFamily: 'var(--font-mono)', color: 'var(--text-sec)' }}>
+                {num(active.position[axis])}
+              </span>
+            </div>
+          ))}
+
+          {!active.targetId && (
+            <>
+              <div style={{ fontSize: 10, color: 'var(--text-dim)' }}>Rotation</div>
+              {(['x', 'y', 'z'] as const).map((axis) => (
+                <div key={'r' + axis} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <span style={{ fontSize: 10, width: 12, color: 'var(--text-dim)' }}>{axis.toUpperCase()}</span>
+                  <input type="range" min={-180} max={180} step={1}
+                    value={active.rotation[axis]}
+                    onChange={(e) => patch({ rotation: { ...active.rotation, [axis]: parseFloat(e.target.value) } })}
+                    style={{ flex: 1 }}
+                  />
+                  <span style={{ fontSize: 10, width: 34, textAlign: 'right', fontFamily: 'var(--font-mono)', color: 'var(--text-sec)' }}>
+                    {num(active.rotation[axis])}
+                  </span>
+                </div>
+              ))}
+            </>
+          )}
+
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <span style={{ fontSize: 10, width: 28, color: 'var(--text-dim)' }}>FOV</span>
+            <input type="range" min={10} max={120} step={1}
+              value={active.fov}
+              onChange={(e) => patch({ fov: parseFloat(e.target.value) })}
+              style={{ flex: 1 }}
+            />
+            <span style={{ fontSize: 10, width: 34, textAlign: 'right', fontFamily: 'var(--font-mono)', color: 'var(--text-sec)' }}>
+              {active.fov}
+            </span>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
