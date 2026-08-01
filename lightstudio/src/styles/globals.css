@@ -5,32 +5,33 @@
 @tailwind utilities;
 
 :root {
-  /* ── Core backgrounds ─────────────────────────────────────── */
-  --bg-deep: #0a0a14;
-  --bg-panel: #0f0f1a;
-  --bg-card: #161625;
-  --bg-input: #12121f;
-  /* ── Neon purple/pink accent system ───────────────────────── */
-  --accent: #a78bfa;
-  --accent-bright: #c084fc;
-  --accent-dim: rgba(167, 139, 250, 0.25);
-  --accent-bg: rgba(167, 139, 250, 0.08);
-  --purple: #a78bfa;
-  --purple-glow: rgba(167, 139, 250, 0.5);
-  --pink: #f472b6;
-  --pink-glow: rgba(244, 114, 182, 0.4);
-  --neon-gradient: linear-gradient(135deg, #a78bfa 0%, #f472b6 100%);
+  /* ── Core backgrounds — neutral studio dark ───────────────── */
+  --bg-deep: #0b0b0d;
+  --bg-panel: #141417;
+  --bg-card: #1c1c20;
+  --bg-input: #0f0f12;
+  --bg-elevated: #222228;
+  /* ── Calm blue accent system (pro DCC look) ───────────────── */
+  --accent: #4a9eff;
+  --accent-bright: #74b4ff;
+  --accent-dim: rgba(74, 158, 255, 0.28);
+  --accent-bg: rgba(74, 158, 255, 0.10);
+  --purple: #4a9eff;
+  --purple-glow: rgba(74, 158, 255, 0.45);
+  --pink: #4a9eff;
+  --pink-glow: rgba(74, 158, 255, 0.35);
+  --neon-gradient: linear-gradient(135deg, #4a9eff 0%, #2f7fe0 100%);
   /* ── Track / thumb ────────────────────────────────────────── */
-  --track: #1e1e32;
-  --thumb: #a78bfa;
+  --track: #26262c;
+  --thumb: #4a9eff;
   /* ── Text hierarchy ──────────────────────────────────────── */
-  --text: #ececf4;
-  --text-sec: #9898b4;
-  --text-dim: #5c5c78;
+  --text: #e9e9ec;
+  --text-sec: #9a9aa4;
+  --text-dim: #5e5e68;
   /* ── Borders ──────────────────────────────────────────────── */
-  --border: #1e1e34;
-  --border-light: #2e2e48;
-  --border-glow: rgba(167, 139, 250, 0.18);
+  --border: #26262c;
+  --border-light: #34343c;
+  --border-glow: rgba(74, 158, 255, 0.16);
   /* ── Semantic ─────────────────────────────────────────────── */
   --danger: #f87171;
   --success: #4ade80;
@@ -40,10 +41,10 @@
   --font-mono: 'JetBrains Mono', 'SF Mono', monospace;
   --radius: 8px;
   --radius-sm: 5px;
-  /* ── Glow utilities ───────────────────────────────────────── */
-  --glow-sm: 0 0 8px rgba(167, 139, 250, 0.25);
-  --glow-md: 0 0 16px rgba(167, 139, 250, 0.3);
-  --glow-lg: 0 0 24px rgba(167, 139, 250, 0.35);
+  /* ── Glow utilities — subtle, calm ────────────────────────── */
+  --glow-sm: 0 0 8px rgba(74, 158, 255, 0.18);
+  --glow-md: 0 0 14px rgba(74, 158, 255, 0.22);
+  --glow-lg: 0 0 22px rgba(74, 158, 255, 0.26);
   --panel-glow: 0 0 1px var(--border-glow), inset 0 0 0 1px rgba(255,255,255,0.02);
 }
 
@@ -103,7 +104,7 @@ select {
   display: flex; align-items: center; justify-content: space-between;
   padding: 8px 12px; border-bottom: 1px solid var(--border);
   min-height: 32px; flex-shrink: 0;
-  background: linear-gradient(180deg, rgba(167,139,250,0.03) 0%, transparent 100%);
+  background: linear-gradient(180deg, rgba(74, 158, 255,0.03) 0%, transparent 100%);
 }
 .panel-header h3 {
   font-size: 10px; font-weight: 600; text-transform: uppercase;
@@ -220,7 +221,7 @@ select {
 .tab-item.active { color: var(--accent-bright); border-bottom-color: var(--accent-bright); }
 
 .drop-overlay {
-  position: absolute; inset: 0; background: rgba(167, 139, 250, 0.06);
+  position: absolute; inset: 0; background: rgba(74, 158, 255, 0.06);
   border: 2px dashed var(--accent-bright); border-radius: var(--radius);
   display: flex; align-items: center; justify-content: center; z-index: 50;
   pointer-events: none;
@@ -468,7 +469,7 @@ select {
 
 .preset-card.previewing {
   border-color: var(--accent-bright);
-  box-shadow: 0 0 0 1px var(--accent-dim), var(--glow-md), 0 4px 16px rgba(167, 139, 250, 0.15);
+  box-shadow: 0 0 0 1px var(--accent-dim), var(--glow-md), 0 4px 16px rgba(74, 158, 255, 0.15);
 }
 
 .preset-card:active {
@@ -945,7 +946,7 @@ select {
   background: var(--accent);
   z-index: 10;
   pointer-events: none;
-  box-shadow: 0 0 8px rgba(167, 139, 250, 0.4);
+  box-shadow: 0 0 8px rgba(74, 158, 255, 0.4);
 }
 
 .tl-playhead::before {
@@ -1554,7 +1555,7 @@ select {
 
 .lp-item.selected {
   border-color: var(--accent-bright);
-  box-shadow: 0 0 12px rgba(192, 132, 252, 0.35), 0 0 4px rgba(192, 132, 252, 0.2);
+  box-shadow: 0 0 12px rgba(116, 180, 255, 0.35), 0 0 4px rgba(116, 180, 255, 0.2);
   background: var(--accent-bg);
 }
 
@@ -1567,11 +1568,11 @@ select {
 }
 
 .lp-item.selected canvas {
-  box-shadow: 0 0 10px rgba(192, 132, 252, 0.3);
+  box-shadow: 0 0 10px rgba(116, 180, 255, 0.3);
 }
 
 .lp-item:hover canvas {
-  box-shadow: 0 0 8px rgba(192, 132, 252, 0.2);
+  box-shadow: 0 0 8px rgba(116, 180, 255, 0.2);
 }
 
 .lp-item-name {
@@ -1673,7 +1674,7 @@ input[type="range"]:active::-webkit-slider-thumb {
 }
 
 .preset-card:hover .pc-inner {
-  box-shadow: inset 0 0 20px rgba(167, 139, 250, 0.05);
+  box-shadow: inset 0 0 20px rgba(74, 158, 255, 0.05);
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
@@ -1703,11 +1704,11 @@ input[type="range"]:active::-webkit-slider-thumb {
 
 /* Animated gradient border glow on panels */
 @keyframes borderGlow {
-  0%   { border-color: rgba(99, 102, 241, 0.25); box-shadow: 0 0 6px rgba(99, 102, 241, 0.15); }
-  25%  { border-color: rgba(139, 92, 246, 0.40); box-shadow: 0 0 10px rgba(139, 92, 246, 0.25); }
+  0%   { border-color: rgba(59, 130, 246, 0.25); box-shadow: 0 0 6px rgba(59, 130, 246, 0.15); }
+  25%  { border-color: rgba(74, 158, 255, 0.40); box-shadow: 0 0 10px rgba(74, 158, 255, 0.25); }
   50%  { border-color: rgba(59, 130, 246, 0.40); box-shadow: 0 0 14px rgba(59, 130, 246, 0.25); }
-  75%  { border-color: rgba(99, 102, 241, 0.35); box-shadow: 0 0 8px rgba(99, 102, 241, 0.20); }
-  100% { border-color: rgba(99, 102, 241, 0.25); box-shadow: 0 0 6px rgba(99, 102, 241, 0.15); }
+  75%  { border-color: rgba(59, 130, 246, 0.35); box-shadow: 0 0 8px rgba(59, 130, 246, 0.20); }
+  100% { border-color: rgba(59, 130, 246, 0.25); box-shadow: 0 0 6px rgba(59, 130, 246, 0.15); }
 }
 
 /* Moving border light sweep */
@@ -1728,42 +1729,28 @@ input[type="range"]:active::-webkit-slider-thumb {
   100% { background-position: 200% 0; }
 }
 
-/* Panel glow — applied to main panel containers */
+/* Panel glow — calm, static hairline edge (no pulsing) to match the
+   restrained pro-tool reference. Animation intentionally disabled. */
 .panel-glow {
-  animation: borderGlow 4s ease-in-out infinite;
-  will-change: border-color, box-shadow;
+  animation: none;
+  border-color: var(--border);
 }
 
-/* Moving border light effect — child of panel-glow elements */
+/* Moving border light sweep disabled — the reference is static/clean. */
 .border-light-effect {
   position: relative;
   overflow: hidden;
 }
 .border-light-effect::before {
-  content: '';
-  position: absolute;
-  top: -1px;
-  left: -60%;
-  width: 50%;
-  height: 2px;
-  background: linear-gradient(
-    90deg,
-    transparent,
-    rgba(139, 92, 246, 0.8),
-    rgba(99, 102, 241, 0.6),
-    transparent
-  );
-  animation: borderSweep 4s linear infinite;
-  z-index: 2;
-  pointer-events: none;
+  content: none;
 }
 
 /* Active / selected element glow */
 .element-glow-active {
   box-shadow:
-    0 0 0 1px rgba(139, 92, 246, 0.5),
-    0 0 10px rgba(139, 92, 246, 0.25),
-    0 0 20px rgba(99, 102, 241, 0.1);
+    0 0 0 1px rgba(74, 158, 255, 0.5),
+    0 0 10px rgba(74, 158, 255, 0.25),
+    0 0 20px rgba(59, 130, 246, 0.1);
   transition: box-shadow 0.3s ease;
 }
 
@@ -1773,8 +1760,8 @@ input[type="range"]:active::-webkit-slider-thumb {
 }
 .btn-glow:hover {
   box-shadow:
-    0 0 6px rgba(139, 92, 246, 0.35),
-    0 0 16px rgba(99, 102, 241, 0.15);
+    0 0 6px rgba(74, 158, 255, 0.35),
+    0 0 16px rgba(59, 130, 246, 0.15);
 }
 
 /* Resize handle glow */
@@ -1782,8 +1769,8 @@ input[type="range"]:active::-webkit-slider-thumb {
   transition: background 0.15s ease, box-shadow 0.15s ease, width 0.15s ease, height 0.15s ease;
 }
 .resize-handle-glow:hover {
-  background: rgba(139, 92, 246, 0.5) !important;
-  box-shadow: 0 0 8px rgba(139, 92, 246, 0.3);
+  background: rgba(74, 158, 255, 0.5) !important;
+  box-shadow: 0 0 8px rgba(74, 158, 255, 0.3);
 }
 
 /* Skeleton loading for preset thumbnails */
@@ -1793,7 +1780,7 @@ input[type="range"]:active::-webkit-slider-thumb {
   background: linear-gradient(
     90deg,
     var(--bg-input) 25%,
-    rgba(139, 92, 246, 0.06) 50%,
+    rgba(74, 158, 255, 0.06) 50%,
     var(--bg-input) 75%
   );
   background-size: 200% 100%;
@@ -1927,7 +1914,7 @@ input[type="range"]:active::-webkit-slider-thumb {
   gap: 6px;
   padding: 6px 10px;
   border-bottom: 1px solid var(--border);
-  background: rgba(139, 92, 246, 0.04);
+  background: rgba(74, 158, 255, 0.04);
 }
 .mat-selected-chip-name {
   font-size: 11px;
@@ -2056,7 +2043,7 @@ input[type="range"]:active::-webkit-slider-thumb {
   border-radius: 50%;
   background: var(--accent);
   cursor: pointer;
-  box-shadow: 0 0 6px rgba(167, 139, 250, 0.4);
+  box-shadow: 0 0 6px rgba(74, 158, 255, 0.4);
   border: 1.5px solid rgba(255,255,255,0.15);
 }
 .vp-design-panel input[type="range"]::-moz-range-thumb {
@@ -2065,7 +2052,7 @@ input[type="range"]:active::-webkit-slider-thumb {
   border-radius: 50%;
   background: var(--accent);
   cursor: pointer;
-  box-shadow: 0 0 6px rgba(167, 139, 250, 0.4);
+  box-shadow: 0 0 6px rgba(74, 158, 255, 0.4);
   border: 1.5px solid rgba(255,255,255,0.15);
 }
 
@@ -2092,4 +2079,32 @@ input[type="range"]:active::-webkit-slider-thumb {
 }
 .vp-design-preset-btn:active {
   transform: scale(0.97);
+}
+/* ── Auto-scroll: scrollbars appear only when content overflows ──────────── */
+.props-section,
+.light-properties,
+.tab-content,
+.panel-body {
+  overflow: auto;
+  min-height: 0;
+  min-width: 0;
+}
+
+/* Thin dark scrollbars that match the DCC look */
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+*::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 4px;
+}
+*::-webkit-scrollbar-thumb:hover {
+  background: var(--text-dim);
+}
+*::-webkit-scrollbar-corner {
+  background: transparent;
 }

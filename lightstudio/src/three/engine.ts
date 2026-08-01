@@ -1,4 +1,4 @@
-import * as THREE from 'three';
+﻿import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { RectAreaLightUniformsLib } from 'three/addons/lights/RectAreaLightUniformsLib.js';
@@ -32,6 +32,8 @@ export class SceneManager {
   camera: THREE.PerspectiveCamera;
   renderer: THREE.WebGLRenderer;
   controls: OrbitControls;
+  /** True while the user is orbit-dragging a scripted camera. */
+  _cameraDragging = false;
   container: HTMLElement | null = null;
   ground: THREE.Mesh | null = null;
   groundOverlay: THREE.Mesh | null = null;
@@ -50,7 +52,10 @@ export class SceneManager {
 
   constructor() {
     this.scene = new THREE.Scene();
-    this.scene.background = new THREE.Color('#0d0d1a');
+    // Limbo background: a vertical fade with a soft radial hotspot behind the
+    // subject. This is the standard automotive studio backdrop - a flat colour
+    // makes a dark car read as a silhouette with no separation from the void.
+    this.scene.background = createLimboBackground();
 
     this.camera = new THREE.PerspectiveCamera(45, 1, 0.1, 1000);
     this.camera.position.set(5, 3, 5);
@@ -78,6 +83,39 @@ export class SceneManager {
     this.controls.target.set(0, 0.5, 0);
     this.controls.update();
 
+    // Track drag state so applyActiveCamera() can skip re-applying the stored
+    // position mid-drag, and write the manually-adjusted position back into the
+    // camera store on release.
+    this.controls.addEventListener('start', () => {
+      this._cameraDragging = true;
+    });
+    this.controls.addEventListener('end', () => {
+      this._cameraDragging = false;
+      const store = (window as unknown as {
+        __cameraStore?: {
+          getState: () => {
+            activeCameraId: string | null;
+            updateCamera: (id: string, updates: Record<string, unknown>) => void;
+          };
+        };
+      }).__cameraStore;
+      const s = store?.getState();
+      if (s?.activeCameraId) {
+        s.updateCamera(s.activeCameraId, {
+          position: {
+            x: this.camera.position.x,
+            y: this.camera.position.y,
+            z: this.camera.position.z,
+          },
+          rotation: {
+            x: (this.camera.rotation.x * 180) / Math.PI,
+            y: (this.camera.rotation.y * 180) / Math.PI,
+            z: (this.camera.rotation.z * 180) / Math.PI,
+          },
+        });
+      }
+    });
+
     this.pmremGenerator = new THREE.PMREMGenerator(this.renderer);
     this.pmremGenerator.compileEquirectangularShader();
 
@@ -93,7 +131,7 @@ export class SceneManager {
     this.renderer.domElement.style.width = '100%';
     this.renderer.domElement.style.height = '100%';
 
-    // Ground plane (placeholder — will be replaced by updateGround)
+    // Ground plane (placeholder â€” will be replaced by updateGround)
     this.ground = null;
     this.groundOverlay = null;
     this._floorCubeCamera = null;
@@ -149,7 +187,9 @@ export class SceneManager {
       this.ground = null;
     }
     if (this._floorCubeCamera) {
-      this._floorCubeCamera.dispose();
+      if (this._floorCubeCamera && typeof this._floorCubeCamera.dispose === 'function') {
+  this._floorCubeCamera.dispose();
+}
       this._floorCubeCamera = null;
     }
     if (this._floorCubeRT) {
@@ -162,8 +202,8 @@ export class SceneManager {
   /**
    * Rebuild the ground plane according to the given settings.
    * Always uses MeshStandardMaterial (PBR) so roughness/metalness work correctly.
-   * - reflections=true  → CubeCamera real-time reflections via envMap
-   * - reflections=false → Scene environment only (or none)
+   * - reflections=true  â†’ CubeCamera real-time reflections via envMap
+   * - reflections=false â†’ Scene environment only (or none)
    */
   updateGround(settings?: GroundSettings | null): void {
     if (!settings) return;
@@ -183,11 +223,11 @@ export class SceneManager {
 
     if (!merged.visible) return;
 
-    const GROUND_SIZE = 40;
+    const GROUND_SIZE = merged.size ?? 40;
     const groundGeo = new THREE.PlaneGeometry(GROUND_SIZE, GROUND_SIZE);
     const color = new THREE.Color(merged.color);
 
-    // ── PBR ground material (always MeshStandardMaterial) ──
+    // â”€â”€ PBR ground material (always MeshStandardMaterial) â”€â”€
     const groundMat = new THREE.MeshStandardMaterial({
       color: color.getHex(),
       metalness: merged.metalness,
@@ -198,7 +238,7 @@ export class SceneManager {
     this._floorMaterial = groundMat;
 
     if (merged.reflections) {
-      // ── CubeCamera for real-time planar reflections ──
+      // â”€â”€ CubeCamera for real-time planar reflections â”€â”€
       try {
         const dpr = Math.min(window.devicePixelRatio, 2);
         const cubeRTSize = Math.max(128, Math.round(512 * dpr));
@@ -227,7 +267,7 @@ export class SceneManager {
         groundMat.envMapIntensity = 0.5;
       }
     } else {
-      // No real-time reflections — use scene environment map if available
+      // No real-time reflections â€” use scene environment map if available
       if (this.scene.environment) {
         groundMat.envMap = this.scene.environment;
       }
@@ -235,13 +275,24 @@ export class SceneManager {
     }
 
     this.ground = new THREE.Mesh(groundGeo, groundMat);
-    this.ground.rotation.x = -Math.PI / 2;
-    this.ground.position.y = -0.005;
+
+    // Base orientation: -90deg on X lays the plane flat. User rotation is
+    // applied ON TOP of that, so 0/0/0 means "horizontal", not "vertical".
+    const gPos = merged.position ?? { x: 0, y: 0, z: 0 };
+    const gRot = merged.rotation ?? { x: 0, y: 0, z: 0 };
+    const D2R = Math.PI / 180;
+
+    this.ground.rotation.set(
+      -Math.PI / 2 + gRot.x * D2R,
+      gRot.y * D2R,
+      gRot.z * D2R,
+    );
+    this.ground.position.set(gPos.x, gPos.y - 0.005, gPos.z);
     this.ground.receiveShadow = true;
     this.ground.name = '__floor__';
     this.scene.add(this.ground);
 
-    // ── Fade overlay: fades ground edges into background ──
+    // â”€â”€ Fade overlay: fades ground edges into background â”€â”€
     if (merged.fadeRadius > 0) {
       const overlayGeo = new THREE.PlaneGeometry(GROUND_SIZE, GROUND_SIZE);
       const overlayMat = new THREE.ShaderMaterial({
@@ -282,7 +333,7 @@ export class SceneManager {
 
   setGrid(visible: boolean): void {
     if (visible && !this.grid) {
-      this.grid = new THREE.GridHelper(20, 40, 0x444466, 0x2a2a44);
+      this.grid = new THREE.GridHelper(20, 40, 0x3a3d44, 0x24262b);
       this.grid.position.y = 0.005;
       this.grid.userData.isGrid = true; // hide from SceneHierarchy
       this.scene.add(this.grid);
@@ -299,8 +350,15 @@ export class SceneManager {
     if (show) {
       this.scene.background = new THREE.Color(color);
     } else {
-      this.scene.background = new THREE.Color('#0d0d1a');
+      // Fall back to the limbo backdrop, not a flat colour. A dark car against
+      // flat #0d0d1a is a silhouette in a void - the gradient gives it something
+      // to separate against.
+      this.scene.background = createLimboBackground();
     }
+  }
+
+  setGradientBackground(config: GradientBackgroundConfig): void {
+    this.scene.background = createGradientBackground(config);
   }
 
   setTurntable(active: boolean, speed: number): void {
@@ -360,7 +418,8 @@ export class SceneManager {
       }
 
       if (this._onFrame) this._onFrame(delta);
-      this.controls.update();
+      const scriptedCam = this.applyActiveCamera();
+      if (!scriptedCam) this.controls.update();
       this.renderer.render(this.scene, this.camera);
     };
     loop();
@@ -413,6 +472,108 @@ export class SceneManager {
     return this.renderer.domElement.toDataURL('image/png');
   }
 
+  /**
+   * If a scripted camera is active, drive the real viewport camera from it and,
+   * when it has a target, lookAt() the target's live world position every frame.
+   * OrbitControls is disabled while a camera is active so the user cannot fight
+   * the scripted transform.
+   */
+  applyActiveCamera(): boolean {
+    const store = (window as unknown as {
+      __cameraStore?: { getState: () => {
+        getActiveCamera: () => null | {
+          position: { x: number; y: number; z: number };
+          rotation: { x: number; y: number; z: number };
+          targetId: string | null;
+          fov: number;
+        };
+      } };
+    }).__cameraStore;
+
+    const cam = store?.getState().getActiveCamera() ?? null;
+    console.log('[CAM] stored:', cam.position.x.toFixed(2), cam.position.y.toFixed(2), cam.position.z.toFixed(2),
+      '| actual camera:', this.camera.position.x.toFixed(2), this.camera.position.y.toFixed(2), this.camera.position.z.toFixed(2),
+      '| dragging:', this._cameraDragging);
+
+    if (!cam) {
+      if (!this.controls.enabled) this.controls.enabled = true;
+      return false;
+    }
+
+    // A scripted camera owns the view, but orbit-drag is allowed to adjust it.
+    // The target must be the ORBIT PIVOT (the model, or origin), never the
+    // camera's own position - setting target to the camera position every
+    // frame made the pivot degenerate and cancelled out drag input, which is
+    // why the viewport never visibly moved even though the stored value did.
+    this.controls.enabled = true;
+
+    if (this._cameraDragging) {
+      // Mid-drag: OrbitControls already owns camera.position this frame.
+      // Do not stomp it, and do not touch target - the user is spinning it.
+      return true;
+    }
+
+    const pivot = this.resolveTargetWorld(cam.targetId ?? 'model') ?? { x: 0, y: 0, z: 0 };
+    this.controls.target.set(pivot.x, pivot.y, pivot.z);
+
+    this.camera.position.set(cam.position.x, cam.position.y, cam.position.z);
+
+    if (cam.fov !== this.camera.fov) {
+      this.camera.fov = cam.fov;
+      this.camera.updateProjectionMatrix();
+    }
+
+    if (cam.targetId) {
+      const t = this.resolveTargetWorld(cam.targetId);
+      if (t) this.camera.lookAt(t.x, t.y, t.z);
+    } else {
+      this.camera.rotation.set(
+        (cam.rotation.x * Math.PI) / 180,
+        (cam.rotation.y * Math.PI) / 180,
+        (cam.rotation.z * Math.PI) / 180,
+      );
+    }
+    return true;
+  }
+
+  /** Resolve a camera target id ('model' | 'origin' | 'light:<id>') to a world point. */
+  private resolveTargetWorld(targetId: string): { x: number; y: number; z: number } | null {
+    if (targetId === 'origin') return { x: 0, y: 0, z: 0 };
+
+    if (targetId === 'model') {
+      const box = new THREE.Box3();
+      let found = false;
+      this.scene.traverse((o) => {
+        if (
+          o instanceof THREE.Mesh &&
+          !o.userData?.isHelper &&
+          !o.userData?.isProxy &&
+          o.name !== '__floor__'
+        ) {
+          const b = new THREE.Box3().setFromObject(o);
+          const s = b.getSize(new THREE.Vector3());
+          if (Math.max(s.x, s.y, s.z) < 500) { box.expandByObject(o); found = true; }
+        }
+      });
+      if (!found) return { x: 0, y: 0, z: 0 };
+      const c = box.getCenter(new THREE.Vector3());
+      return { x: c.x, y: c.y, z: c.z };
+    }
+
+    if (targetId.startsWith('light:')) {
+      const id = targetId.slice(6);
+      let pos: { x: number; y: number; z: number } | null = null;
+      this.scene.traverse((o) => {
+        if (o.userData?.lightId === id) {
+          const w = o.getWorldPosition(new THREE.Vector3());
+          pos = { x: w.x, y: w.y, z: w.z };
+        }
+      });
+      return pos;
+    }
+
+    return null;
+  }
   dispose(): void {
     this.stopRenderLoop();
     this.detach();
@@ -433,7 +594,7 @@ export class SceneManager {
   }
 }
 
-// ── Vignette shader (custom) ────────────────────────────────────────────────
+// â”€â”€ Vignette shader (custom) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 const VignetteShader = {
   uniforms: {
     tDiffuse: { value: null as THREE.Texture | null },
@@ -464,7 +625,7 @@ const VignetteShader = {
   `,
 };
 
-// ── Color Grading shader (brightness / contrast / saturation) ───────────────
+// â”€â”€ Color Grading shader (brightness / contrast / saturation) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 const ColorGradingShader = {
   uniforms: {
     tDiffuse: { value: null as THREE.Texture | null },
@@ -505,7 +666,7 @@ const ColorGradingShader = {
   `,
 };
 
-// ── Pipeline settings interface ─────────────────────────────────────────────
+// â”€â”€ Pipeline settings interface â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 export interface PipelineConfig {
   bloom: { enabled: boolean; intensity: number; threshold: number; radius: number };
   ao: { enabled: boolean; radius: number; intensity: number };
@@ -570,7 +731,7 @@ export class RenderPipeline {
 
     // Anti-aliasing
     if (this._config.antialiasing === 'smaa') {
-      // @ts-expect-error — SMAAPass types are incomplete in @types/three
+      // @ts-expect-error â€” SMAAPass types are incomplete in @types/three
       this._smaaPass = new SMAAPass(w, h);
       this._composer.addPass(this._smaaPass);
     } else if (this._config.antialiasing === 'fxaa') {
@@ -578,8 +739,8 @@ export class RenderPipeline {
       this._fxaaPass = new ShaderPass(fxaaMat);
       this._composer.addPass(this._fxaaPass);
     }
-    // 'taa' — handled via renderer settings + jitter; we keep SMAA as fallback
-    // 'none' — no AA pass
+    // 'taa' â€” handled via renderer settings + jitter; we keep SMAA as fallback
+    // 'none' â€” no AA pass
 
     // SSAO
     if (this._config.ao.enabled) {
@@ -713,7 +874,7 @@ export class RenderPipeline {
     }
   }
 
-  // ── Convenience setters (called from Viewport sync) ───────────────────────
+  // â”€â”€ Convenience setters (called from Viewport sync) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
   setEngine(engine: 'pbr' | 'pathtracer'): void {
     if (engine === 'pbr') {
@@ -772,7 +933,7 @@ export class RenderPipeline {
     return this._composer;
   }
 
-  /** Take a screenshot — renders one frame and returns a data URL. */
+  /** Take a screenshot â€” renders one frame and returns a data URL. */
   capture(): string {
     this.render();
     return this._sm.renderer.domElement.toDataURL('image/png');
@@ -799,15 +960,15 @@ export class RenderPipeline {
     this._colorGradingPass = null;
   }
 
-  // ── Private helpers ───────────────────────────────────────────────────────
+  // â”€â”€ Private helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
-  /** Apply SSAO parameters — radius controls kernel spread, intensity controls maxDistance scaling. */
+  /** Apply SSAO parameters â€” radius controls kernel spread, intensity controls maxDistance scaling. */
   private _applyAOParams(radius: number, intensity: number): void {
     if (!this._ssaoPass) return;
     this._ssaoPass.kernelRadius = radius;
     this._ssaoPass.minDistance = 0.005;
-    // Scale maxDistance with intensity: higher intensity → AO visible at greater depth range
-    // Tuned for car-scale scenes (objects ~2–5m across)
+    // Scale maxDistance with intensity: higher intensity â†’ AO visible at greater depth range
+    // Tuned for car-scale scenes (objects ~2â€“5m across)
     this._ssaoPass.maxDistance = 0.05 + intensity * 0.5;
   }
 
@@ -987,7 +1148,12 @@ export class LightManager {
     this._types.set(ld.id, ld.type);
 
     // Create helper
-    const helper = this._createHelper(ld.type, lightObj as THREE.Light);
+    // Stamp the store id onto the THREE object so the gizmo can find this
+    // light without reaching into LightManager internals.
+    lightObj.userData.lightId = ld.id;
+    lightObj.userData.edgeSoftness = ld.edgeSoftness ?? 50;
+
+    const helper = this._createHelper(ld.type, lightObj as THREE.Light, ld);
     if (helper) {
       this._helpers.set(ld.id, helper);
       this._scene.add(helper);
@@ -1004,20 +1170,41 @@ export class LightManager {
     const s = ld.transform.spherical;
     const latRad = (s.lat * Math.PI) / 180;
     const lngRad = (s.lng * Math.PI) / 180;
-    const px = s.radius * Math.cos(latRad) * Math.cos(lngRad);
+    // cartesianToSpherical() stores `radius` as the HORIZONTAL distance
+    // (sqrt(x^2+z^2)) and `height` as y. Multiplying by cos(lat) here applies
+    // the elevation a second time, so every round-trip through the store pulls
+    // the light in toward the origin - which is why LightPaint never landed
+    // where you clicked.
+    void latRad;
+    const px = s.radius * Math.cos(lngRad);
     const py = s.height;
-    const pz = s.radius * Math.cos(latRad) * Math.sin(lngRad);
+    const pz = s.radius * Math.sin(lngRad);
 
+    lightObj.userData.edgeSoftness = ld.edgeSoftness ?? 50;
     lightObj.position.set(px, py, pz);
     lightObj.visible = shouldShow;
 
-    // Apply rotation if enabled
-    if (ld.transform.rotation.enabled) {
+    // Aiming.
+    //
+    // A LightPaint target always wins: lookAt() sets the quaternion directly and
+    // is immune to the local-vs-world confusion that Euler angles suffer from.
+    // Pushing a world-space Euler through lightObj.rotation.set() - which is a
+    // LOCAL rotation - is what made side-panel paints drift while roof paints
+    // looked fine: overhead, the discrepancy is tiny; beside the car, it is not.
+    const aimTarget = (ld.transform as { aimTarget?: { x: number; y: number; z: number } }).aimTarget;
+
+    if (aimTarget) {
+      lightObj.lookAt(aimTarget.x, aimTarget.y, aimTarget.z);
+    } else if (ld.transform.rotation.enabled) {
       lightObj.rotation.set(
         (ld.transform.rotation.x * Math.PI) / 180,
         (ld.transform.rotation.y * Math.PI) / 180,
         (ld.transform.rotation.z * Math.PI) / 180,
       );
+    } else if (lightObj instanceof THREE.RectAreaLight) {
+      // Area lights are single-sided; with no explicit aim, face the scene centre
+      // so they never emit into the void.
+      lightObj.lookAt(0, 0, 0);
     }
 
     if (lightObj instanceof THREE.Light) {
@@ -1086,6 +1273,22 @@ export class LightManager {
       helper.rotation.copy(lightObj.rotation);
       if (helper instanceof THREE.Mesh && lightObj instanceof THREE.Light) {
         (helper.material as THREE.MeshBasicMaterial).color.copy(lightObj.color);
+
+        // Rebuild the plane when the area dimensions change. BufferGeometry is
+        // immutable, so mutating PlaneGeometry.parameters does nothing - the old
+        // geometry must be disposed and replaced.
+        const isAreaType = ld.type === 'area' || ld.type === 'overhead';
+        if (isAreaType) {
+          const w = Math.max(0.01, ld.areaWidth ?? 2);
+          const h = Math.max(0.01, ld.areaHeight ?? 2);
+          const prev = helper.userData as { hw?: number; hh?: number };
+          if (prev.hw !== w || prev.hh !== h) {
+            helper.geometry.dispose();
+            helper.geometry = new THREE.PlaneGeometry(w, h);
+            prev.hw = w;
+            prev.hh = h;
+          }
+        }
       }
     }
   }
@@ -1178,11 +1381,13 @@ export class LightManager {
     }
   }
 
-  private _createHelper(type: string, light: THREE.Light): THREE.Object3D | null {
+  private _createHelper(type: string, light: THREE.Light, ld?: { areaWidth?: number; areaHeight?: number }): THREE.Object3D | null {
     const isArea = type === 'area' || type === 'overhead';
     let geo: THREE.BufferGeometry;
     if (isArea) {
-      geo = new THREE.PlaneGeometry(0.3, 0.3);
+      const w = Math.max(0.01, ld?.areaWidth ?? 2);
+      const h = Math.max(0.01, ld?.areaHeight ?? 2);
+      geo = new THREE.PlaneGeometry(w, h);
     } else if (type === 'directional') {
       // Use a slightly larger sphere for directional
       geo = new THREE.SphereGeometry(0.1, 12, 12);
@@ -1300,7 +1505,7 @@ export class ModelLoader {
       arrayBuffer = await file.arrayBuffer();
       setRawModelData(arrayBuffer, file.name);
     } catch {
-      // Non-critical — model will load but won't be saveable
+      // Non-critical â€” model will load but won't be saveable
     }
 
     const url = URL.createObjectURL(file);
@@ -1453,4 +1658,96 @@ export class ModelLoader {
   dispose(): void {
     this.removeCurrentModel();
   }
+}
+
+/**
+ * Build the limbo backdrop as a 2D canvas texture.
+ *
+ * Two layers: a vertical dark-to-lighter fade (floor is brighter than sky, as in
+ * a real cyc wall), plus a soft radial hotspot centred behind the subject. A flat
+ * colour gives a dark car nothing to separate against.
+ */
+export interface GradientStop {
+  color: string;
+  position: number;
+  opacity: number;
+}
+
+export interface GradientBackgroundConfig {
+  type: 'linear' | 'radial' | 'conic';
+  angle: number;
+  stops: GradientStop[];
+}
+
+export function createGradientBackground(config: GradientBackgroundConfig): THREE.Texture {
+  const w = 1024;
+  const h = 1024;
+  const canvas = document.createElement('canvas');
+  canvas.width = w;
+  canvas.height = h;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return new THREE.Texture();
+
+  let gradient: CanvasGradient;
+
+  if (config.type === 'radial') {
+    gradient = ctx.createRadialGradient(w / 2, h / 2, 0, w / 2, h / 2, w * 0.7);
+  } else {
+    const rad = (config.angle * Math.PI) / 180;
+    const x1 = w / 2 - (Math.cos(rad) * w) / 2;
+    const y1 = h / 2 - (Math.sin(rad) * h) / 2;
+    const x2 = w / 2 + (Math.cos(rad) * w) / 2;
+    const y2 = h / 2 + (Math.sin(rad) * h) / 2;
+    gradient = ctx.createLinearGradient(x1, y1, x2, y2);
+  }
+
+  const sorted = [...config.stops].sort((a, b) => a.position - b.position);
+  for (const stop of sorted) {
+    const rgb = new THREE.Color(stop.color);
+    const r = Math.round(rgb.r * 255);
+    const g = Math.round(rgb.g * 255);
+    const b = Math.round(rgb.b * 255);
+    gradient.addColorStop(stop.position, `rgba(${r}, ${g}, ${b}, ${stop.opacity})`);
+  }
+
+  ctx.fillStyle = gradient;
+  ctx.fillRect(0, 0, w, h);
+
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.needsUpdate = true;
+  return tex;
+}
+
+export function createLimboBackground(): THREE.Texture {
+  const w = 1024;
+  const h = 1024;
+  const canvas = document.createElement('canvas');
+  canvas.width = w;
+  canvas.height = h;
+  const ctx = canvas.getContext('2d');
+
+  if (!ctx) return new THREE.Texture();
+
+  // Vertical fade - neutral cool studio cyc: dark at the top, lifting to a
+  // brighter horizon so the subject reads against a graded backdrop.
+  const vertical = ctx.createLinearGradient(0, 0, 0, h);
+  vertical.addColorStop(0.0, '#0c0e11');
+  vertical.addColorStop(0.5, '#1a1d22');
+  vertical.addColorStop(1.0, '#2b2f36');
+  ctx.fillStyle = vertical;
+  ctx.fillRect(0, 0, w, h);
+
+  // Soft neutral hotspot behind the subject — cleaner, brighter studio pop
+  const radial = ctx.createRadialGradient(w / 2, h * 0.58, 0, w / 2, h * 0.58, w * 0.55);
+  radial.addColorStop(0.0, 'rgba(122, 130, 142, 0.42)');
+  radial.addColorStop(0.5, 'rgba(66, 72, 82, 0.20)');
+  radial.addColorStop(1.0, 'rgba(0, 0, 0, 0)');
+  ctx.fillStyle = radial;
+  ctx.fillRect(0, 0, w, h);
+
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.needsUpdate = true;
+  return tex;
 }

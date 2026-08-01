@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+﻿import React, { useState, useMemo } from 'react';
 
 interface ManualWindowProps {
   onClose: () => void;
@@ -8,20 +8,114 @@ interface ManualSection {
   id: string;
   title: string;
   icon: string;
+  category: string;
   content: ManualContent[];
 }
 
 interface ManualContent {
-  type: 'heading' | 'text' | 'shortcut-table' | 'tip' | 'list';
+  type: 'heading' | 'text' | 'shortcut-table' | 'tip' | 'list' | 'card';
   data?: string;
   rows?: { keys: string; action: string }[];
   items?: string[];
+  cards?: { icon: string; title: string; badge?: string; desc: string }[];
 }
 
 const SECTIONS: ManualSection[] = [
   {
+    id: 'lightpaint',
+    title: 'LightPaint',
+    category: 'Lights',
+    icon: '\u2728',
+    content: [
+      { type: 'heading', data: 'Click-to-position lighting' },
+      { type: 'text', data: 'Select a light, then click the LightPaint icon (the star at the bottom of the transform toolbar) and click directly on the model. The light repositions itself automatically based on the active mode below.' },
+      { type: 'heading', data: 'The five modes' },
+      { type: 'card', cards: [
+        { icon: '\u25CE', title: 'Reflection', badge: 'default', desc: 'Light lands so its reflection appears exactly on the clicked point. Best for chrome, glass, and car paint.' },
+        { icon: '\u2600', title: 'Illumination', desc: 'Light faces the clicked point directly for maximum flat coverage. Best for matte materials.' },
+        { icon: '\u263D', title: 'Shade', desc: 'Light moves to the opposite side, putting the clicked point into shadow.' },
+        { icon: '\u2192', title: 'Rim', desc: 'Ignores the model entirely and places the light behind the scene along the camera sightline.' },
+        { icon: '\u21BB', title: 'Shadow', desc: 'Pivots around the last Reflection/Illumination point so the cast shadow lands on the new click.' },
+      ] },
+      { type: 'tip', data: 'Drag continuously across a surface for a live preview - the reflection follows your cursor in real time. A light must be selected first, and the model must be loaded and visible.' },
+    ],
+  },
+  {
+    id: 'cameras',
+    title: 'Cameras',
+    category: 'Cameras',
+    icon: '\u{1F3A5}',
+    content: [
+      { type: 'heading', data: 'Adding a camera' },
+      { type: 'text', data: 'Use Create > Camera to add a Free Camera (manual orbit and rotation) or a Target Camera (automatically aims at and tracks a chosen scene object as either one moves).' },
+      { type: 'heading', data: 'Switching cameras' },
+      { type: 'text', data: 'A camera dropdown is always visible in the bottom-left corner of the viewport, listing Perspective (free orbit) plus every camera in the scene.' },
+      { type: 'heading', data: 'Camera properties' },
+      { type: 'list', items: [
+        'Position / Rotation - world-space XYZ; rotation only applies when no target is set',
+        'Target - pick an auto-tracked object, or Free Rotation for manual control',
+        'Lens - focal length (mm), sensor fit, lens shift X/Y, FOV',
+        'Clip - near and far clipping plane distances',
+        'Depth of Field - focus object or manual distance, f-stop, blade count',
+      ] },
+      { type: 'tip', data: 'Orbit-drag directly in the viewport to fine-tune framing. The new position saves back to the active camera automatically when you release the drag.' },
+    ],
+  },
+  {
+    id: 'environment',
+    title: 'Environment and HDRI',
+    category: 'Environment and HDRI',
+    icon: '\u{1F30D}',
+    content: [
+      { type: 'heading', data: 'Loading an HDRI' },
+      { type: 'text', data: 'The Env tab loads one or more .hdr files, each as an independent layer with its own intensity, rotation, and active toggle, so multiple environments can be blended together.' },
+      { type: 'heading', data: 'Gradient background' },
+      { type: 'text', data: 'As an alternative or supplement to a loaded HDRI, generate a procedural gradient directly in the viewport from the collapsible Viewport panel top-left of the 3D view.' },
+      { type: 'list', items: [
+        'Type - Linear, Radial, or Conic',
+        'Angle - rotation of the gradient direction, linear mode only',
+        'Color stops - unlimited stops, each with its own color, position, and opacity',
+      ] },
+      { type: 'tip', data: 'When enabled, the gradient is rendered into the HDRI Preview and export pipeline as a genuine environment layer, not just a flat background image.' },
+    ],
+  },
+  {
+    id: 'status',
+    title: 'Feature Status',
+    category: 'Reference',
+    icon: '\u2705',
+    content: [
+      { type: 'heading', data: 'What is fully working' },
+      { type: 'list', items: [
+        'All light types, color, brightness, opacity, visibility',
+        'Edge softness in the exported HDRI',
+        'Transform gizmos - Move, Rotate, Scale',
+        'LightPaint - all five modes',
+        'Presets - additive stacking',
+        'HDRI loading and multi-layer blending',
+        'Gradient background - viewport and export',
+        'Ground plane transform and material',
+        'Multi-camera creation, switching, and manual adjustment',
+        'HDRI live preview and stats',
+      ] },
+      { type: 'heading', data: 'Partial or in progress' },
+      { type: 'list', items: [
+        'Ground plane baked into HDRI export - UI only for now',
+        'Camera position/rotation applied to viewport - under active investigation',
+        'Camera focal length, sensor, clip, and DOF - stored but not yet rendered',
+        'HDRI export exposure calibration - being retuned',
+      ] },
+      { type: 'heading', data: 'Not yet available' },
+      { type: 'list', items: [
+        'Edge softness visible in the live viewport - a standard area light has no falloff parameter',
+        '.erik geometry import - proprietary, undocumented format',
+      ] },
+    ],
+  },
+  {
     id: 'getting-started',
     title: 'Getting Started',
+    category: 'Getting Started',
     icon: '\u{1F680}',
     content: [
       { type: 'heading', data: 'Welcome to LightForge Studio' },
@@ -42,6 +136,7 @@ const SECTIONS: ManualSection[] = [
   {
     id: 'lighting',
     title: 'Lighting System',
+    category: 'Lights',
     icon: '\u{1F4A1}',
     content: [
       { type: 'heading', data: 'Supported Light Types' },
@@ -120,6 +215,7 @@ const SECTIONS: ManualSection[] = [
   {
     id: 'shortcuts',
     title: 'Keyboard Shortcuts',
+    category: 'Reference',
     icon: '\u{2328}',
     content: [
       { type: 'heading', data: 'General' },
@@ -169,6 +265,7 @@ const SECTIONS: ManualSection[] = [
   {
     id: 'scene-management',
     title: 'Scene Management',
+    category: 'Reference',
     icon: '\u{1F4C2}',
     content: [
       { type: 'heading', data: 'Scene Hierarchy' },
@@ -202,6 +299,7 @@ const SECTIONS: ManualSection[] = [
 
 const ManualWindow: React.FC<ManualWindowProps> = ({ onClose }) => {
   const [activeSection, setActiveSection] = useState('getting-started');
+  const [openCategories, setOpenCategories] = useState<Record<string, boolean>>({});
   const [searchQuery, setSearchQuery] = useState('');
 
   const filteredSections = useMemo(() => {
@@ -239,7 +337,7 @@ const ManualWindow: React.FC<ManualWindowProps> = ({ onClose }) => {
     >
       <div
         style={{
-          width: 'min(900px, 92vw)',
+          width: 'min(1120px, 94vw)',
           height: 'min(620px, 85vh)',
           background: 'var(--bg-deep)',
           border: '1px solid var(--border)',
@@ -294,35 +392,48 @@ const ManualWindow: React.FC<ManualWindowProps> = ({ onClose }) => {
             />
           </div>
 
-          {/* Section list */}
+          {/* Section list, grouped into collapsible categories */}
           <div style={{ flex: 1, overflowY: 'auto', padding: '4px 0' }}>
-            {filteredSections.map((section) => (
-              <div
-                key={section.id}
-                onClick={() => { setActiveSection(section.id); setSearchQuery(''); }}
-                style={{
-                  padding: '6px 12px',
-                  fontSize: 10,
-                  color: activeSection === section.id ? 'var(--accent-bright)' : 'var(--text-sec)',
-                  background: activeSection === section.id ? 'rgba(167, 139, 250, 0.08)' : 'transparent',
-                  borderRight: activeSection === section.id ? '2px solid var(--accent)' : '2px solid transparent',
-                  cursor: 'pointer',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 6,
-                  transition: 'all 0.1s',
-                }}
-                onMouseEnter={(e) => {
-                  if (activeSection !== section.id) (e.currentTarget as HTMLElement).style.background = 'var(--bg-card)';
-                }}
-                onMouseLeave={(e) => {
-                  if (activeSection !== section.id) (e.currentTarget as HTMLElement).style.background = 'transparent';
-                }}
-              >
-                <span style={{ fontSize: 12 }}>{section.icon}</span>
-                <span>{section.title}</span>
-              </div>
-            ))}
+            {Object.entries(
+              filteredSections.reduce((acc, s) => {
+                (acc[s.category] = acc[s.category] || []).push(s);
+                return acc;
+              }, {} as Record<string, ManualSection[]>)
+            ).map(([category, sections]) => {
+              const isOpen = openCategories[category] ?? true;
+              return (
+                <div key={category}>
+                  <div
+                    onClick={() => setOpenCategories((p) => ({ ...p, [category]: !isOpen }))}
+                    style={{
+                      padding: '7px 10px', fontSize: 10, fontWeight: 600, color: 'var(--text-sec)',
+                      cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6, userSelect: 'none',
+                    }}
+                  >
+                    <span style={{ fontSize: 9, width: 10, display: 'inline-block' }}>{isOpen ? '\u25BE' : '\u25B8'}</span>
+                    <span>{category}</span>
+                  </div>
+                  {isOpen && sections.map((section) => (
+                    <div
+                      key={section.id}
+                      onClick={() => { setActiveSection(section.id); setSearchQuery(''); }}
+                      style={{
+                        padding: '6px 12px 6px 26px', fontSize: 10,
+                        color: activeSection === section.id ? 'var(--accent-bright)' : 'var(--text-sec)',
+                        background: activeSection === section.id ? 'rgba(74, 158, 255, 0.08)' : 'transparent',
+                        borderRight: activeSection === section.id ? '2px solid var(--accent)' : '2px solid transparent',
+                        cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6, transition: 'all 0.1s',
+                      }}
+                      onMouseEnter={(e) => { if (activeSection !== section.id) (e.currentTarget as HTMLElement).style.background = 'var(--bg-card)'; }}
+                      onMouseLeave={(e) => { if (activeSection !== section.id) (e.currentTarget as HTMLElement).style.background = 'transparent'; }}
+                    >
+                      <span style={{ fontSize: 12 }}>{section.icon}</span>
+                      <span>{section.title}</span>
+                    </div>
+                  ))}
+                </div>
+              );
+            })}
             {filteredSections.length === 0 && (
               <div style={{ padding: 12, fontSize: 10, color: 'var(--text-dim)', textAlign: 'center' }}>
                 No results
@@ -356,7 +467,7 @@ const ManualWindow: React.FC<ManualWindowProps> = ({ onClose }) => {
               }}
               title="Close (Esc)"
             >
-              \u2715
+              {'\u2715'}
             </button>
           </div>
 
@@ -365,14 +476,14 @@ const ManualWindow: React.FC<ManualWindowProps> = ({ onClose }) => {
             {currentSection.content.map((block, idx) => {
               if (block.type === 'heading') {
                 return (
-                  <div key={idx} style={{ fontSize: 12, fontWeight: 600, color: 'var(--text)', marginTop: 16, marginBottom: 6 }}>
+                  <div key={idx} style={{ fontSize: 19, fontWeight: 600, color: '#e8e9eb', marginTop: 28, marginBottom: 12 }}>
                     {block.data}
                   </div>
                 );
               }
               if (block.type === 'text') {
                 return (
-                  <div key={idx} style={{ fontSize: 11, color: 'var(--text-sec)', lineHeight: 1.7, marginBottom: 8 }}>
+                  <div key={idx} style={{ fontSize: 15.5, color: '#b8bcc3', lineHeight: 1.75, marginBottom: 16 }}>
                     {block.data}
                   </div>
                 );
@@ -381,8 +492,8 @@ const ManualWindow: React.FC<ManualWindowProps> = ({ onClose }) => {
                 return (
                   <div key={idx} style={{ marginBottom: 8, paddingLeft: 12 }}>
                     {block.items?.map((item, i) => (
-                      <div key={i} style={{ fontSize: 11, color: 'var(--text-sec)', lineHeight: 1.7, marginBottom: 2, display: 'flex', gap: 6 }}>
-                        <span style={{ color: 'var(--accent)', flexShrink: 0 }}>\u2022</span>
+                      <div key={i} style={{ fontSize: 15, color: '#b8bcc3', lineHeight: 1.7, marginBottom: 6, display: 'flex', gap: 8 }}>
+                        <span style={{ color: '#5a9cf5', flexShrink: 0 }}>{'\u2022'}</span>
                         <span>{item}</span>
                       </div>
                     ))}
@@ -415,20 +526,47 @@ const ManualWindow: React.FC<ManualWindowProps> = ({ onClose }) => {
                   </div>
                 );
               }
+              if (block.type === 'card') {
+                return (
+                  <div key={idx} style={{ display: 'flex', flexDirection: 'column', gap: 6, margin: '8px 0' }}>
+                    {block.cards?.map((card, i) => (
+                      <div key={i} style={{
+                        display: 'flex', gap: 10, padding: '10px 12px',
+                        background: '#1a1c20', border: '1px solid #2a2d33',
+                        borderRadius: 8, padding: '16px 18px',
+                      }}>
+                        <span style={{ fontSize: 22, color: '#5a9cf5', flexShrink: 0, lineHeight: 1.4 }}>{card.icon}</span>
+                        <div>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                            <span style={{ fontSize: 15, fontWeight: 600, color: '#e8e9eb' }}>{card.title}</span>
+                            {card.badge && (
+                              <span style={{
+                                fontSize: 11, fontWeight: 600, color: '#5a9cf5',
+                                background: 'rgba(90, 156, 245, 0.15)', padding: '2px 9px', borderRadius: 10,
+                              }}>{card.badge}</span>
+                            )}
+                          </div>
+                          <div style={{ fontSize: 14, color: '#9199a3', lineHeight: 1.6, marginTop: 4 }}>{card.desc}</div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                );
+              }
               if (block.type === 'tip') {
                 return (
                   <div key={idx} style={{
                     padding: '8px 12px',
                     margin: '8px 0',
-                    background: 'rgba(167, 139, 250, 0.06)',
-                    border: '1px solid rgba(167, 139, 250, 0.15)',
-                    borderLeft: '3px solid var(--accent)',
+                    background: 'rgba(74, 158, 255, 0.06)',
+                    border: '1px solid rgba(74, 158, 255, 0.15)',
+                    borderLeft: '3px solid #5a9cf5',
                     borderRadius: '0 var(--radius-sm) var(--radius-sm) 0',
                     fontSize: 10,
                     color: 'var(--text-sec)',
                     lineHeight: 1.6,
                   }}>
-                    <span style={{ fontWeight: 600, color: 'var(--accent-bright)', marginRight: 4 }}>Tip:</span>
+                    <span style={{ fontWeight: 600, color: '#5a9cf5', marginRight: 4 }}>Tip:</span>
                     {block.data}
                   </div>
                 );

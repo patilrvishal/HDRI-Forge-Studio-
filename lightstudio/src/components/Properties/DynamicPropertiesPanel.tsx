@@ -32,10 +32,10 @@ const TYPE_COLORS: Record<string, string> = {
   mesh: '#4ade80',
   light: '#f0a868',
   camera: '#60a5fa',
-  group: '#a78bfa',
+  group: '#4a9eff',
   helper: '#6b7280',
   other: '#6b7280',
-  collection: '#a78bfa',
+  collection: '#4a9eff',
 };
 
 /* ═══════════════════════════════════════════════════════════════════

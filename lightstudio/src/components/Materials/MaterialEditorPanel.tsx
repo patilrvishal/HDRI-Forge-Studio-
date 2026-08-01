@@ -340,7 +340,7 @@ const MaterialEditorPanel: React.FC<MaterialEditorPanelProps> = ({ materialManag
   const physicalBadge = (
     <span style={{
       fontSize: 7, padding: '0 4px', borderRadius: 2, marginLeft: 'auto',
-      background: 'rgba(167, 139, 250, 0.12)', color: 'var(--accent-bright)',
+      background: 'rgba(74, 158, 255, 0.12)', color: 'var(--accent-bright)',
       letterSpacing: '0.4px', fontWeight: 600,
     }}>
       PHYSICAL
@@ -457,9 +457,9 @@ const MaterialEditorPanel: React.FC<MaterialEditorPanelProps> = ({ materialManag
               fontSize: 8,
               padding: '1px 5px',
               borderRadius: 3,
-              background: selected.isPhysical ? 'rgba(167, 139, 250, 0.15)' : 'var(--bg-input)',
+              background: selected.isPhysical ? 'rgba(74, 158, 255, 0.15)' : 'var(--bg-input)',
               color: selected.isPhysical ? 'var(--accent-bright)' : 'var(--text-dim)',
-              border: `1px solid ${selected.isPhysical ? 'rgba(167, 139, 250, 0.3)' : 'var(--border)'}`,
+              border: `1px solid ${selected.isPhysical ? 'rgba(74, 158, 255, 0.3)' : 'var(--border)'}`,
               letterSpacing: '0.3px',
             }}
           >

@@ -1,4 +1,4 @@
-import React, { useRef, useState, useCallback, useEffect } from 'react';
+﻿import React, { useRef, useState, useCallback, useEffect } from 'react';
 import { TopMenubar } from '../Toolbar/TopMenubar';
 import { LeftToolbar } from '../Toolbar/LeftToolbar';
 import { Viewport } from '../Viewport/Viewport';
@@ -20,6 +20,16 @@ import { useUILayoutStore } from '../../store/uiLayoutStore';
 import { useHistoryStore } from '../../store/historyStore';
 import { useKeyboardShortcuts } from '../../hooks/useKeyboardShortcuts';
 import { TimelinePanel } from '../Timeline/TimelinePanel';
+import { CameraPanel } from '../Viewport/CameraPanel';
+import { useSceneHierarchyStore } from '../../store/sceneHierarchyStore';
+
+function SceneCameraSlot() {
+  const filterType = useSceneHierarchyStore((s) => s.filterType);
+  if (filterType !== 'camera') return null;
+  return <CameraPanel />;
+}
+import { GradientBackgroundPanel } from '../Environment/GradientBackgroundPanel';
+import { HDRIPreviewPanel } from '../HDRI/HDRIPreviewPanel';
 import { ExportDialog } from '../Export/ExportDialog';
 import { FinalRenderPanel } from '../Export/FinalRenderPanel';
 import { EnvironmentBrowser } from '../Environment/EnvironmentBrowser';
@@ -52,7 +62,7 @@ const LightProfileSection: React.FC = () => {
   );
 };
 
-/** Small close (×) button for panel headers */
+/** Small close (Ã—) button for panel headers */
 const PanelCloseButton: React.FC<{ panel: PanelKey }> = ({ panel }) => (
   <button
     className="btn-icon panel-close-btn"
@@ -107,7 +117,7 @@ export const AppLayout: React.FC = () => {
   const viewportDesignVisible = panelVisibility.viewportDesign;
 
   // Bottom panel: side-by-side tabs (mutually exclusive)
-  const [bottomTab, setBottomTab] = useState<'timeline' | 'presets'>('timeline');
+  const [bottomTab, setBottomTab] = useState<'hdri' | 'timeline' | 'presets'>('hdri');
 
   // History state for status bar
   const undoCount = useHistoryStore((s) => s.undoStack.length);
@@ -253,7 +263,7 @@ export const AppLayout: React.FC = () => {
         {/* Left Toolbar (fixed width) */}
         <LeftToolbar sceneManagerRef={sceneManagerRef} />
 
-        {/* Left Panel — Light List (resizable, smooth transition) */}
+        {/* Left Panel â€” Light List (resizable, smooth transition) */}
         <div
           className="panel-transition"
           style={{
@@ -338,10 +348,18 @@ export const AppLayout: React.FC = () => {
                   <LightProfileSection />
                 </>
               ) : leftTab === 'environment' ? (
-                <EnvironmentAssetsPanel />
+                <>
+                  <EnvironmentAssetsPanel />
+                  <div style={{ borderTop: '1px solid var(--border)', marginTop: 8, paddingTop: 8 }}>
+                    <GradientBackgroundPanel />
+                  </div>
+                </>
               ) : (
                 <ErrorBoundary>
                   <SceneHierarchy sceneRef={sceneRef} />
+                  <div style={{ borderTop: '1px solid var(--border)', marginTop: 8, paddingTop: 8 }}>
+                    <SceneCameraSlot />
+                  </div>
                 </ErrorBoundary>
               )}
             </div>
@@ -385,7 +403,7 @@ export const AppLayout: React.FC = () => {
               <Viewport sceneManagerRef={sceneManagerRef} onScreenshot={handleScreenshot} onReady={handleViewportReady} />
             </ErrorBoundary>
 
-            {/* Viewport Design Panel — floating overlay */}
+            {/* Viewport Design Panel â€” floating overlay */}
             {viewportDesignVisible && !focusMode && <ViewportDesignPanel />}
 
             {/* Focus mode hint overlay */}
@@ -433,6 +451,12 @@ export const AppLayout: React.FC = () => {
               <div style={{ borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center' }}>
                 <div className="tab-bar" style={{ flex: 1 }}>
                   <div
+                    className={`tab-item ${bottomTab === 'hdri' ? 'active' : ''}`}
+                    onClick={() => setBottomTab('hdri')}
+                  >
+                    HDRI Preview
+                  </div>
+                  <div
                     className={`tab-item ${bottomTab === 'timeline' ? 'active' : ''}`}
                     onClick={() => setBottomTab('timeline')}
                   >
@@ -451,8 +475,9 @@ export const AppLayout: React.FC = () => {
                 </div>
               </div>
 
-              {/* Tab content — mutually exclusive, full width */}
+              {/* Tab content â€” mutually exclusive, full width */}
               <div style={{ flex: 1, overflow: 'hidden' }}>
+                {bottomTab === 'hdri' && <HDRIPreviewPanel />}
                 {bottomTab === 'timeline' && <TimelinePanel />}
                 {bottomTab === 'presets' && <PresetBrowser onGenerateThumbnail={handleGenerateThumbnail} />}
               </div>
@@ -570,16 +595,16 @@ export const AppLayout: React.FC = () => {
           fontSize: 10,
           color: 'var(--text-dim)',
           borderTop: '1px solid var(--border)',
-          background: 'linear-gradient(90deg, var(--bg-deep), rgba(167,139,250,0.02), var(--bg-deep))',
+          background: 'linear-gradient(90deg, var(--bg-deep), rgba(74, 158, 255,0.02), var(--bg-deep))',
           flexShrink: 0,
         }}
       >
         <div style={{ display: 'flex', gap: 12 }}>
           <span>
-            {undoCount > 0 ? `Undo: ${undoCount}` : 'Undo: —'}
+            {undoCount > 0 ? `Undo: ${undoCount}` : 'Undo: â€”'}
           </span>
           <span>
-            {redoCount > 0 ? `Redo: ${redoCount}` : 'Redo: —'}
+            {redoCount > 0 ? `Redo: ${redoCount}` : 'Redo: â€”'}
           </span>
         </div>
         <div style={{ display: 'flex', gap: 12 }}>

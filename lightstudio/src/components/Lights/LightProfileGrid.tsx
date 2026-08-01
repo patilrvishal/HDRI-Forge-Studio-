@@ -27,7 +27,7 @@ function renderLightThumb(canvas: HTMLCanvasElement, type: string, color: string
 
   // Clear with dark background
   ctx.clearRect(0, 0, S, S);
-  ctx.fillStyle = '#0a0a12';
+  ctx.fillStyle = '#0d0d0f';
   ctx.fillRect(0, 0, S, S);
 
   switch (type as LightType) {
@@ -398,14 +398,14 @@ export const LightProfileGrid: React.FC<LightProfileGridProps> = ({
             }}
             onMouseEnter={(e) => {
               if (!isSelected) {
-                (e.currentTarget as HTMLDivElement).style.borderColor = 'rgba(192,132,252,0.45)';
-                (e.currentTarget as HTMLDivElement).style.transform = 'scale(1.05)';
+                (e.currentTarget as HTMLDivElement).style.borderColor = 'var(--accent-dim)';
+                (e.currentTarget as HTMLDivElement).style.background = 'var(--bg-elevated)';
               }
             }}
             onMouseLeave={(e) => {
               if (!isSelected) {
-                (e.currentTarget as HTMLDivElement).style.borderColor = 'rgba(255,255,255,0.06)';
-                (e.currentTarget as HTMLDivElement).style.transform = 'scale(1)';
+                (e.currentTarget as HTMLDivElement).style.borderColor = 'var(--border)';
+                (e.currentTarget as HTMLDivElement).style.background = 'var(--bg-card)';
               }
             }}
           >
@@ -427,7 +427,7 @@ export const LightProfileGrid: React.FC<LightProfileGridProps> = ({
 
 const gridStyle: React.CSSProperties = {
   display: 'grid',
-  gridTemplateColumns: 'repeat(auto-fill, minmax(56px, 1fr))',
+  gridTemplateColumns: 'repeat(auto-fill, minmax(76px, 1fr))',
   gap: '8px',
   padding: '8px',
 };
@@ -436,36 +436,42 @@ const thumbWrapperStyle: React.CSSProperties = {
   display: 'flex',
   flexDirection: 'column',
   alignItems: 'center',
-  gap: '2px',
-  padding: '4px',
-  borderRadius: '6px',
-  border: '2px solid rgba(255,255,255,0.06)',
+  gap: '5px',
+  padding: '6px',
+  borderRadius: '8px',
+  borderWidth: '1px',
+  borderStyle: 'solid',
+  borderColor: 'var(--border)',
   cursor: 'pointer',
-  transition: 'border-color 0.15s ease, transform 0.15s ease, box-shadow 0.15s ease',
+  transition: 'border-color 0.18s ease, background 0.18s ease, box-shadow 0.18s ease',
   userSelect: 'none',
-  background: 'transparent',
+  background: 'var(--bg-card)',
 };
 
 const selectedThumbStyle: React.CSSProperties = {
-  borderColor: '#c084fc',
-  boxShadow: '0 0 12px rgba(192,132,252,0.4)',
+  borderColor: 'var(--accent)',
+  background: 'var(--accent-bg)',
+  boxShadow: '0 0 0 1px var(--accent-dim), 0 0 14px rgba(74, 158, 255, 0.22)',
 };
 
 const canvasStyle: React.CSSProperties = {
-  width: 48,
-  height: 48,
-  borderRadius: '4px',
+  width: '100%',
+  height: 'auto',
+  aspectRatio: '1 / 1',
+  borderRadius: '6px',
   display: 'block',
+  background: '#0d0d0f',
 };
 
 const labelStyle: React.CSSProperties = {
   fontSize: '9px',
-  color: 'var(--text-sec, #888)',
+  fontWeight: 500,
+  color: 'var(--text-sec)',
   textAlign: 'center',
   whiteSpace: 'nowrap',
   overflow: 'hidden',
   textOverflow: 'ellipsis',
-  maxWidth: '54px',
+  maxWidth: '100%',
   lineHeight: '1.2',
 };
 

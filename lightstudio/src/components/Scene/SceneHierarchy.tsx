@@ -130,7 +130,7 @@ function isDescendantOf(parentObj: THREE.Object3D, checkObj: THREE.Object3D): bo
 
 const TYPE_COLORS: Record<string, string> = {
   group: '#7dd3fc',
-  mesh: '#a78bfa',
+  mesh: '#4a9eff',
   light: '#f0a868',
   camera: '#94a3b8',
   helper: '#475569',
@@ -869,7 +869,7 @@ const TreeNode: React.FC<{
           background: isDropTarget
             ? 'rgba(251, 191, 36, 0.15)'
             : isSelected
-              ? 'rgba(167, 139, 250, 0.15)'
+              ? 'rgba(74, 158, 255, 0.15)'
               : 'transparent',
           borderLeft: isSelected ? '2px solid var(--accent)' : '2px solid transparent',
           borderBottom: isDropTarget ? '1px solid rgba(251, 191, 36, 0.5)' : '1px solid transparent',
@@ -894,7 +894,7 @@ const TreeNode: React.FC<{
           if (!isSelected) {
             (e.currentTarget as HTMLElement).style.background = 'transparent';
           } else if (!isDropTarget) {
-            (e.currentTarget as HTMLElement).style.background = 'rgba(167, 139, 250, 0.15)';
+            (e.currentTarget as HTMLElement).style.background = 'rgba(74, 158, 255, 0.15)';
           }
         }}
       >
@@ -1528,8 +1528,8 @@ const ObjectPropertiesPanel: React.FC<{
               borderRadius: 3,
               cursor: 'pointer',
               fontFamily: 'var(--font-mono)',
-              border: `1px solid ${isIsolated ? 'rgba(167, 139, 250, 0.3)' : 'var(--border)'}`,
-              background: isIsolated ? 'rgba(167, 139, 250, 0.1)' : 'var(--bg-input)',
+              border: `1px solid ${isIsolated ? 'rgba(74, 158, 255, 0.3)' : 'var(--border)'}`,
+              background: isIsolated ? 'rgba(74, 158, 255, 0.1)' : 'var(--bg-input)',
               color: isIsolated ? 'var(--accent-bright)' : 'var(--text-dim)',
               transition: 'all 0.1s',
             }}
@@ -1913,7 +1913,7 @@ export const SceneHierarchy: React.FC<SceneHierarchyProps> = ({ sceneRef }) => {
               title="Show All (exit isolation)"
               style={{
                 width: 18, height: 18, display: 'flex', alignItems: 'center', justifyContent: 'center',
-                background: 'rgba(167,139,250,0.15)', border: '1px solid rgba(167,139,250,0.3)',
+                background: 'rgba(74, 158, 255,0.15)', border: '1px solid rgba(74, 158, 255,0.3)',
                 cursor: 'pointer', color: 'var(--accent-bright)',
                 padding: 0, borderRadius: 2,
               }}
