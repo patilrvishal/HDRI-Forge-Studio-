@@ -9,6 +9,51 @@ import { ColorPicker } from '../UI/ColorPicker';
 import { sphericalToCartesian, cartesianToSpherical } from '../../utils/math';
 import { colorProfileToHex, hexToKelvin, kelvinToHex } from '../../utils/colorConversion';
 
+/**
+ * Collapsible inspector section with a chevron header — matches the reference
+ * pro-tool right panel. `headerRight` renders interactive content (labels,
+ * toggles) on the right of the header without triggering collapse.
+ */
+const CollapsibleSection: React.FC<{
+  title: string;
+  headerRight?: React.ReactNode;
+  defaultOpen?: boolean;
+  children: React.ReactNode;
+}> = ({ title, headerRight, defaultOpen = true, children }) => {
+  const [open, setOpen] = useState(defaultOpen);
+  return (
+    <div className="props-section">
+      <div
+        className="section-header"
+        onClick={() => setOpen((o) => !o)}
+        style={{ cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6, userSelect: 'none' }}
+      >
+        <svg
+          width="8"
+          height="8"
+          viewBox="0 0 8 8"
+          fill="currentColor"
+          style={{
+            flexShrink: 0,
+            opacity: 0.65,
+            transform: open ? 'rotate(90deg)' : 'rotate(0deg)',
+            transition: 'transform 0.15s ease',
+          }}
+        >
+          <path d="M2 0l4 4-4 4z" />
+        </svg>
+        <span style={{ flex: 1 }}>{title}</span>
+        {headerRight && (
+          <span onClick={(e) => e.stopPropagation()} style={{ display: 'flex', alignItems: 'center' }}>
+            {headerRight}
+          </span>
+        )}
+      </div>
+      {open && children}
+    </div>
+  );
+};
+
 const LIGHT_TYPE_OPTIONS: Array<{ value: string; label: string }> = [
   { value: 'point', label: 'Point' },
   { value: 'spot', label: 'Spot' },
@@ -234,8 +279,7 @@ export const LightProperties: React.FC = () => {
   return (
     <div className="light-properties">
       {/* Header */}
-      <div className="props-section">
-        <div className="section-header">Light Settings</div>
+      <CollapsibleSection title="Light Settings">
 
         {/* Name */}
         <div className="field-row" style={{ marginBottom: 6 }}>
@@ -308,25 +352,23 @@ export const LightProperties: React.FC = () => {
             onChange={(v) => handleUpdate({ gearVisible: v })}
           />
         </div>
-      </div>
+      </CollapsibleSection>
 
       {/* Falloff section */}
       {hasFalloff && (
-        <div className="props-section">
-          <div className="section-header">Falloff</div>
+        <CollapsibleSection title="Falloff">
           <Dropdown
             label="Decay"
             value={light.falloff}
             options={FALLOFF_OPTIONS}
             onChange={(v) => handleUpdate({ falloff: v as FalloffType })}
           />
-        </div>
+        </CollapsibleSection>
       )}
 
       {/* Spotlight params */}
       {isSpotLike && (
-        <div className="props-section">
-          <div className="section-header">Spotlight</div>
+        <CollapsibleSection title="Spotlight">
           <Slider
             label="Angle"
             value={light.spotAngle}
@@ -345,13 +387,12 @@ export const LightProperties: React.FC = () => {
             onChange={(v) => handleUpdate({ spotPenumbra: v / 100 })}
             unit="%"
           />
-        </div>
+        </CollapsibleSection>
       )}
 
       {/* Area light dimensions */}
       {isAreaLike && (
-        <div className="props-section">
-          <div className="section-header">Area Dimensions</div>
+        <CollapsibleSection title="Dimensions">
           <NumericInput
             label="Width"
             value={light.areaWidth}
@@ -401,17 +442,18 @@ export const LightProperties: React.FC = () => {
             onChange={handleAreaScale}
             unit="x"
           />
-        </div>
+        </CollapsibleSection>
       )}
 
       {/* Position: Spherical */}
-      <div className="props-section">
-        <div className="section-header">
-          Position
-          <span style={{ float: 'right', fontWeight: 400, textTransform: 'none', letterSpacing: 'normal', fontSize: 9, color: 'var(--text-dim)' }}>
+      <CollapsibleSection
+        title="Position"
+        headerRight={
+          <span style={{ fontWeight: 400, textTransform: 'none', letterSpacing: 'normal', fontSize: 9, color: 'var(--text-dim)' }}>
             Spherical
           </span>
-        </div>
+        }
+      >
         <Slider
           label="Latitude"
           value={safeSpherical.lat}
@@ -446,16 +488,17 @@ export const LightProperties: React.FC = () => {
           step={0.1}
           onChange={(v) => handleSphericalChange('height', v)}
         />
-      </div>
+      </CollapsibleSection>
 
       {/* Position: Cartesian XYZ */}
-      <div className="props-section">
-        <div className="section-header">
-          Position
-          <span style={{ float: 'right', fontWeight: 400, textTransform: 'none', letterSpacing: 'normal', fontSize: 9, color: 'var(--text-dim)' }}>
+      <CollapsibleSection
+        title="Position"
+        headerRight={
+          <span style={{ fontWeight: 400, textTransform: 'none', letterSpacing: 'normal', fontSize: 9, color: 'var(--text-dim)' }}>
             XYZ
           </span>
-        </div>
+        }
+      >
         <div style={{ display: 'flex', gap: 4, marginBottom: 4 }}>
           <div style={{ flex: 1 }}>
             <NumericInput
@@ -491,26 +534,25 @@ export const LightProperties: React.FC = () => {
             />
           </div>
         </div>
-      </div>
+      </CollapsibleSection>
 
       {/* Rotation */}
-      <div className="props-section">
-        <div className="section-header">
-          Rotation
-          <span style={{ marginLeft: 'auto' }}>
-            <Toggle
-              checked={safeRotation.enabled}
-              onChange={(v) =>
-                handleUpdate({
-                  transform: {
-                    ...light.transform,
-                    rotation: { ...light.transform.rotation, enabled: v },
-                  },
-                })
-              }
-            />
-          </span>
-        </div>
+      <CollapsibleSection
+        title="Rotation"
+        headerRight={
+          <Toggle
+            checked={safeRotation.enabled}
+            onChange={(v) =>
+              handleUpdate({
+                transform: {
+                  ...light.transform,
+                  rotation: { ...light.transform.rotation, enabled: v },
+                },
+              })
+            }
+          />
+        }
+      >
         {safeRotation.enabled && (
           <>
             <Slider
@@ -542,11 +584,10 @@ export const LightProperties: React.FC = () => {
             />
           </>
         )}
-      </div>
+      </CollapsibleSection>
 
       {/* Collection assignment */}
-      <div className="props-section">
-        <div className="section-header">Collection</div>
+      <CollapsibleSection title="Advanced Render Collection">
         <Dropdown
           label="Group"
           value={light.collectionId ?? '__none__'}
@@ -559,7 +600,7 @@ export const LightProperties: React.FC = () => {
           ]}
           onChange={(v) => handleUpdate({ collectionId: v === '__none__' ? null : v })}
         />
-      </div>
+      </CollapsibleSection>
     </div>
   );
 };

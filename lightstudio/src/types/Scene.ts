@@ -120,7 +120,7 @@ export const DEFAULT_RENDER_SETTINGS: RenderSettings = {
   quality: 'high',
   antialiasing: 'smaa',
   shadowQuality: 'high',
-  bloom: { enabled: true, intensity: 0.3, threshold: 0.8, radius: 0.5 },
+  bloom: { enabled: true, intensity: 0.55, threshold: 0.7, radius: 0.6 },
   ao: { enabled: true, radius: 0.8, intensity: 0.6 },
   ground: {
     // Off by default - a floor should be an explicit choice, not a surprise

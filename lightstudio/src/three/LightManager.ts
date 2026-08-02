@@ -301,12 +301,16 @@ export class LightManager {
    * reflected the light's size).
    */
   private createHelperMesh(lightData: Light): THREE.Mesh | null {
+    // Softbox/emitter look: additive blending makes the panel read as a
+    // glowing light source that crosses the bloom threshold — matching the
+    // studio softboxes in the reference — instead of a flat translucent card.
     const helperMaterial = new THREE.MeshBasicMaterial({
       color: lightData.color,
       transparent: true,
-      opacity: 0.6,
+      opacity: 0.9,
       side: THREE.DoubleSide,
       depthTest: false,
+      blending: THREE.AdditiveBlending,
     });
 
     const geometry = this.buildHelperGeometry(lightData);
