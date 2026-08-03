@@ -48,8 +48,10 @@ export interface HdriItem {
   id: string
   name: string
   value: number
-  hueA: string
-  hueB: string
+  hueA?: string
+  hueB?: string
+  /** Real preview image (object URL or data URL) shown once an HDRI is imported. */
+  imageUrl?: string
 }
 
 const DEFAULT_SLOTS: CameraSlot[] = [
@@ -110,12 +112,14 @@ interface StudioState {
   params: LightParams
   profile: ProfileKey
   presetIndex: number
+  hdris: HdriItem[]
   selectedHdri: string
   livePreview: boolean
   cameraSlots: CameraSlot[]
   activeSlot: number
   projection: Projection
 
+  importHdri: (item: HdriItem) => void
   selectLight: (id: string) => void
   toggleLightFlag: (id: string, key: 'visible' | 'locked' | 'solo') => void
   setParam: <K extends keyof LightParams>(key: K, value: LightParams[K]) => void
@@ -136,12 +140,15 @@ export const useStudio = create<StudioState>()(
       params: DEFAULT_PARAMS,
       profile: 'area',
       presetIndex: 0,
+      hdris: HDRIS,
       selectedHdri: 'h1',
       livePreview: true,
       cameraSlots: DEFAULT_SLOTS,
       activeSlot: 0,
       projection: 'perspective',
 
+      importHdri: (item) =>
+        set((s) => ({ hdris: [...s.hdris, item], selectedHdri: item.id })),
       selectLight: (id) => set({ selectedLightId: id }),
       toggleLightFlag: (id, key) =>
         set((s) => ({

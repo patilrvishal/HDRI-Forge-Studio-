@@ -1,12 +1,44 @@
 'use client'
 
-import React from 'react'
-import { Check, Play, SkipBack, SkipForward, Repeat } from 'lucide-react'
-import { useStudio, HDRIS } from '@/store/studioStore'
+import React, { useRef, useState } from 'react'
+import { Check, Play, SkipBack, SkipForward, Repeat, Upload, Loader2 } from 'lucide-react'
+import { useStudio, type HdriItem } from '@/store/studioStore'
+import { fileToPreviewUrl } from './hdri'
 import { Toggle } from './ui'
 
+/** Equirectangular-looking placeholder (sky band + horizon + ground). */
+function placeholderBg(h: HdriItem): string {
+  const a = h.hueA ?? '#8a94a3'
+  const b = h.hueB ?? '#20242b'
+  return `linear-gradient(180deg, ${a} 0%, ${a} 38%, rgba(255,255,255,0.18) 40%, ${b} 44%, ${b} 100%)`
+}
+
 export function BottomPanel() {
-  const { selectedHdri, setHdri, livePreview, toggleLive } = useStudio()
+  const { hdris, selectedHdri, setHdri, importHdri, livePreview, toggleLive } = useStudio()
+  const fileRef = useRef<HTMLInputElement>(null)
+  const [importing, setImporting] = useState(false)
+
+  async function handleFiles(files: FileList | null) {
+    if (!files || files.length === 0) return
+    setImporting(true)
+    try {
+      for (const file of Array.from(files)) {
+        const url = await fileToPreviewUrl(file)
+        const name = file.name.replace(/\.[^.]+$/, '')
+        importHdri({
+          id: `imp_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+          name,
+          value: 1.0,
+          imageUrl: url ?? undefined,
+          hueA: '#7c86a0',
+          hueB: '#191b22',
+        })
+      }
+    } finally {
+      setImporting(false)
+      if (fileRef.current) fileRef.current.value = ''
+    }
+  }
 
   return (
     <div className="st-bottom">
@@ -20,10 +52,17 @@ export function BottomPanel() {
 
       <div style={{ display: 'flex', flex: 1, minHeight: 0 }}>
         <div className="st-env-row">
-          {HDRIS.map((h) => (
+          {hdris.map((h) => (
             <div key={h.id} className={`st-hdri-card${selectedHdri === h.id ? ' sel' : ''}`} onClick={() => setHdri(h.id)}>
-              <div className="st-hdri-thumb" style={{ background: `linear-gradient(100deg, ${h.hueB}, ${h.hueA} 45%, ${h.hueB})` }}>
-                <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(180deg, transparent 40%, rgba(0,0,0,0.5))' }} />
+              <div
+                className="st-hdri-thumb"
+                style={
+                  h.imageUrl
+                    ? { backgroundImage: `url(${h.imageUrl})`, backgroundSize: 'cover', backgroundPosition: 'center' }
+                    : { background: placeholderBg(h) }
+                }
+              >
+                <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(180deg, transparent 55%, rgba(0,0,0,0.55))' }} />
                 {selectedHdri === h.id && <div className="st-check"><Check size={10} /></div>}
                 <div className="st-badge" style={{ top: 5, left: selectedHdri === h.id ? 24 : 5 }}>HDR</div>
                 <div className="st-badge" style={{ top: 5, right: 5 }}>{h.value.toFixed(1)}</div>
@@ -31,6 +70,30 @@ export function BottomPanel() {
               <div className="st-hdri-name">{h.name}</div>
             </div>
           ))}
+
+          {/* Import card */}
+          <div className="st-hdri-card" onClick={() => fileRef.current?.click()}>
+            <div
+              className="st-hdri-thumb"
+              style={{
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                border: '1px dashed var(--st-border)', background: 'var(--st-bg)', color: 'var(--st-text-muted)', gap: 6,
+              }}
+            >
+              {importing ? <Loader2 size={16} className="st-spin" /> : <Upload size={16} />}
+              <span style={{ fontSize: 11 }}>{importing ? 'Importing…' : 'Import HDRI'}</span>
+            </div>
+            <div className="st-hdri-name" style={{ color: 'var(--st-text-dim)' }}>.hdr / .jpg / .png / .exr</div>
+          </div>
+
+          <input
+            ref={fileRef}
+            type="file"
+            accept=".hdr,.exr,image/*"
+            multiple
+            style={{ display: 'none' }}
+            onChange={(e) => handleFiles(e.target.files)}
+          />
         </div>
 
         <div className="st-global-env">
@@ -39,8 +102,11 @@ export function BottomPanel() {
             <span className="st-row-label" style={{ width: 'auto', flex: 1 }}>Live Preview</span>
             <Toggle on={livePreview} onChange={toggleLive} />
           </div>
+          <button className="st-btn" onClick={() => fileRef.current?.click()}>
+            <Upload size={13} /> Import HDRI
+          </button>
           <span className="st-caption">
-            Live preview updates the scene lighting from the selected HDRI in real time. Turn off for a one-off render.
+            Import a .hdr or equirectangular image — its preview appears in the strip and drives the scene lighting.
           </span>
         </div>
       </div>
