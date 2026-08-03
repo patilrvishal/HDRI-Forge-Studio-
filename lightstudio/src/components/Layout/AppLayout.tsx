@@ -1,4 +1,4 @@
-﻿import React, { useRef, useState, useCallback, useEffect } from 'react';
+import React, { useRef, useState, useCallback, useEffect } from 'react';
 import { TopMenubar } from '../Toolbar/TopMenubar';
 import { LeftToolbar } from '../Toolbar/LeftToolbar';
 import { Viewport } from '../Viewport/Viewport';
@@ -263,7 +263,7 @@ export const AppLayout: React.FC = () => {
         {/* Left Toolbar (fixed width) */}
         <LeftToolbar sceneManagerRef={sceneManagerRef} />
 
-        {/* Left Panel â€” Light List (resizable, smooth transition) */}
+        {/* Left Panel - Light List (resizable, smooth transition) */}
         <div
           className="panel-transition"
           style={{
@@ -403,7 +403,7 @@ export const AppLayout: React.FC = () => {
               <Viewport sceneManagerRef={sceneManagerRef} onScreenshot={handleScreenshot} onReady={handleViewportReady} />
             </ErrorBoundary>
 
-            {/* Viewport Design Panel â€” floating overlay */}
+            {/* Viewport Design Panel - floating overlay */}
             {viewportDesignVisible && !focusMode && <ViewportDesignPanel />}
 
             {/* Focus mode hint overlay */}
@@ -475,7 +475,7 @@ export const AppLayout: React.FC = () => {
                 </div>
               </div>
 
-              {/* Tab content â€” mutually exclusive, full width */}
+              {/* Tab content - mutually exclusive, full width */}
               <div style={{ flex: 1, overflow: 'hidden' }}>
                 {bottomTab === 'hdri' && <HDRIPreviewPanel />}
                 {bottomTab === 'timeline' && <TimelinePanel />}
@@ -601,10 +601,10 @@ export const AppLayout: React.FC = () => {
       >
         <div style={{ display: 'flex', gap: 12 }}>
           <span>
-            {undoCount > 0 ? `Undo: ${undoCount}` : 'Undo: â€”'}
+            {undoCount > 0 ? `Undo: ${undoCount}` : 'Undo: -'}
           </span>
           <span>
-            {redoCount > 0 ? `Redo: ${redoCount}` : 'Redo: â€”'}
+            {redoCount > 0 ? `Redo: ${redoCount}` : 'Redo: -'}
           </span>
         </div>
         <div style={{ display: 'flex', gap: 12 }}>

@@ -1,4 +1,4 @@
-﻿import React, { useCallback, useMemo, useState, useRef, useEffect } from 'react';
+import React, { useCallback, useMemo, useState, useRef, useEffect } from 'react';
 import { useLightsStore } from '../../store/lightsStore';
 import type { Light, LightType, ColorProfile, FalloffType } from '../../types/Light';
 import { Slider } from '../UI/Slider';
@@ -90,7 +90,7 @@ export const LightProperties: React.FC = () => {
     [lights, selectedLightId],
   );
 
-  // Safe accessor for spherical values â€” guards against NaN/undefined
+  // Safe accessor for spherical values - guards against NaN/undefined
   const safeSpherical = useMemo(() => {
     if (!light) return { lat: 0, lng: 0, radius: 5, height: 3 };
     const s = light.transform.spherical;

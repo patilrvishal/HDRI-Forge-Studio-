@@ -1,4 +1,4 @@
-﻿import * as THREE from 'three';
+import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { RectAreaLightUniformsLib } from 'three/addons/lights/RectAreaLightUniformsLib.js';
@@ -131,7 +131,7 @@ export class SceneManager {
     this.renderer.domElement.style.width = '100%';
     this.renderer.domElement.style.height = '100%';
 
-    // Ground plane (placeholder â€” will be replaced by updateGround)
+    // Ground plane (placeholder - will be replaced by updateGround)
     this.ground = null;
     this.groundOverlay = null;
     this._floorCubeCamera = null;
@@ -227,7 +227,7 @@ export class SceneManager {
     const groundGeo = new THREE.PlaneGeometry(GROUND_SIZE, GROUND_SIZE);
     const color = new THREE.Color(merged.color);
 
-    // â”€â”€ PBR ground material (always MeshStandardMaterial) â”€â”€
+    // ------ PBR ground material (always MeshStandardMaterial) ------
     const groundMat = new THREE.MeshStandardMaterial({
       color: color.getHex(),
       metalness: merged.metalness,
@@ -238,7 +238,7 @@ export class SceneManager {
     this._floorMaterial = groundMat;
 
     if (merged.reflections) {
-      // â”€â”€ CubeCamera for real-time planar reflections â”€â”€
+      // ------ CubeCamera for real-time planar reflections ------
       try {
         const dpr = Math.min(window.devicePixelRatio, 2);
         const cubeRTSize = Math.max(128, Math.round(512 * dpr));
@@ -267,7 +267,7 @@ export class SceneManager {
         groundMat.envMapIntensity = 0.5;
       }
     } else {
-      // No real-time reflections â€” use scene environment map if available
+      // No real-time reflections - use scene environment map if available
       if (this.scene.environment) {
         groundMat.envMap = this.scene.environment;
       }
@@ -292,7 +292,7 @@ export class SceneManager {
     this.ground.name = '__floor__';
     this.scene.add(this.ground);
 
-    // â”€â”€ Fade overlay: fades ground edges into background â”€â”€
+    // ------ Fade overlay: fades ground edges into background ------
     if (merged.fadeRadius > 0) {
       const overlayGeo = new THREE.PlaneGeometry(GROUND_SIZE, GROUND_SIZE);
       const overlayMat = new THREE.ShaderMaterial({
@@ -594,7 +594,7 @@ export class SceneManager {
   }
 }
 
-// â”€â”€ Vignette shader (custom) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ------ Vignette shader (custom) ------------------------------------------------------------------------------------------------------------------------------------------------
 const VignetteShader = {
   uniforms: {
     tDiffuse: { value: null as THREE.Texture | null },
@@ -625,7 +625,7 @@ const VignetteShader = {
   `,
 };
 
-// â”€â”€ Color Grading shader (brightness / contrast / saturation) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ------ Color Grading shader (brightness / contrast / saturation) ---------------------------------------------
 const ColorGradingShader = {
   uniforms: {
     tDiffuse: { value: null as THREE.Texture | null },
@@ -666,7 +666,7 @@ const ColorGradingShader = {
   `,
 };
 
-// â”€â”€ Pipeline settings interface â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ------ Pipeline settings interface ---------------------------------------------------------------------------------------------------------------------------------------
 export interface PipelineConfig {
   bloom: { enabled: boolean; intensity: number; threshold: number; radius: number };
   ao: { enabled: boolean; radius: number; intensity: number };
@@ -731,7 +731,7 @@ export class RenderPipeline {
 
     // Anti-aliasing
     if (this._config.antialiasing === 'smaa') {
-      // @ts-expect-error â€” SMAAPass types are incomplete in @types/three
+      // @ts-expect-error - SMAAPass types are incomplete in @types/three
       this._smaaPass = new SMAAPass(w, h);
       this._composer.addPass(this._smaaPass);
     } else if (this._config.antialiasing === 'fxaa') {
@@ -739,8 +739,8 @@ export class RenderPipeline {
       this._fxaaPass = new ShaderPass(fxaaMat);
       this._composer.addPass(this._fxaaPass);
     }
-    // 'taa' â€” handled via renderer settings + jitter; we keep SMAA as fallback
-    // 'none' â€” no AA pass
+    // 'taa' - handled via renderer settings + jitter; we keep SMAA as fallback
+    // 'none' - no AA pass
 
     // SSAO
     if (this._config.ao.enabled) {
@@ -874,7 +874,7 @@ export class RenderPipeline {
     }
   }
 
-  // â”€â”€ Convenience setters (called from Viewport sync) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ------ Convenience setters (called from Viewport sync) ---------------------------------------------------------------------
 
   setEngine(engine: 'pbr' | 'pathtracer'): void {
     if (engine === 'pbr') {
@@ -933,7 +933,7 @@ export class RenderPipeline {
     return this._composer;
   }
 
-  /** Take a screenshot â€” renders one frame and returns a data URL. */
+  /** Take a screenshot - renders one frame and returns a data URL. */
   capture(): string {
     this.render();
     return this._sm.renderer.domElement.toDataURL('image/png');
@@ -960,15 +960,15 @@ export class RenderPipeline {
     this._colorGradingPass = null;
   }
 
-  // â”€â”€ Private helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ------ Private helpers ---------------------------------------------------------------------------------------------------------------------------------------------------------------------
 
-  /** Apply SSAO parameters â€” radius controls kernel spread, intensity controls maxDistance scaling. */
+  /** Apply SSAO parameters - radius controls kernel spread, intensity controls maxDistance scaling. */
   private _applyAOParams(radius: number, intensity: number): void {
     if (!this._ssaoPass) return;
     this._ssaoPass.kernelRadius = radius;
     this._ssaoPass.minDistance = 0.005;
     // Scale maxDistance with intensity: higher intensity â†’ AO visible at greater depth range
-    // Tuned for car-scale scenes (objects ~2â€“5m across)
+    // Tuned for car-scale scenes (objects ~2-5m across)
     this._ssaoPass.maxDistance = 0.05 + intensity * 0.5;
   }
 
@@ -1505,7 +1505,7 @@ export class ModelLoader {
       arrayBuffer = await file.arrayBuffer();
       setRawModelData(arrayBuffer, file.name);
     } catch {
-      // Non-critical â€” model will load but won't be saveable
+      // Non-critical - model will load but won't be saveable
     }
 
     const url = URL.createObjectURL(file);

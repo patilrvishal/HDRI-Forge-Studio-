@@ -1,16 +1,16 @@
-﻿import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback } from 'react';
 import { useSceneStore } from '../../store/sceneStore';
 import { useLightsStore } from '../../store/lightsStore';
 import { sphericalToCartesian } from '../../utils/math';
 
-// â”€â”€ Section toggle chevron â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ------ Section toggle chevron ------------------------------------------------------------------------------------------------------------------------------
 const Chevron: React.FC<{ open: boolean }> = ({ open }) => (
   <svg width="10" height="10" viewBox="0 0 10 10" style={{ transition: 'transform 0.2s', transform: open ? 'rotate(90deg)' : 'rotate(0deg)' }}>
     <path d="M3 1L7 5L3 9" stroke="currentColor" strokeWidth="1.5" fill="none" strokeLinecap="round" strokeLinejoin="round" />
   </svg>
 );
 
-// â”€â”€ Compact inline slider row â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ------ Compact inline slider row ------------------------------------------------------------------------------------------------------------------
 const MiniSlider: React.FC<{
   label: string; value: number; min: number; max: number; step?: number;
   onChange: (v: number) => void; unit?: string; color?: string;
@@ -31,7 +31,7 @@ const MiniSlider: React.FC<{
   );
 };
 
-// â”€â”€ Color swatch input â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ------ Color swatch input ------------------------------------------------------------------------------------------------------------------------------------------
 const ColorDot: React.FC<{
   color: string; onChange: (c: string) => void; size?: number;
 }> = ({ color, onChange, size = 18 }) => (
@@ -43,7 +43,7 @@ const ColorDot: React.FC<{
   </div>
 );
 
-// â”€â”€ Collapsible section â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ------ Collapsible section ---------------------------------------------------------------------------------------------------------------------------------------
 const Section: React.FC<{
   title: string; icon?: string; defaultOpen?: boolean;
   children: React.ReactNode;
@@ -64,7 +64,7 @@ const Section: React.FC<{
   );
 };
 
-// â”€â”€ Cinematic 3-Light preset â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ------ Cinematic 3-Light preset ------------------------------------------------------------------------------------------------------------------------
 const CINEMATIC_PRESETS = [
   {
     name: 'Cinematic 3-Light',
@@ -136,7 +136,7 @@ const CINEMATIC_PRESETS = [
   },
 ];
 
-// â”€â”€ Main Panel â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ------ Main Panel ------------------------------------------------------------------------------------------------------------------------------------------------------------------
 export const ViewportDesignPanel: React.FC = () => {
   const environment = useSceneStore((s) => s.environment);
   const setEnvironment = useSceneStore((s) => s.setEnvironment);
@@ -152,7 +152,7 @@ export const ViewportDesignPanel: React.FC = () => {
   const updateLight = useLightsStore((s) => s.updateLight);
   const setLightsFromPreset = useLightsStore((s) => s.setLightsFromPreset);
 
-  // â”€â”€ Apply cinematic preset â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ------ Apply cinematic preset ------------------------------------------------------------------------------------------------------------
   const applyCinematicPreset = useCallback((preset: typeof CINEMATIC_PRESETS[0]) => {
     // Clear existing lights and create 3 new ones
     setLightsFromPreset([]);
@@ -238,7 +238,7 @@ export const ViewportDesignPanel: React.FC = () => {
     });
   }, [addLight, updateLight, setLightsFromPreset, setEnvironment, setRenderSettings, setBloom, setAO]);
 
-  // â”€â”€ Helpers to update the first two lights (key + fill) â”€â”€â”€â”€â”€â”€â”€
+  // ------ Helpers to update the first two lights (key + fill) ---------------------
   const getKeyLight = () => lights[0];
   const getFillLight = () => lights[1];
   const getAmbientLight = () => lights[2];
@@ -262,7 +262,7 @@ export const ViewportDesignPanel: React.FC = () => {
 
   return (
     <div className="vp-design-panel">
-      {/* â”€â”€ Preset Buttons â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
+      {/* ------ Preset Buttons --------------------------------------------------------------------------------------------------------- */}
       <div style={{ padding: '6px 8px 4px', borderBottom: '1px solid var(--border)' }}>
         <div style={{ fontSize: 9, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.8px', color: 'var(--text-dim)', marginBottom: 4 }}>
           Quick Presets
@@ -285,11 +285,11 @@ export const ViewportDesignPanel: React.FC = () => {
         </div>
       </div>
 
-      {/* â”€â”€ 3-Light Setup â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
+      {/* ------ 3-Light Setup --------------------------------------------------------------------------------------------------------------- */}
       <Section title="3-Light Setup" icon="ðŸ’¡" defaultOpen={true}>
         {/* Key Light */}
         <div style={{ fontSize: 8, fontWeight: 600, color: '#7db8f0', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: 2, marginTop: 4 }}>
-          {keyLight ? `Key â€” ${keyLight.name}` : 'Key Light (not created)'}
+          {keyLight ? `Key - ${keyLight.name}` : 'Key Light (not created)'}
         </div>
         {keyLight && (
           <>
@@ -298,16 +298,16 @@ export const ViewportDesignPanel: React.FC = () => {
               <span style={{ fontSize: 8, color: 'var(--text-dim)' }}>{keyLight.color}</span>
               <span style={{ flex: 1 }} />
               <span style={{ fontSize: 8, color: 'var(--text-dim)' }}>
-                Lat {Math.round(keyLight.transform.spherical.lat)}Â° / Lng {Math.round(keyLight.transform.spherical.lng)}Â°
+                Lat {Math.round(keyLight.transform.spherical.lat)}deg / Lng {Math.round(keyLight.transform.spherical.lng)}deg
               </span>
             </div>
             <MiniSlider label="Brightness" value={keyLight.brightness} min={0} max={500} step={1} onChange={(v) => updateKeyLight({ brightness: v })} />
-            <MiniSlider label="Latitude" value={keyLight.transform.spherical.lat} min={-90} max={90} step={1} unit="Â°" onChange={(v) => {
+            <MiniSlider label="Latitude" value={keyLight.transform.spherical.lat} min={-90} max={90} step={1} unit="deg" onChange={(v) => {
               const s = { ...keyLight.transform.spherical, lat: v };
               const cart = sphericalToCartesian(s.lat, s.lng, s.radius, s.height);
               updateKeyLight({ transform: { ...keyLight.transform, spherical: s, position: cart } });
             }} />
-            <MiniSlider label="Longitude" value={keyLight.transform.spherical.lng} min={0} max={360} step={1} unit="Â°" onChange={(v) => {
+            <MiniSlider label="Longitude" value={keyLight.transform.spherical.lng} min={0} max={360} step={1} unit="deg" onChange={(v) => {
               const s = { ...keyLight.transform.spherical, lng: v };
               const cart = sphericalToCartesian(s.lat, s.lng, s.radius, s.height);
               updateKeyLight({ transform: { ...keyLight.transform, spherical: s, position: cart } });
@@ -322,7 +322,7 @@ export const ViewportDesignPanel: React.FC = () => {
 
         {/* Fill Light */}
         <div style={{ fontSize: 8, fontWeight: 600, color: '#f0a868', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: 2, marginTop: 8 }}>
-          {fillLight ? `Fill â€” ${fillLight.name}` : 'Fill Light (not created)'}
+          {fillLight ? `Fill - ${fillLight.name}` : 'Fill Light (not created)'}
         </div>
         {fillLight && (
           <>
@@ -331,16 +331,16 @@ export const ViewportDesignPanel: React.FC = () => {
               <span style={{ fontSize: 8, color: 'var(--text-dim)' }}>{fillLight.color}</span>
               <span style={{ flex: 1 }} />
               <span style={{ fontSize: 8, color: 'var(--text-dim)' }}>
-                Lat {Math.round(fillLight.transform.spherical.lat)}Â° / Lng {Math.round(fillLight.transform.spherical.lng)}Â°
+                Lat {Math.round(fillLight.transform.spherical.lat)}deg / Lng {Math.round(fillLight.transform.spherical.lng)}deg
               </span>
             </div>
             <MiniSlider label="Brightness" value={fillLight.brightness} min={0} max={500} step={1} onChange={(v) => updateFillLight({ brightness: v })} />
-            <MiniSlider label="Latitude" value={fillLight.transform.spherical.lat} min={-90} max={90} step={1} unit="Â°" onChange={(v) => {
+            <MiniSlider label="Latitude" value={fillLight.transform.spherical.lat} min={-90} max={90} step={1} unit="deg" onChange={(v) => {
               const s = { ...fillLight.transform.spherical, lat: v };
               const cart = sphericalToCartesian(s.lat, s.lng, s.radius, s.height);
               updateFillLight({ transform: { ...fillLight.transform, spherical: s, position: cart } });
             }} />
-            <MiniSlider label="Longitude" value={fillLight.transform.spherical.lng} min={0} max={360} step={1} unit="Â°" onChange={(v) => {
+            <MiniSlider label="Longitude" value={fillLight.transform.spherical.lng} min={0} max={360} step={1} unit="deg" onChange={(v) => {
               const s = { ...fillLight.transform.spherical, lng: v };
               const cart = sphericalToCartesian(s.lat, s.lng, s.radius, s.height);
               updateFillLight({ transform: { ...fillLight.transform, spherical: s, position: cart } });
@@ -350,7 +350,7 @@ export const ViewportDesignPanel: React.FC = () => {
 
         {/* Ambient Light */}
         <div style={{ fontSize: 8, fontWeight: 600, color: 'var(--text-dim)', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: 2, marginTop: 8 }}>
-          {ambLight ? `Ambient â€” ${ambLight.name}` : 'Ambient Light (not created)'}
+          {ambLight ? `Ambient - ${ambLight.name}` : 'Ambient Light (not created)'}
         </div>
         {ambLight && (
           <>
@@ -363,17 +363,17 @@ export const ViewportDesignPanel: React.FC = () => {
         )}
       </Section>
 
-      {/* â”€â”€ Background â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
+      {/* ------ Background --------------------------------------------------------------------------------------------------------------------- */}
       <Section title="Background" icon="ðŸŽ¨">
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
           <ColorDot color={environment.background} onChange={(c) => setEnvironment({ background: c })} size={20} />
           <span style={{ fontSize: 9, fontFamily: 'var(--font-mono)', color: 'var(--text-sec)' }}>{environment.background}</span>
         </div>
         <MiniSlider label="Env Intensity" value={environment.intensity} min={0} max={3} step={0.05} onChange={(v) => setEnvironment({ intensity: v })} />
-        <MiniSlider label="HDRI Rotation" value={environment.rotation} min={0} max={360} step={1} unit="Â°" onChange={(v) => setEnvironment({ rotation: v })} />
+        <MiniSlider label="HDRI Rotation" value={environment.rotation} min={0} max={360} step={1} unit="deg" onChange={(v) => setEnvironment({ rotation: v })} />
       </Section>
 
-      {/* â”€â”€ Post-Processing â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
+      {/* ------ Post-Processing ------------------------------------------------------------------------------------------------------ */}
       <Section title="Post-Processing" icon="âœ¨">
         <MiniSlider label="Exposure" value={renderSettings.exposure} min={0.1} max={5} step={0.05} onChange={(v) => setRenderSettings({ exposure: v })} />
         <MiniSlider label="Bloom" value={renderSettings.bloom.enabled ? renderSettings.bloom.intensity : 0} min={0} max={2} step={0.01} onChange={(v) => {
@@ -389,7 +389,7 @@ export const ViewportDesignPanel: React.FC = () => {
         <MiniSlider label="AO Radius" value={renderSettings.ao.radius} min={0.1} max={3} step={0.05} onChange={(v) => setAO({ ...renderSettings.ao, radius: v })} />
       </Section>
 
-      {/* â”€â”€ Color Grading â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
+      {/* ------ Color Grading ------------------------------------------------------------------------------------------------------------ */}
       <Section title="Color Grading" icon="ðŸŒˆ">
         <MiniSlider label="Brightness" value={renderSettings.colorGrading.enabled ? renderSettings.colorGrading.brightness : 0} min={-1} max={1} step={0.01} onChange={(v) => {
           setRenderSettings({ colorGrading: { enabled: true, brightness: v, contrast: renderSettings.colorGrading.contrast, saturation: renderSettings.colorGrading.saturation } });
@@ -402,7 +402,7 @@ export const ViewportDesignPanel: React.FC = () => {
         }} />
       </Section>
 
-      {/* â”€â”€ Grid & Ground â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
+      {/* ------ Grid & Ground ------------------------------------------------------------------------------------------------------------ */}
       <Section title="Grid & Ground" icon="ðŸ“">
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '2px 0' }}>
           <button

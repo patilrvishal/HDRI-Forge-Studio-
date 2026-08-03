@@ -1,4 +1,4 @@
-﻿import { create } from 'zustand';
+import { create } from 'zustand';
 import type { Light } from '../types/Light';
 import { createDefaultLight, LIGHT_TEMPLATES } from '../types/Light';
 import { history } from './historyStore';
@@ -93,7 +93,7 @@ export const useLightsStore = create<LightsState>((set, get) => ({
   },
 
   selectLight: (id) => {
-    // Selection changes are NOT recorded â€” they don't mutate scene data
+    // Selection changes are NOT recorded - they don't mutate scene data
     set({ selectedLightId: id });
   },
 
@@ -131,7 +131,7 @@ export const useLightsStore = create<LightsState>((set, get) => ({
   },
 
   setCollectionFilter: (collectionId) => {
-    // Filter changes are NOT recorded â€” they are UI-only
+    // Filter changes are NOT recorded - they are UI-only
     set({ collectionFilter: collectionId });
   },
 

@@ -1,4 +1,4 @@
-﻿import React, { useRef, useEffect, useState, useCallback } from 'react';
+import React, { useRef, useEffect, useState, useCallback } from 'react';
 import * as THREE from 'three';
 import { useSceneStore } from '../../store/sceneStore';
 import { useLightsStore } from '../../store/lightsStore';
@@ -68,7 +68,7 @@ export const Viewport: React.FC<ViewportProps> = ({ sceneManagerRef, onScreensho
   const selectedLightId = useLightsStore((s) => s.selectedLightId);
   const updateLight = useLightsStore((s) => s.updateLight);
 
-  // Animation store selectors (non-reactive â€” read inside the loop via getState)
+  // Animation store selectors (non-reactive - read inside the loop via getState)
   // We only use isPlaying for the dependency to know if animation is active
 
   // Initialize the 3D scene on mount
@@ -178,14 +178,14 @@ export const Viewport: React.FC<ViewportProps> = ({ sceneManagerRef, onScreensho
     // Notify parent that the render pipeline is ready (for export)
     onReady?.(renderPipeline, materialManager);
 
-    // â”€â”€ Animation frame accumulator & tick callback â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // ------ Animation frame accumulator & tick callback ---------------------------------------------------------------
     const clock = new THREE.Clock();
     animAccumulatorRef.current = 0;
 
     const loop = () => {
       const delta = clock.getDelta();
 
-      // â”€â”€ Animation tick (frame-accurate playback) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+      // ------ Animation tick (frame-accurate playback) ------------------------------------------------------------------
       const animState = useAnimationStore.getState();
       if (animState.isPlaying && animState.tracks.length > 0) {
         animAccumulatorRef.current += delta;
@@ -278,13 +278,13 @@ export const Viewport: React.FC<ViewportProps> = ({ sceneManagerRef, onScreensho
         animAccumulatorRef.current = 0;
       }
 
-      // â”€â”€ Turntable (non-animated, manual rotation) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+      // ------ Turntable (non-animated, manual rotation) ---------------------------------------------------------------
       if (sceneManager._turntableActive) {
         const model = sceneManager._findModel();
         if (model) model.rotation.y += delta * sceneManager._turntableSpeed * 0.5;
       }
 
-      // â”€â”€ Update CubeCamera for PBR floor reflections â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+      // ------ Update CubeCamera for PBR floor reflections ---------------------------------------------------------
       if (sceneManager._floorCubeCamera && sceneManager.ground && sceneManager._groundSettings?.reflections) {
         try {
           sceneManager.ground.visible = false;
@@ -424,10 +424,10 @@ export const Viewport: React.FC<ViewportProps> = ({ sceneManagerRef, onScreensho
     const el = envLoaderRef.current;
     if (!sm || !el) return;
 
-    // Skip custom HDRI â€” handled by the separate effect below
+    // Skip custom HDRI - handled by the separate effect below
     if (environment.presetId === '__custom__') return;
 
-    // Built-in presets: clear any custom equirect, no 360Â° background.
+    // Built-in presets: clear any custom equirect, no 360deg background.
     // Skip the background clear when a gradient background owns the scene bg.
     el.clearEquirectTexture();
     if (!environment.gradientBackground?.enabled) {
@@ -451,7 +451,7 @@ export const Viewport: React.FC<ViewportProps> = ({ sceneManagerRef, onScreensho
   }, [environment.presetId, environment.rotation, environment.intensity, sceneManagerRef, envLoaderRef]);
 
   // Phase 9: Load custom HDRI file into the 3D scene
-  // NOTE: intensity is deliberately NOT a dependency â€” it is applied by the
+  // NOTE: intensity is deliberately NOT a dependency - it is applied by the
   // effect below without reloading. Reloading on every slider tick was making
   // the HDRI vanish mid-drag.
   useEffect(() => {
@@ -469,16 +469,16 @@ export const Viewport: React.FC<ViewportProps> = ({ sceneManagerRef, onScreensho
           sm.scene.environmentRotation = new THREE.Euler(0, rad, 0);
           sm.scene.backgroundRotation = new THREE.Euler(0, rad, 0);
 
-          // Show the HDRI as a 360Â° backplate in the viewport
+          // Show the HDRI as a 360deg backplate in the viewport
           el.setBackgroundFromEnv(sm.scene, environment.showBackground);
         })
         .catch((e) => {
-          // Do NOT fall back to a built-in preset â€” that silently replaces the
+          // Do NOT fall back to a built-in preset - that silently replaces the
           // user's custom HDRI with studio-neutral.
           console.error('[LightForge] Custom HDRI load failed:', e);
         });
     } else if (environment.presetId !== '__custom__') {
-      // Not custom â€” clear any HDRI backplate, unless a gradient owns the bg
+      // Not custom - clear any HDRI backplate, unless a gradient owns the bg
       if (!environment.gradientBackground?.enabled) {
         el.setBackgroundFromEnv(sm.scene, false);
       }
@@ -538,7 +538,7 @@ export const Viewport: React.FC<ViewportProps> = ({ sceneManagerRef, onScreensho
         .then((envTexture) => {
           const envState = useSceneStore.getState().environment;
           el.setEnvironmentTexture(sm.scene, envTexture, envState.intensity);
-          // Restore 360Â° HDRI backplate â€” always show when custom HDRI is loaded
+          // Restore 360deg HDRI backplate - always show when custom HDRI is loaded
           if (!envState.showBackground) {
             useSceneStore.getState().setEnvironment({ showBackground: true });
           }

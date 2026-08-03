@@ -1,4 +1,4 @@
-﻿import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import * as THREE from 'three';
 import { useLightsStore } from '../../store/lightsStore';
 import { useSceneStore } from '../../store/sceneStore';
@@ -16,7 +16,7 @@ import {
 const PREVIEW_W = 512;
 const PREVIEW_H = 256;
 
-/** Debounce window â€” re-render only after the user stops dragging. */
+/** Debounce window - re-render only after the user stops dragging. */
 const DEBOUNCE_MS = 300;
 
 const RESOLUTIONS: Array<{ label: string; w: 512 | 1024 | 2048 | 4096; h: 256 | 512 | 1024 | 2048 }> = [
@@ -28,7 +28,7 @@ const RESOLUTIONS: Array<{ label: string; w: 512 | 1024 | 2048 | 4096; h: 256 | 
 
 /**
  * Tone-map linear HDR floats into 8-bit RGBA for on-screen display.
- * Uses exposure + Reinhard + gamma 2.2 â€” this is DISPLAY ONLY and never
+ * Uses exposure + Reinhard + gamma 2.2 - this is DISPLAY ONLY and never
  * touches the exported file, which stays fully linear/unbounded.
  */
 function tonemapToImageData(
@@ -46,7 +46,7 @@ function tonemapToImageData(
     let g = pixels[si + 1] * exposure;
     let b = pixels[si + 2] * exposure;
 
-    // Reinhard tone map â€” compresses the huge HDR range into 0..1
+    // Reinhard tone map - compresses the huge HDR range into 0..1
     r = r / (1 + r);
     g = g / (1 + g);
     b = b / (1 + b);
@@ -161,7 +161,7 @@ export const HDRIPreviewPanel: React.FC = () => {
     };
   }, [livePreview, lights, environment, hdriAssets, renderPreview]);
 
-  /** Exposure only re-paints â€” no need to re-run the expensive pixel loop. */
+  /** Exposure only re-paints - no need to re-run the expensive pixel loop. */
   useEffect(() => {
     const canvas = canvasRef.current;
     const pixels = pixelsRef.current;
@@ -267,7 +267,7 @@ export const HDRIPreviewPanel: React.FC = () => {
           </div>
         )}
 
-        {/* Exposure â€” display only */}
+        {/* Exposure - display only */}
         <div>
           <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, marginBottom: 3 }}>
             <span style={{ color: 'var(--text-sec)' }}>View Exposure</span>
@@ -285,11 +285,11 @@ export const HDRIPreviewPanel: React.FC = () => {
             style={{ width: '100%' }}
           />
           <div style={{ fontSize: 9, color: 'var(--text-dim)', marginTop: 2 }}>
-            Display only â€” not baked into the file
+            Display only - not baked into the file
           </div>
         </div>
 
-        {/* Live stats â€” this is what tells you if the export is blown out */}
+        {/* Live stats - this is what tells you if the export is blown out */}
         <div
           style={{
             fontSize: 10,
@@ -303,7 +303,7 @@ export const HDRIPreviewPanel: React.FC = () => {
         >
           <div style={{ display: 'flex', justifyContent: 'space-between' }}>
             <span style={{ color: 'var(--text-dim)' }}>Max</span>
-            <span style={{ color: 'var(--text-sec)' }}>{stats ? stats.max.toFixed(1) : 'â€”'}</span>
+            <span style={{ color: 'var(--text-sec)' }}>{stats ? stats.max.toFixed(1) : '-'}</span>
           </div>
           <div style={{ display: 'flex', justifyContent: 'space-between' }}>
             <span style={{ color: 'var(--text-dim)' }}>Clipped</span>

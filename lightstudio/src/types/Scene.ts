@@ -1,4 +1,4 @@
-﻿export interface CameraState {
+export interface CameraState {
   position: [number, number, number];
   target: [number, number, number];
   fov: number;
@@ -43,13 +43,13 @@ export interface GroundSettings {
   visible: boolean;
   /** Enable real-time floor reflections (CubeCamera + PBR) */
   reflections: boolean;
-  /** Reflection intensity 0â€“1 (controls envMapIntensity of reflections) */
+  /** Reflection intensity 0-1 (controls envMapIntensity of reflections) */
   reflectionSharpness: number;
   /** Ground color (hex) */
   color: string;
-  /** Ground roughness 0â€“1 */
+  /** Ground roughness 0-1 */
   roughness: number;
-  /** Ground metalness 0â€“1 */
+  /** Ground metalness 0-1 */
   metalness: number;
   /** Fade ground edges into background (distance from center where fade starts, 0 = off) */
   fadeRadius: number;
@@ -70,7 +70,7 @@ export interface GroundSettings {
 export interface RenderSettings {
   engine: 'pbr' | 'pathtracer';
   tonemapping: 'aces' | 'reinhard' | 'linear';
-  exposure: number; // 0.1 â€“ 5.0
+  exposure: number; // 0.1 - 5.0
   quality: 'low' | 'medium' | 'high' | 'ultra';
   antialiasing: 'none' | 'fxaa' | 'smaa' | 'taa';
   shadowQuality: 'none' | 'low' | 'medium' | 'high';
@@ -89,14 +89,14 @@ export interface RenderSettings {
 
 export interface VignetteSettings {
   enabled: boolean;
-  intensity: number; // 0 â€“ 1
+  intensity: number; // 0 - 1
 }
 
 export interface ColorGradingSettings {
   enabled: boolean;
-  brightness: number; // -1 â€“ 1
-  contrast: number;   // -1 â€“ 1
-  saturation: number; // -1 â€“ 1
+  brightness: number; // -1 - 1
+  contrast: number;   // -1 - 1
+  saturation: number; // -1 - 1
 }
 
 export interface SceneState {
