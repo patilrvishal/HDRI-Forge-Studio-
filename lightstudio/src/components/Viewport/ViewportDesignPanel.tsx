@@ -45,9 +45,9 @@ const ColorDot: React.FC<{
 
 // ------ Collapsible section ---------------------------------------------------------------------------------------------------------------------------------------
 const Section: React.FC<{
-  title: string; icon?: string; defaultOpen?: boolean;
+  title: string; defaultOpen?: boolean;
   children: React.ReactNode;
-}> = ({ title, icon, defaultOpen = false, children }) => {
+}> = ({ title, defaultOpen = false, children }) => {
   const [open, setOpen] = useState(defaultOpen);
   return (
     <div style={{ borderTop: '1px solid var(--border)' }}>
@@ -56,10 +56,9 @@ const Section: React.FC<{
         style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '5px 8px', cursor: 'pointer', userSelect: 'none' }}
       >
         <Chevron open={open} />
-        {icon && <span style={{ fontSize: 11 }}>{icon}</span>}
         <span style={{ fontSize: 9, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.8px', color: 'var(--text-sec)', flex: 1 }}>{title}</span>
       </div>
-      {open && <div style={{ padding: '4px 8px 6px 82px' }}>{children}</div>}
+      {open && <div style={{ padding: '4px 8px 6px 24px' }}>{children}</div>}
     </div>
   );
 };
@@ -286,7 +285,7 @@ export const ViewportDesignPanel: React.FC = () => {
       </div>
 
       {/* ------ 3-Light Setup --------------------------------------------------------------------------------------------------------------- */}
-      <Section title="3-Light Setup" icon="ðŸ’¡" defaultOpen={true}>
+      <Section title="3-Light Setup" defaultOpen={true}>
         {/* Key Light */}
         <div style={{ fontSize: 8, fontWeight: 600, color: '#7db8f0', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: 2, marginTop: 4 }}>
           {keyLight ? `Key - ${keyLight.name}` : 'Key Light (not created)'}
@@ -364,7 +363,7 @@ export const ViewportDesignPanel: React.FC = () => {
       </Section>
 
       {/* ------ Background --------------------------------------------------------------------------------------------------------------------- */}
-      <Section title="Background" icon="ðŸŽ¨">
+      <Section title="Background">
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
           <ColorDot color={environment.background} onChange={(c) => setEnvironment({ background: c })} size={20} />
           <span style={{ fontSize: 9, fontFamily: 'var(--font-mono)', color: 'var(--text-sec)' }}>{environment.background}</span>
@@ -374,7 +373,7 @@ export const ViewportDesignPanel: React.FC = () => {
       </Section>
 
       {/* ------ Post-Processing ------------------------------------------------------------------------------------------------------ */}
-      <Section title="Post-Processing" icon="âœ¨">
+      <Section title="Post-Processing">
         <MiniSlider label="Exposure" value={renderSettings.exposure} min={0.1} max={5} step={0.05} onChange={(v) => setRenderSettings({ exposure: v })} />
         <MiniSlider label="Bloom" value={renderSettings.bloom.enabled ? renderSettings.bloom.intensity : 0} min={0} max={2} step={0.01} onChange={(v) => {
           setBloom({ enabled: v > 0.01, intensity: v, threshold: renderSettings.bloom.threshold, radius: renderSettings.bloom.radius });
@@ -390,7 +389,7 @@ export const ViewportDesignPanel: React.FC = () => {
       </Section>
 
       {/* ------ Color Grading ------------------------------------------------------------------------------------------------------------ */}
-      <Section title="Color Grading" icon="ðŸŒˆ">
+      <Section title="Color Grading">
         <MiniSlider label="Brightness" value={renderSettings.colorGrading.enabled ? renderSettings.colorGrading.brightness : 0} min={-1} max={1} step={0.01} onChange={(v) => {
           setRenderSettings({ colorGrading: { enabled: true, brightness: v, contrast: renderSettings.colorGrading.contrast, saturation: renderSettings.colorGrading.saturation } });
         }} />
@@ -403,7 +402,7 @@ export const ViewportDesignPanel: React.FC = () => {
       </Section>
 
       {/* ------ Grid & Ground ------------------------------------------------------------------------------------------------------------ */}
-      <Section title="Grid & Ground" icon="ðŸ“">
+      <Section title="Grid & Ground">
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '2px 0' }}>
           <button
             onClick={toggleGrid}

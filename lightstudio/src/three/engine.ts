@@ -1679,6 +1679,16 @@ export interface GradientBackgroundConfig {
   stops: GradientStop[];
 }
 
+/** Parse a #rrggbb hex string directly to a CSS rgba() string - no color-space conversion. */
+function hexToRgbaString(hex: string, opacity: number): string {
+  const clean = hex.replace('#', '');
+  const num = parseInt(clean, 16);
+  const r = (num >> 16) & 255;
+  const g = (num >> 8) & 255;
+  const b = num & 255;
+  return `rgba(${r}, ${g}, ${b}, ${opacity})`;
+}
+
 export function createGradientBackground(config: GradientBackgroundConfig): THREE.Texture {
   const w = 1024;
   const h = 1024;
@@ -1701,13 +1711,13 @@ export function createGradientBackground(config: GradientBackgroundConfig): THRE
     gradient = ctx.createLinearGradient(x1, y1, x2, y2);
   }
 
+  // Use the authored hex directly as a CSS color - canvas 2D operates in
+  // sRGB display space, so routing it through THREE.Color first would
+  // silently decode it to linear light (THREE.ColorManagement) and darken
+  // every stop when Math.round(rgb.r * 255) re-treats it as 0-255 sRGB.
   const sorted = [...config.stops].sort((a, b) => a.position - b.position);
   for (const stop of sorted) {
-    const rgb = new THREE.Color(stop.color);
-    const r = Math.round(rgb.r * 255);
-    const g = Math.round(rgb.g * 255);
-    const b = Math.round(rgb.b * 255);
-    gradient.addColorStop(stop.position, `rgba(${r}, ${g}, ${b}, ${stop.opacity})`);
+    gradient.addColorStop(stop.position, hexToRgbaString(stop.color, stop.opacity));
   }
 
   ctx.fillStyle = gradient;

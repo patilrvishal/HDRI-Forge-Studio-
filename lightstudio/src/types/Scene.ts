@@ -168,8 +168,8 @@ export const DEFAULT_SCENE_STATE: SceneState = {
       type: 'radial',
       angle: 90,
       stops: [
-        { color: '#ededed', position: 0, opacity: 1 },
-        { color: '#9c9c9c', position: 1, opacity: 1 },
+        { color: '#d9d9d9', position: 0, opacity: 1 },
+        { color: '#859093', position: 1, opacity: 1 },
       ],
     },
     backplate: null,

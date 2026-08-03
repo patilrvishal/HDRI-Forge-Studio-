@@ -367,3 +367,33 @@ Stage Summary:
 - Both approaches (3a background, 3b mirror sphere) now tried before falling back to analytical
 - TypeScript: 0 errors, encoding tests: ALL PASSED
 
+---
+Task ID: ui-theme-viewport-fixes
+Agent: Main Agent
+Task: Neutral+blue theme redesign, viewport rendering fixes, tab bar 3D styling, and a companion Next.js studio UI
+
+Work Log:
+- Re-themed lightstudio from purple/pink neon to a neutral-dark + calm-blue palette (globals.css CSS variables, blue-shifted all hardcoded purple/pink hex and rgba tokens across chrome components); disabled the animated panel-glow pulse and border-sweep for a calmer, static look
+- Restyled the 3D viewport studio backdrop (limbo gradient + grid) to neutral cool tones; softbox/area light helpers switched to additive blending so they read as glowing emitters and cross the bloom threshold; raised default bloom intensity/threshold
+- Wrapped every LightProperties inspector section in a new collapsible CollapsibleSection (chevron header), renamed sections to match the reference (Dimensions, Advanced Render Collection, etc.)
+- Built a full companion "LightForge Studio" UI in the root Next.js app (src/store/studioStore.ts, src/components/studio/*, src/app/studio.css) as a design/reference build: TopBar, LeftPanel (light list + profile tiles + preset grid), Viewport (SVG perspective grid, bokeh, functional camera-slot bar 1-8 + Save, projection switch, render/memory HUD), RightPanel (7 collapsible sections), BottomPanel (HDRI strip + timeline)
+- Added real HDRI import to the Next.js studio: client-side decode (images via object URL, .hdr via three RGBELoader tone-mapped to a thumbnail), imported items render their actual preview in the strip instead of a placeholder gradient
+- Fixed double-encoded (mojibake) characters baked into 9 lightstudio source files (dashes/degree signs/box-drawing comment banners corrupted by a prior save-encoding bug) - some were user-visible (status bar Undo/Redo, HDRI preview captions, viewport design panel degree labels); removed the corrupted emoji icons from the Viewport Design Panel's collapsible sections entirely per "no random icons" direction
+- Set the studio's default background to the radial gradient (was disabled by default); fixed two bugs blocking it: the apply-effect only fired on change (not on init), and two environment-sync effects were unconditionally nulling scene.background on load
+- Found and fixed a real gamma/color-space bug in createGradientBackground() and gradientToEnvLayer(): stop colors were routed through `new THREE.Color()` before use as a canvas 2D fillStyle - THREE.Color decodes sRGB hex to linear light on construction, so treating `.r * 255` as sRGB again silently darkened every stop (verified via direct canvas pixel sampling: #ededed rendered as 215, #9c9c9c as 85 - exact sRGB->linear decode). Fixed by parsing hex directly for canvas/CSS use
+- Updated the default gradient stops twice per user reference screenshots, final: #d9d9d9 (pos 0) -> #859093 (pos 1), radial, both opacity 1 - confirmed via pixel sampling to render pixel-exact
+- Redesigned all three tab bars (Lights/Env/Scene, Properties/Light Prev/Material/Mat Edit, HDRI Preview/Timeline/Presets): fixed text wrapping (missing white-space:nowrap), removed inline style overrides that were silently stripping the shared .tab-item border, added a "3D groove" treatment (solid border + layered inset/outset shadows so the strip reads as a recessed trough with the active tab as a raised card)
+- Added a scoped purple/violet accent (--accent-purple family) + a wireframe cube icon for the "Properties" tab specifically at the user's request, then extended the same purple accent to all three tab bars when asked "use purple for all panel" - the rest of the app (sliders, borders, other buttons) intentionally stays on the existing blue accent, not touched
+
+Stage Summary:
+- lightstudio/src/styles/globals.css: neutral+blue palette, calmed animations, tab-bar/tab-item 3D groove + purple accent variables and rules
+- lightstudio/src/three/engine.ts: neutral viewport backdrop/grid, additive softbox helpers, hexToRgbaString() gamma-bug fix in createGradientBackground()
+- lightstudio/src/three/HDRIExporter.ts: matching gamma-bug fix in gradientToEnvLayer(); mojibake cleanup
+- lightstudio/src/types/Scene.ts: gradient background enabled by default, final stops #d9d9d9/#859093
+- lightstudio/src/components/Viewport/Viewport.tsx: gradient-on-init fix, background-clear guard fix; mojibake cleanup
+- lightstudio/src/components/Viewport/ViewportDesignPanel.tsx: removed corrupted/decorative emoji icons; mojibake cleanup
+- lightstudio/src/components/Layout/AppLayout.tsx: tab bar markup/CSS-class rework across all three tab groups, CubeIcon component, properties-card-frame
+- lightstudio/src/components/Lights/LightProperties.tsx, HDRI/HDRIPreviewPanel.tsx, store/lightsStore.ts: mojibake cleanup
+- src/store/studioStore.ts, src/app/studio.css, src/components/studio/*: new companion Next.js studio UI (design reference build, not wired to a live 3D engine)
+- TypeScript: 0 errors (tsc --noEmit clean) after every change in this session; viewport gradient verified pixel-exact against reference screenshots via direct canvas sampling
+

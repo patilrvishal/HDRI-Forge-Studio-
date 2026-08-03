@@ -23,6 +23,22 @@ import { TimelinePanel } from '../Timeline/TimelinePanel';
 import { CameraPanel } from '../Viewport/CameraPanel';
 import { useSceneHierarchyStore } from '../../store/sceneHierarchyStore';
 
+/** Wireframe box glyph shown before the active "Properties" tab label. */
+function CubeIcon() {
+  return (
+    <svg width="13" height="13" viewBox="0 0 16 16" fill="none" className="tab-icon" style={{ marginRight: 6, flexShrink: 0 }}>
+      <path
+        d="M8 1.5L14 5V11L8 14.5L2 11V5L8 1.5Z"
+        stroke="currentColor"
+        strokeWidth="1.2"
+        strokeLinejoin="round"
+      />
+      <path d="M2 5L8 8.5L14 5" stroke="currentColor" strokeWidth="1.2" strokeLinejoin="round" />
+      <path d="M8 8.5V14.5" stroke="currentColor" strokeWidth="1.2" />
+    </svg>
+  );
+}
+
 function SceneCameraSlot() {
   const filterType = useSceneHierarchyStore((s) => s.filterType);
   if (filterType !== 'camera') return null;
@@ -311,27 +327,13 @@ export const AppLayout: React.FC = () => {
             </div>
 
             {/* Tab bar */}
-            <div
-              style={{
-                display: 'flex',
-                borderBottom: '1px solid var(--border)',
-                flexShrink: 0,
-              }}
-            >
+            <div className="tab-bar tab-bar-purple" style={{ flexShrink: 0 }}>
               {(['lights', 'environment', 'scene'] as const).map((tab) => (
                 <button
                   key={tab}
                   className={`tab-item ${leftTab === tab ? 'active' : ''}`}
                   onClick={() => setLeftTab(tab)}
-                  style={{
-                    flex: 1,
-                    fontSize: 10,
-                    padding: '5px 0',
-                    borderRadius: 0,
-                    border: 'none',
-                    borderBottom: leftTab === tab ? '2px solid var(--accent)' : '2px solid transparent',
-                    marginBottom: -1,
-                  }}
+                  style={{ flex: 1, justifyContent: 'center' }}
                 >
                   {tab === 'lights' ? 'Lights' : tab === 'environment' ? 'Env' : 'Scene'}
                 </button>
@@ -448,8 +450,16 @@ export const AppLayout: React.FC = () => {
               }}
             >
               {/* Tab bar */}
-              <div style={{ borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center' }}>
-                <div className="tab-bar" style={{ flex: 1 }}>
+              <div
+                style={{
+                  background: 'var(--bg-deep)',
+                  borderBottom: '2px solid var(--border-light)',
+                  boxShadow: '0 1px 0 rgba(255, 255, 255, 0.06), inset 0 -4px 6px -4px rgba(0, 0, 0, 0.55)',
+                  display: 'flex',
+                  alignItems: 'center',
+                }}
+              >
+                <div className="tab-bar tab-bar-purple" style={{ flex: 1, background: 'none', boxShadow: 'none' }}>
                   <div
                     className={`tab-item ${bottomTab === 'hdri' ? 'active' : ''}`}
                     onClick={() => setBottomTab('hdri')}
@@ -510,7 +520,7 @@ export const AppLayout: React.FC = () => {
           }}
         >
           <div
-            className="panel panel-glow border-light-effect"
+            className="panel panel-glow border-light-effect properties-card-frame"
             style={{
               width: rightPanelWidth,
               flexShrink: 0,
@@ -519,12 +529,21 @@ export const AppLayout: React.FC = () => {
             }}
           >
             {/* Tab bar with close button */}
-            <div style={{ borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center' }}>
-              <div className="tab-bar" style={{ flex: 1 }}>
+            <div
+              style={{
+                background: 'var(--bg-deep)',
+                borderBottom: '2px solid var(--border-light)',
+                boxShadow: '0 1px 0 rgba(255, 255, 255, 0.06), inset 0 -4px 6px -4px rgba(0, 0, 0, 0.55)',
+                display: 'flex',
+                alignItems: 'center',
+              }}
+            >
+              <div className="tab-bar tab-bar-purple" style={{ flex: 1, background: 'none', boxShadow: 'none' }}>
                 <div
                   className={`tab-item ${rightTab === 'properties' ? 'active' : ''}`}
                   onClick={() => setRightTab('properties')}
                 >
+                  <CubeIcon />
                   Properties
                 </div>
                 <div

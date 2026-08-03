@@ -210,15 +210,84 @@ select {
   min-width: 36px; text-align: right; flex-shrink: 0;
 }
 
-.tab-bar { display: flex; gap: 2px; padding: 4px 4px 0; }
-.tab-item {
-  padding: 4px 8px; font-size: 10px; font-weight: 500;
-  text-transform: uppercase; letter-spacing: 0.5px;
-  color: var(--text-dim); border-bottom: 2px solid transparent;
-  cursor: pointer; transition: all 0.15s;
+/* Recessed "groove" trough the tabs sit in - a solid, clearly-visible border
+   plus a hairline highlight just below it reads as a carved 3D seam rather
+   than a flat 1px rule. */
+.tab-bar {
+  display: flex; align-items: stretch; gap: 0; padding: 0 4px;
+  background: var(--bg-deep);
+  border-bottom: 2px solid var(--border-light);
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.06), inset 0 -4px 6px -4px rgba(0, 0, 0, 0.55);
 }
-.tab-item:hover { color: var(--text-sec); }
-.tab-item.active { color: var(--accent-bright); border-bottom-color: var(--accent-bright); }
+.tab-item {
+  position: relative;
+  padding: 8px 10px; font-size: 10px; font-weight: 500;
+  text-transform: uppercase; letter-spacing: 0.5px; white-space: nowrap; flex-shrink: 0;
+  display: flex; align-items: center;
+  color: var(--text-dim); border-bottom: 2px solid transparent;
+  /* Carved vertical divider: a solid border for a clearly-visible seam, plus
+     an inset dark/light pair for depth - both inset so they stay inside this
+     tab's own box (no bleed into the next tab's paint). */
+  border-right: 1px solid var(--border-light);
+  box-shadow: inset -2px 0 3px -2px rgba(0, 0, 0, 0.6), inset 1px 0 0 rgba(255, 255, 255, 0.04);
+  cursor: pointer; transition: color 0.15s ease, border-color 0.15s ease, background 0.15s ease, box-shadow 0.15s ease;
+}
+.tab-item:last-child { border-right: none; box-shadow: none; }
+.tab-item:hover { color: var(--text-sec); background: rgba(255, 255, 255, 0.03); }
+.tab-item.active {
+  color: var(--accent-bright);
+  border-bottom-color: var(--accent-bright);
+  /* Raised card popping out of the darker groove: lighter fill, a bright
+     top edge, and solid dark seams either side simulate a physical lip. */
+  background: var(--bg-panel);
+  border-left: 1px solid var(--border-light);
+  border-right: 1px solid var(--border-light);
+  box-shadow:
+    inset 0 2px 0 rgba(255, 255, 255, 0.1),
+    inset 1px 0 0 rgba(0, 0, 0, 0.5),
+    inset -1px 0 0 rgba(0, 0, 0, 0.5),
+    0 2px 6px rgba(0, 0, 0, 0.35);
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   Properties tab bar - scoped purple accent + framed card
+   Deliberately isolated to this one tab group; every other accent in the
+   app stays on --accent (blue). Do not use --accent-purple elsewhere.
+   ═══════════════════════════════════════════════════════════════════════ */
+:root {
+  --accent-purple: #a78bfa;
+  --accent-purple-bright: #c084fc;
+  --accent-purple-bg: rgba(167, 139, 250, 0.14);
+  --accent-purple-glow: rgba(167, 139, 250, 0.45);
+}
+
+.tab-icon { color: var(--text-dim); transition: color 0.15s ease, filter 0.15s ease; }
+
+.tab-bar-purple .tab-item.active {
+  color: var(--accent-purple-bright);
+  border-bottom-color: var(--accent-purple-bright);
+  background: var(--accent-purple-bg);
+  box-shadow:
+    inset 0 2px 0 rgba(255, 255, 255, 0.1),
+    inset 1px 0 0 rgba(0, 0, 0, 0.5),
+    inset -1px 0 0 rgba(0, 0, 0, 0.5),
+    0 2px 10px var(--accent-purple-glow);
+}
+.tab-bar-purple .tab-item.active .tab-icon {
+  color: var(--accent-purple-bright);
+  filter: drop-shadow(0 0 3px var(--accent-purple-glow));
+}
+
+/* Framed card: rounded double-border with a soft purple-tinted outer glow,
+   echoing the reference's embossed panel frame. */
+.properties-card-frame {
+  border-radius: 10px;
+  box-shadow: 0 0 0 1px rgba(167, 139, 250, 0.16), 0 10px 28px rgba(0, 0, 0, 0.4);
+}
+.properties-card-frame > div:first-child {
+  border-top-left-radius: 9px;
+  border-top-right-radius: 9px;
+}
 
 .drop-overlay {
   position: absolute; inset: 0; background: rgba(74, 158, 255, 0.06);

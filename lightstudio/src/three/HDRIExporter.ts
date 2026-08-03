@@ -1222,12 +1222,17 @@ export function gradientToEnvLayer(config: {
     gradient = ctx.createLinearGradient(x1, y1, x2, y2);
   }
 
+  // Use the authored hex directly as a CSS color - canvas 2D operates in
+  // sRGB display space, so routing it through THREE.Color first would
+  // silently decode it to linear light and darken every stop when
+  // Math.round(c.r * 255) re-treats it as 0-255 sRGB.
   const sorted = [...config.stops].sort((a, b) => a.position - b.position);
   for (const stop of sorted) {
-    const c = new THREE.Color(stop.color);
-    const r = Math.round(c.r * 255);
-    const g = Math.round(c.g * 255);
-    const b = Math.round(c.b * 255);
+    const clean = stop.color.replace('#', '');
+    const num = parseInt(clean, 16);
+    const r = (num >> 16) & 255;
+    const g = (num >> 8) & 255;
+    const b = num & 255;
     gradient.addColorStop(stop.position, `rgba(${r}, ${g}, ${b}, ${stop.opacity})`);
   }
 
