@@ -345,11 +345,13 @@ export const LightProperties: React.FC = () => {
             label="Visible"
             checked={light.visible}
             onChange={(v) => handleUpdate({ visible: v })}
+            variant="glossy"
           />
           <Toggle
             label="Helper"
             checked={light.gearVisible}
             onChange={(v) => handleUpdate({ gearVisible: v })}
+            variant="glossy"
           />
         </div>
       </CollapsibleSection>
@@ -542,6 +544,7 @@ export const LightProperties: React.FC = () => {
         headerRight={
           <Toggle
             checked={safeRotation.enabled}
+            variant="glossy"
             onChange={(v) =>
               handleUpdate({
                 transform: {

@@ -239,7 +239,7 @@ export const RenderSettingsPanel: React.FC<RenderSettingsPanelProps> = ({ onClos
 
           {/* ─── Bloom ─────────────────────────────────────────── */}
           <Section title="Bloom">
-            <Toggle label="Enable" checked={rs.bloom.enabled} onChange={handleBloomToggle} />
+            <Toggle variant="glossy" label="Enable" checked={rs.bloom.enabled} onChange={handleBloomToggle} />
             {rs.bloom.enabled && (
               <>
                 <Slider label="Intensity" value={rs.bloom.intensity} min={0} max={3} step={0.05} onChange={handleBloomIntensity} />
@@ -251,7 +251,7 @@ export const RenderSettingsPanel: React.FC<RenderSettingsPanelProps> = ({ onClos
 
           {/* ─── Ambient Occlusion ─────────────────────────────── */}
           <Section title="Ambient Occlusion">
-            <Toggle label="Enable" checked={rs.ao.enabled} onChange={handleAOToggle} />
+            <Toggle variant="glossy" label="Enable" checked={rs.ao.enabled} onChange={handleAOToggle} />
             {rs.ao.enabled && (
               <>
                 <Slider label="Radius" value={rs.ao.radius} min={0.01} max={2} step={0.01} onChange={handleAORadius} />
@@ -263,10 +263,10 @@ export const RenderSettingsPanel: React.FC<RenderSettingsPanelProps> = ({ onClos
 
           {/* ─── Ground / Floor ─────────────────────────────────── */}
           <Section title="Ground / Floor">
-            <Toggle label="Visible" checked={rs.ground.visible} onChange={handleGroundVisible} />
+            <Toggle variant="glossy" label="Visible" checked={rs.ground.visible} onChange={handleGroundVisible} />
             {rs.ground.visible && (
               <>
-                <Toggle label="Floor Reflections" checked={rs.ground.reflections} onChange={handleGroundReflections} />
+                <Toggle variant="glossy" label="Floor Reflections" checked={rs.ground.reflections} onChange={handleGroundReflections} />
                 {rs.ground.reflections && (
                   <Slider label="Reflection Intensity" value={rs.ground.reflectionSharpness} min={0} max={1} step={0.05} onChange={handleGroundSharpness} />
                 )}
@@ -289,7 +289,7 @@ export const RenderSettingsPanel: React.FC<RenderSettingsPanelProps> = ({ onClos
 
           {/* ─── Vignette ───────────────────────────────────────── */}
           <Section title="Vignette">
-            <Toggle label="Enable" checked={rs.vignette.enabled} onChange={handleVignetteToggle} />
+            <Toggle variant="glossy" label="Enable" checked={rs.vignette.enabled} onChange={handleVignetteToggle} />
             {rs.vignette.enabled && (
               <Slider label="Intensity" value={rs.vignette.intensity} min={0} max={1} step={0.01} onChange={handleVignetteIntensity} />
             )}
@@ -297,7 +297,7 @@ export const RenderSettingsPanel: React.FC<RenderSettingsPanelProps> = ({ onClos
 
           {/* ─── Color Grading ──────────────────────────────────── */}
           <Section title="Color Grading">
-            <Toggle label="Enable" checked={rs.colorGrading.enabled} onChange={handleCGToggle} />
+            <Toggle variant="glossy" label="Enable" checked={rs.colorGrading.enabled} onChange={handleCGToggle} />
             {rs.colorGrading.enabled && (
               <>
                 <Slider label="Brightness" value={rs.colorGrading.brightness} min={-1} max={1} step={0.01} onChange={handleCGBrightness} />
@@ -318,7 +318,7 @@ export const RenderSettingsPanel: React.FC<RenderSettingsPanelProps> = ({ onClos
                 <NumericInput label="Height" value={rs.customHeight} onChange={(v: number) => setRenderSettings({ customHeight: v })} min={240} max={4320} step={1} width="70px" />
               </div>
             )}
-            <Toggle label="Auto Save" checked={rs.autoSave} onChange={handleAutoSaveToggle} />
+            <Toggle variant="glossy" label="Auto Save" checked={rs.autoSave} onChange={handleAutoSaveToggle} />
             {rs.autoSave && (
               <NumericInput label="Interval" value={rs.autoSaveInterval} onChange={handleAutoSaveInterval} min={1} max={30} step={1} width="50px" />
             )}

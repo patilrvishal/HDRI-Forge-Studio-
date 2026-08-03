@@ -2177,3 +2177,108 @@ input[type="range"]:active::-webkit-slider-thumb {
 *::-webkit-scrollbar-corner {
   background: transparent;
 }
+
+/* ═══════════════════════════════════════════════════════════════════════
+   TRIAL: glossy 3D toggle + menu style (sun/moon switch reference)
+   Scoped to `.glossy-3d-trial` only - currently wraps the Properties tab
+   content so this can be reviewed in isolation before rolling it out to
+   other panels. Delete this block (and the wrapper class) to revert.
+   ═══════════════════════════════════════════════════════════════════════ */
+
+/* Glossy slide switch - matches the reference photo: a dark dotted "grip"
+   handle that slides to one side, revealing a glowing colour-coded ON/OFF
+   readout on the other. Not scoped to .glossy-3d-trial by class nesting -
+   the Toggle component only renders this markup when variant="glossy" is
+   passed explicitly (currently just the 3 toggles in LightProperties). */
+.glossy-toggle {
+  position: relative;
+  width: 56px; height: 22px; border-radius: 999px;
+  background: linear-gradient(180deg, #1a1a1c 0%, #0c0c0e 100%);
+  border: 1px solid #000;
+  box-shadow: inset 0 2px 5px rgba(0, 0, 0, 0.75), inset 0 -1px 0 rgba(255, 255, 255, 0.04);
+  cursor: pointer;
+  overflow: hidden;
+  flex-shrink: 0;
+}
+
+.glossy-toggle-label {
+  position: absolute; inset: 0;
+  display: flex; align-items: center;
+  font-size: 8px; font-weight: 700; letter-spacing: 0.5px;
+  transition: color 0.2s ease, background 0.2s ease;
+  pointer-events: none;
+}
+.glossy-toggle.on .glossy-toggle-label {
+  justify-content: flex-end; padding-right: 7px;
+  color: #d3ecff;
+  text-shadow: 0 0 6px rgba(74, 158, 255, 0.9);
+  background: radial-gradient(ellipse 70% 100% at right, rgba(74, 158, 255, 0.4), transparent 75%);
+}
+.glossy-toggle.off .glossy-toggle-label {
+  justify-content: flex-start; padding-left: 7px;
+  color: #ffddce;
+  text-shadow: 0 0 6px rgba(255, 107, 69, 0.9);
+  background: radial-gradient(ellipse 70% 100% at left, rgba(255, 107, 69, 0.4), transparent 75%);
+}
+
+/* The sliding grip handle - dark brushed capsule with a 3x3 dot texture. */
+.glossy-toggle-handle {
+  position: absolute; top: 1px; left: 1px;
+  width: 32px; height: 20px; border-radius: 999px;
+  background: linear-gradient(180deg, #3c3c42 0%, #202024 55%, #101012 100%);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.6), inset 0 1px 1px rgba(255, 255, 255, 0.1), inset 0 -1px 1px rgba(0, 0, 0, 0.4);
+  display: flex; align-items: center; justify-content: center;
+  transition: left 0.25s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+.glossy-toggle.off .glossy-toggle-handle { left: 23px; }
+
+.glossy-toggle-dots {
+  display: grid; grid-template-columns: repeat(3, 1fr); gap: 2.5px;
+}
+.glossy-toggle-dots span {
+  width: 2px; height: 2px; border-radius: 50%;
+  background: rgba(255, 255, 255, 0.16);
+  box-shadow: 0 0.5px 0 rgba(0, 0, 0, 0.5);
+}
+
+/* Dropdown / "menu" selects: rounded glossy 3D pill button, same material
+   language as the toggle above - existing option text/values unchanged. */
+.glossy-3d-trial .field-select {
+  border-radius: 12px;
+  background: linear-gradient(180deg, #232328 0%, #16161a 100%);
+  border: 1px solid #000;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.07),
+    inset 0 -3px 5px rgba(0, 0, 0, 0.55),
+    0 2px 5px rgba(0, 0, 0, 0.35);
+  transition: box-shadow 0.2s ease, border-color 0.2s ease;
+}
+.glossy-3d-trial .field-select:hover {
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.09),
+    inset 0 -3px 5px rgba(0, 0, 0, 0.55),
+    0 0 10px rgba(74, 158, 255, 0.25);
+}
+.glossy-3d-trial .field-select:focus {
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.09),
+    0 0 0 2px var(--accent-dim),
+    0 0 12px rgba(74, 158, 255, 0.45);
+}
+
+/* Text inputs and numeric fields get the same glossy pill treatment for
+   a consistent "3D button" family within the trial scope. */
+.glossy-3d-trial .field-input {
+  border-radius: 12px;
+  background: linear-gradient(180deg, #1a1a1e 0%, #101013 100%);
+  border: 1px solid #000;
+  box-shadow:
+    inset 0 2px 4px rgba(0, 0, 0, 0.6),
+    inset 0 -1px 0 rgba(255, 255, 255, 0.04);
+}
+.glossy-3d-trial .field-input:focus {
+  box-shadow:
+    inset 0 2px 4px rgba(0, 0, 0, 0.6),
+    0 0 0 2px var(--accent-dim),
+    0 0 12px rgba(74, 158, 255, 0.4);
+}

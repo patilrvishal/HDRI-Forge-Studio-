@@ -1,5 +1,6 @@
 import React from 'react';
 import { useSceneStore } from '../../store/sceneStore';
+import { Toggle } from '../UI/Toggle';
 
 export const GradientBackgroundPanel: React.FC = () => {
   const gradientBackground = useSceneStore((s) => s.environment.gradientBackground);
@@ -28,17 +29,11 @@ export const GradientBackgroundPanel: React.FC = () => {
     <div style={{ padding: 10, display: 'flex', flexDirection: 'column', gap: 8 }}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
         <div className="section-header">Gradient background</div>
-        <button
-          onClick={() => patch({ enabled: !gradientBackground.enabled })}
-          style={{
-            fontSize: 9, padding: '2px 8px', borderRadius: 3, cursor: 'pointer',
-            background: gradientBackground.enabled ? 'var(--accent)' : 'transparent',
-            color: gradientBackground.enabled ? '#fff' : 'var(--text-dim)',
-            border: '1px solid var(--border)',
-          }}
-        >
-          {gradientBackground.enabled ? 'ON' : 'OFF'}
-        </button>
+        <Toggle
+          checked={gradientBackground.enabled}
+          onChange={(v) => patch({ enabled: v })}
+          variant="glossy"
+        />
       </div>
 
       {gradientBackground.enabled && (

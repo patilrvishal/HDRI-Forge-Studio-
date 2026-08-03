@@ -573,7 +573,7 @@ export const AppLayout: React.FC = () => {
             {/* Tab content */}
             <div className="panel-body" style={{ overflow: 'hidden', padding: 0, display: 'flex', flexDirection: 'column' }}>
               {rightTab === 'properties' && (
-                <div style={{ flex: 1, overflow: 'hidden' }}>
+                <div className="glossy-3d-trial" style={{ flex: 1, overflow: 'hidden' }}>
                   <ErrorBoundary>
                     <DynamicPropertiesPanel sceneRef={sceneRef} />
                   </ErrorBoundary>

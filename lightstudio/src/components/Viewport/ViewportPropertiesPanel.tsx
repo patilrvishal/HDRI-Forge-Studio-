@@ -1,5 +1,6 @@
 ﻿import React, { useState } from 'react';
 import { useSceneStore } from '../../store/sceneStore';
+import { Toggle } from '../UI/Toggle';
 
 export const ViewportPropertiesPanel: React.FC = () => {
   const [open, setOpen] = useState(false);
@@ -51,17 +52,11 @@ export const ViewportPropertiesPanel: React.FC = () => {
             <span style={{ fontSize: 10, color: 'var(--text-dim)', textTransform: 'uppercase', letterSpacing: 0.5 }}>
               Gradient background
             </span>
-            <button
-              onClick={() => patch({ enabled: !gradientBackground.enabled })}
-              style={{
-                fontSize: 9, padding: '2px 8px', borderRadius: 3, cursor: 'pointer',
-                background: gradientBackground.enabled ? 'var(--accent)' : 'transparent',
-                color: gradientBackground.enabled ? '#fff' : 'var(--text-dim)',
-                border: '1px solid var(--border)',
-              }}
-            >
-              {gradientBackground.enabled ? 'ON' : 'OFF'}
-            </button>
+            <Toggle
+              checked={gradientBackground.enabled}
+              onChange={(v) => patch({ enabled: v })}
+              variant="glossy"
+            />
           </div>
 
           {gradientBackground.enabled && (

@@ -3,6 +3,7 @@ import * as THREE from 'three';
 import { useLightsStore } from '../../store/lightsStore';
 import { useSceneStore } from '../../store/sceneStore';
 import { useHDRIAssetStore } from '../../store/hdriAssetStore';
+import { Toggle } from '../UI/Toggle';
 
 import {
   generateAnalyticalHDRI,
@@ -243,24 +244,17 @@ export const HDRIPreviewPanel: React.FC = () => {
         <div className="section-header">HDRI Preview</div>
 
         {/* Live preview toggle — off by default to keep the app responsive */}
-        <button
-          onClick={() => {
-            const next = !livePreview;
-            setLivePreview(next);
-            if (next) void renderPreview();
-          }}
-          style={{
-            padding: '6px 0',
-            fontSize: 11,
-            background: livePreview ? 'var(--accent)' : 'transparent',
-            color: livePreview ? '#fff' : 'var(--text-sec)',
-            border: '1px solid ' + (livePreview ? 'var(--accent)' : 'var(--border)'),
-            borderRadius: 4,
-            cursor: 'pointer',
-          }}
-        >
-          {livePreview ? 'Live Preview: ON' : 'Live Preview: OFF'}
-        </button>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '2px 0' }}>
+          <span style={{ fontSize: 11, color: 'var(--text-sec)' }}>Live Preview</span>
+          <Toggle
+            checked={livePreview}
+            onChange={(next) => {
+              setLivePreview(next);
+              if (next) void renderPreview();
+            }}
+            variant="glossy"
+          />
+        </div>
         {!livePreview && (
           <div style={{ fontSize: 9, color: 'var(--text-dim)', lineHeight: 1.4, marginTop: -4 }}>
             Auto-refresh is off. Use Refresh Preview for a one-off render.

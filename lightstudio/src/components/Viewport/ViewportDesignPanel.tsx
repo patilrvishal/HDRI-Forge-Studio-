@@ -2,6 +2,7 @@ import React, { useState, useCallback } from 'react';
 import { useSceneStore } from '../../store/sceneStore';
 import { useLightsStore } from '../../store/lightsStore';
 import { sphericalToCartesian } from '../../utils/math';
+import { Toggle } from '../UI/Toggle';
 
 // ------ Section toggle chevron ------------------------------------------------------------------------------------------------------------------------------
 const Chevron: React.FC<{ open: boolean }> = ({ open }) => (
@@ -404,16 +405,8 @@ export const ViewportDesignPanel: React.FC = () => {
       {/* ------ Grid & Ground ------------------------------------------------------------------------------------------------------------ */}
       <Section title="Grid & Ground">
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '2px 0' }}>
-          <button
-            onClick={toggleGrid}
-            style={{
-              fontSize: 9, padding: '3px 8px', borderRadius: 4, border: '1px solid var(--border-light)',
-              background: showGrid ? 'var(--accent-bg)' : 'transparent', color: showGrid ? 'var(--accent)' : 'var(--text-dim)',
-              cursor: 'pointer', fontFamily: 'var(--font-ui)',
-            }}
-          >
-            {showGrid ? 'Grid ON' : 'Grid OFF'}
-          </button>
+          <span style={{ fontSize: 10, color: 'var(--text-sec)' }}>Grid</span>
+          <Toggle checked={showGrid} onChange={toggleGrid} variant="glossy" />
           <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginLeft: 'auto' }}>
             <ColorDot color={renderSettings.ground.color} onChange={(c) => setRenderSettings({ ground: { ...renderSettings.ground, color: c } })} size={16} />
           </div>
@@ -426,17 +419,11 @@ export const ViewportDesignPanel: React.FC = () => {
         {/* Show / hide the floor plane entirely */}
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', margin: '6px 0' }}>
           <span style={{ fontSize: 10, color: 'var(--text-sec)' }}>Floor Plane</span>
-          <button
-            onClick={() => setRenderSettings({ ground: { ...renderSettings.ground, visible: !renderSettings.ground.visible } })}
-            style={{
-              fontSize: 9, padding: '2px 8px', borderRadius: 3, cursor: 'pointer',
-              background: renderSettings.ground.visible ? 'var(--accent)' : 'transparent',
-              color: renderSettings.ground.visible ? '#fff' : 'var(--text-dim)',
-              border: '1px solid var(--border)',
-            }}
-          >
-            {renderSettings.ground.visible ? 'ON' : 'OFF'}
-          </button>
+          <Toggle
+            checked={renderSettings.ground.visible}
+            onChange={(v) => setRenderSettings({ ground: { ...renderSettings.ground, visible: v } })}
+            variant="glossy"
+          />
         </div>
 
         {renderSettings.ground.visible && (
@@ -461,17 +448,11 @@ export const ViewportDesignPanel: React.FC = () => {
             {/* Bake into HDRI or keep it viewport-only */}
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 6 }}>
               <span style={{ fontSize: 10, color: 'var(--text-sec)' }}>Include in HDRI</span>
-              <button
-                onClick={() => setRenderSettings({ ground: { ...renderSettings.ground, includeInHDRI: !renderSettings.ground.includeInHDRI } })}
-                style={{
-                  fontSize: 9, padding: '2px 8px', borderRadius: 3, cursor: 'pointer',
-                  background: renderSettings.ground.includeInHDRI ? 'var(--accent)' : 'transparent',
-                  color: renderSettings.ground.includeInHDRI ? '#fff' : 'var(--text-dim)',
-                  border: '1px solid var(--border)',
-                }}
-              >
-                {renderSettings.ground.includeInHDRI ? 'ON' : 'OFF'}
-              </button>
+              <Toggle
+                checked={renderSettings.ground.includeInHDRI}
+                onChange={(v) => setRenderSettings({ ground: { ...renderSettings.ground, includeInHDRI: v } })}
+                variant="glossy"
+              />
             </div>
             <div style={{ fontSize: 8, color: 'var(--text-dim)', lineHeight: 1.3, marginTop: 2 }}>
               Off = viewport only. On = baked into the exported HDRI.

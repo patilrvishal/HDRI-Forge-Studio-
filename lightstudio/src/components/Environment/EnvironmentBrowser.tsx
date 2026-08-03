@@ -195,7 +195,7 @@ const EnvironmentBrowser: React.FC<EnvironmentBrowserProps> = ({ onClose, onPres
                 onChange={(e) => handleBackgroundChange(e.target.value)}
                 style={{ width: 32, height: 22, border: '1px solid var(--border)', borderRadius: 3, cursor: 'pointer' }}
               />
-              <Toggle label="Show BG" checked={environment.showBackground} onChange={toggleBackground} />
+              <Toggle variant="glossy" label="Show BG" checked={environment.showBackground} onChange={toggleBackground} />
             </div>
             <button
               className="btn-sm"

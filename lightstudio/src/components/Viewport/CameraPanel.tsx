@@ -1,6 +1,7 @@
 ﻿import React, { useCallback } from 'react';
 import { useCameraStore, type SceneCamera } from '../../store/cameraStore';
 import { useLightsStore } from '../../store/lightsStore';
+import { Toggle } from '../UI/Toggle';
 
 interface TargetOption {
   id: string;
@@ -234,17 +235,11 @@ export const CameraPanel: React.FC = () => {
 
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 6 }}>
             <span style={{ fontSize: 10, color: 'var(--text-dim)' }}>Depth of field</span>
-            <button
-              onClick={() => patch({ dofEnabled: !active.dofEnabled })}
-              style={{
-                fontSize: 9, padding: '2px 8px', borderRadius: 3, cursor: 'pointer',
-                background: active.dofEnabled ? 'var(--accent)' : 'transparent',
-                color: active.dofEnabled ? '#fff' : 'var(--text-dim)',
-                border: '1px solid var(--border)',
-              }}
-            >
-              {active.dofEnabled ? 'ON' : 'OFF'}
-            </button>
+            <Toggle
+              checked={active.dofEnabled}
+              onChange={(v) => patch({ dofEnabled: v })}
+              variant="glossy"
+            />
           </div>
           {active.dofEnabled && (
             <>

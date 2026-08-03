@@ -143,6 +143,7 @@ const HDRIAssetCard: React.FC<{
             label="Active"
             checked={asset.active}
             onChange={() => onUpdate(asset.id, { active: !asset.active })}
+            variant="glossy"
           />
           {/* File info */}
           <div style={{ fontSize: 9, color: 'var(--text-dim)', marginTop: 2 }}>
