@@ -283,6 +283,56 @@ const MENU_DEFINITIONS = (
 
 const MENU_KEYS = ['Project', 'Edit', 'Create', 'Canvas', 'Window', 'Help'];
 
+const THEME_OPTIONS: Array<{ value: string; label: string }> = [
+  { value: 'purple', label: 'Purple' },
+  { value: 'yellow-orange', label: 'Yellow-Orange' },
+  { value: 'white-orange', label: 'White-Orange' },
+  { value: 'bluish-black', label: 'Bluish-Black' },
+];
+
+const THEME_STORAGE_KEY = 'lightforge-accent-theme';
+
+/** Accent-theme dropdown for the tab-bar highlight + Properties card frame.
+ *  Applies a data-theme attribute on <body> that the CSS theme presets key
+ *  off of, and persists the choice across reloads. */
+function ThemeSwitcher() {
+  const [theme, setTheme] = useState<string>(() => {
+    try {
+      return localStorage.getItem(THEME_STORAGE_KEY) || 'purple';
+    } catch {
+      return 'purple';
+    }
+  });
+
+  useEffect(() => {
+    if (theme === 'purple') {
+      delete document.body.dataset.theme;
+    } else {
+      document.body.dataset.theme = theme;
+    }
+    try {
+      localStorage.setItem(THEME_STORAGE_KEY, theme);
+    } catch {
+      // ignore storage errors (private browsing, etc.)
+    }
+  }, [theme]);
+
+  return (
+    <select
+      className="theme-switcher"
+      value={theme}
+      onChange={(e) => setTheme(e.target.value)}
+      title="Accent theme"
+    >
+      {THEME_OPTIONS.map((opt) => (
+        <option key={opt.value} value={opt.value}>
+          {opt.label}
+        </option>
+      ))}
+    </select>
+  );
+}
+
 export const TopMenubar: React.FC<TopMenubarProps> = ({ sceneManagerRef, onExportImage, onFinalRender }) => {
   const openMenu = useUIStore((s) => s.openMenu);
   const setOpenMenu = useUIStore((s) => s.setOpenMenu);
@@ -472,6 +522,10 @@ export const TopMenubar: React.FC<TopMenubarProps> = ({ sceneManagerRef, onExpor
           )}
         </div>
       ))}
+
+      <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', paddingRight: 8 }}>
+        <ThemeSwitcher />
+      </div>
     </div>
   );
 };

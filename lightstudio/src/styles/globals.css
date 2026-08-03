@@ -250,44 +250,102 @@ select {
 }
 
 /* ═══════════════════════════════════════════════════════════════════════
-   Properties tab bar - scoped purple accent + framed card
-   Deliberately isolated to this one tab group; every other accent in the
-   app stays on --accent (blue). Do not use --accent-purple elsewhere.
+   Tab-bar accent theme - switchable via the theme dropdown (top-right).
+   Deliberately isolated to the tab-bar highlight + Properties card frame;
+   every other accent in the app stays on --accent (blue). Do not use
+   --theme-accent elsewhere. Default palette = Purple.
    ═══════════════════════════════════════════════════════════════════════ */
 :root {
-  --accent-purple: #a78bfa;
-  --accent-purple-bright: #c084fc;
-  --accent-purple-bg: rgba(167, 139, 250, 0.14);
-  --accent-purple-glow: rgba(167, 139, 250, 0.45);
+  --theme-accent: #a78bfa;
+  --theme-accent-bright: #c084fc;
+  --theme-accent-bg: rgba(167, 139, 250, 0.14);
+  --theme-accent-glow: rgba(167, 139, 250, 0.45);
+  --theme-accent-glow-strong: rgba(167, 139, 250, 0.16);
+}
+
+/* Yellow-Orange */
+body[data-theme="yellow-orange"] {
+  --theme-accent: #f5a623;
+  --theme-accent-bright: #ffc24d;
+  --theme-accent-bg: rgba(245, 166, 35, 0.14);
+  --theme-accent-glow: rgba(245, 166, 35, 0.45);
+  --theme-accent-glow-strong: rgba(245, 166, 35, 0.18);
+}
+
+/* White-Orange */
+body[data-theme="white-orange"] {
+  --theme-accent: #ffcf9e;
+  --theme-accent-bright: #fff3e0;
+  --theme-accent-bg: rgba(255, 183, 94, 0.14);
+  --theme-accent-glow: rgba(255, 183, 94, 0.5);
+  --theme-accent-glow-strong: rgba(255, 183, 94, 0.2);
+}
+
+/* Bluish-Black */
+body[data-theme="bluish-black"] {
+  --theme-accent: #3b5bdb;
+  --theme-accent-bright: #6c8cff;
+  --theme-accent-bg: rgba(59, 91, 219, 0.16);
+  --theme-accent-glow: rgba(59, 91, 219, 0.5);
+  --theme-accent-glow-strong: rgba(59, 91, 219, 0.2);
 }
 
 .tab-icon { color: var(--text-dim); transition: color 0.15s ease, filter 0.15s ease; }
 
 .tab-bar-purple .tab-item.active {
-  color: var(--accent-purple-bright);
-  border-bottom-color: var(--accent-purple-bright);
-  background: var(--accent-purple-bg);
+  color: var(--theme-accent-bright);
+  border-bottom-color: var(--theme-accent-bright);
+  background: var(--theme-accent-bg);
   box-shadow:
     inset 0 2px 0 rgba(255, 255, 255, 0.1),
     inset 1px 0 0 rgba(0, 0, 0, 0.5),
     inset -1px 0 0 rgba(0, 0, 0, 0.5),
-    0 2px 10px var(--accent-purple-glow);
+    0 2px 10px var(--theme-accent-glow);
+  transition: color 0.25s ease, background 0.25s ease, box-shadow 0.25s ease;
 }
 .tab-bar-purple .tab-item.active .tab-icon {
-  color: var(--accent-purple-bright);
-  filter: drop-shadow(0 0 3px var(--accent-purple-glow));
+  color: var(--theme-accent-bright);
+  filter: drop-shadow(0 0 3px var(--theme-accent-glow));
 }
 
-/* Framed card: rounded double-border with a soft purple-tinted outer glow,
+/* Framed card: rounded double-border with a soft theme-tinted outer glow,
    echoing the reference's embossed panel frame. */
 .properties-card-frame {
   border-radius: 10px;
-  box-shadow: 0 0 0 1px rgba(167, 139, 250, 0.16), 0 10px 28px rgba(0, 0, 0, 0.4);
+  box-shadow: 0 0 0 1px var(--theme-accent-glow-strong), 0 10px 28px rgba(0, 0, 0, 0.4);
+  transition: box-shadow 0.25s ease;
 }
 .properties-card-frame > div:first-child {
   border-top-left-radius: 9px;
   border-top-right-radius: 9px;
 }
+
+/* ── Theme switcher dropdown (top-right corner) ─────────────────────── */
+.theme-switcher {
+  height: 22px;
+  padding: 0 22px 0 8px;
+  background: var(--bg-header, var(--bg-card));
+  border: 1px solid var(--border-light);
+  border-radius: 4px;
+  color: var(--text-sec);
+  font-size: 10px;
+  cursor: pointer;
+  appearance: none;
+  -webkit-appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='5' viewBox='0 0 8 5'%3E%3Cpath fill='%239a9aa4' d='M4 5L0 0h8z'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 8px center;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+.theme-switcher:hover {
+  border-color: var(--theme-accent);
+  box-shadow: 0 0 6px var(--theme-accent-glow-strong);
+}
+.theme-switcher:focus {
+  border-color: var(--theme-accent-bright);
+  box-shadow: 0 0 0 2px var(--theme-accent-glow-strong);
+}
+.theme-switcher option { background: var(--bg-card); color: var(--text); }
 
 .drop-overlay {
   position: absolute; inset: 0; background: rgba(74, 158, 255, 0.06);
