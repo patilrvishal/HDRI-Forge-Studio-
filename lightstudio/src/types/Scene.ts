@@ -164,12 +164,12 @@ export const DEFAULT_SCENE_STATE: SceneState = {
     intensity: 1.0,
     showBackground: false,
     gradientBackground: {
-      enabled: false,
-      type: 'linear',
+      enabled: true,
+      type: 'radial',
       angle: 90,
       stops: [
-        { color: '#08080f', position: 0, opacity: 1 },
-        { color: '#1e1e2b', position: 1, opacity: 1 },
+        { color: '#ededed', position: 0, opacity: 1 },
+        { color: '#9c9c9c', position: 1, opacity: 1 },
       ],
     },
     backplate: null,

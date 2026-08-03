@@ -167,6 +167,14 @@ export const Viewport: React.FC<ViewportProps> = ({ sceneManagerRef, onScreensho
       envLoader.setEnvironmentTexture(sceneManager.scene, envTexture, useSceneStore.getState().environment.intensity);
     }
 
+    // Apply the default gradient background on init. The reactive effect that
+    // normally handles this only fires when gradientBackground *changes*, so a
+    // default-enabled gradient would otherwise never be applied on first load.
+    const gb0 = useSceneStore.getState().environment.gradientBackground;
+    if (gb0?.enabled) {
+      sceneManager.setGradientBackground(gb0);
+    }
+
     // Notify parent that the render pipeline is ready (for export)
     onReady?.(renderPipeline, materialManager);
 
@@ -419,9 +427,12 @@ export const Viewport: React.FC<ViewportProps> = ({ sceneManagerRef, onScreensho
     // Skip custom HDRI â€” handled by the separate effect below
     if (environment.presetId === '__custom__') return;
 
-    // Built-in presets: clear any custom equirect, no 360Â° background
+    // Built-in presets: clear any custom equirect, no 360Â° background.
+    // Skip the background clear when a gradient background owns the scene bg.
     el.clearEquirectTexture();
-    el.setBackgroundFromEnv(sm.scene, false);
+    if (!environment.gradientBackground?.enabled) {
+      el.setBackgroundFromEnv(sm.scene, false);
+    }
 
     // Built-in presets bake rotation into the generated scene, so the
     // native scene rotation must be reset to avoid double-rotating.
@@ -467,8 +478,10 @@ export const Viewport: React.FC<ViewportProps> = ({ sceneManagerRef, onScreensho
           console.error('[LightForge] Custom HDRI load failed:', e);
         });
     } else if (environment.presetId !== '__custom__') {
-      // Not custom â€” clear any HDRI backplate
-      el.setBackgroundFromEnv(sm.scene, false);
+      // Not custom â€” clear any HDRI backplate, unless a gradient owns the bg
+      if (!environment.gradientBackground?.enabled) {
+        el.setBackgroundFromEnv(sm.scene, false);
+      }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
