@@ -76,7 +76,8 @@ interface ErikMeshInfo {
 
 interface ErikMaterialEntry {
   name: string;
-  atlas: ErikAtlasEntry;
+  /** Names of the texture layers this material samples from, not a UV transform. */
+  atlas: string[];
 }
 
 interface ErikMetadata {
@@ -329,14 +330,15 @@ export class ErikLoader {
       sharedMaterial.lightMapIntensity = 1;
     }
 
-    const materialsByName = new Map(meta.data.erik_materials.map((m) => [m.name, m]));
-
     const group = new THREE.Group();
     group.name = 'erik_model';
+    // Source geometry is Z-up (per-mesh bounding boxes show Z spanning the
+    // car's height, X spanning its length) - three.js is Y-up.
+    group.rotation.x = -Math.PI / 2;
 
     for (const meshInfo of meta.data.binary_info) {
       if (!meshInfo.got_data) continue;
-      const mesh = this._buildMesh(meshInfo, geomBuf, sharedMaterial.clone(), materialsByName);
+      const mesh = this._buildMesh(meshInfo, geomBuf, sharedMaterial.clone());
       if (mesh) group.add(mesh);
     }
 
@@ -362,7 +364,6 @@ export class ErikLoader {
     info: ErikMeshInfo,
     geomBuf: Uint8Array,
     material: THREE.MeshStandardMaterial,
-    materialsByName: Map<string, ErikMaterialEntry>,
   ): THREE.Mesh | null {
     const n = info.vertex_count;
     if (n === 0) return null;
@@ -412,19 +413,11 @@ export class ErikLoader {
       geometry.setAttribute('uv2', new THREE.BufferAttribute(uv2, 2));
     }
 
-    // --- Remap uv1 into shared-atlas space using this mesh's material entry,
-    //     then assign as the primary UV set the albedo/normal/roughness maps read. ---
-    const matEntry = materialsByName.get(info.mesh_name.replace(/^(solid_|transparent_base_?)/, ''));
+    // uv1 is already authored in the shared atlas's texture space - each
+    // material's "atlas" field is just the list of texture layers it reads
+    // from (e.g. ["light_map","albedo_base",...]), not a per-mesh UV
+    // transform, so uv1 is used directly as the primary UV set.
     if (uv1) {
-      if (matEntry) {
-        const { x, y, scale, repeatX, repeatY } = matEntry.atlas;
-        for (let v = 0; v < n; v++) {
-          const u = uv1[v * 2 + 0] * scale * repeatX;
-          const vv = uv1[v * 2 + 1] * scale * repeatY;
-          uv1[v * 2 + 0] = x + u;
-          uv1[v * 2 + 1] = y + vv;
-        }
-      }
       geometry.setAttribute('uv', new THREE.BufferAttribute(uv1, 2));
     }
 
