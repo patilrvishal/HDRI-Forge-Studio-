@@ -9,6 +9,7 @@ import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js'
 import { SMAAPass } from 'three/addons/postprocessing/SMAAPass.js';
 import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
 import { SSAOPass } from 'three/addons/postprocessing/SSAOPass.js';
+import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { FXAAShader } from 'three/addons/shaders/FXAAShader.js';
 import type { GroundSettings } from '../types/Scene';
 
@@ -689,6 +690,7 @@ export class RenderPipeline {
   private _ssaoPass: SSAOPass | null = null;
   private _vignettePass: ShaderPass | null = null;
   private _colorGradingPass: ShaderPass | null = null;
+  private _outputPass: OutputPass | null = null;
   private _config: PipelineConfig;
   private _needsRebuild = false;
 
@@ -772,6 +774,14 @@ export class RenderPipeline {
       this._colorGradingPass = new ShaderPass(cgMat);
       this._composer.addPass(this._colorGradingPass);
     }
+
+    // OutputPass applies renderer.toneMapping + toneMappingExposure and the
+    // final color space conversion. Without it, EffectComposer's intermediate
+    // render targets stay linear and every pass after RenderPass silently
+    // ignores exposure/tone mapping - confirmed by direct renderer.render()
+    // responding to toneMappingExposure while composer.render() did not.
+    this._outputPass = new OutputPass();
+    this._composer.addPass(this._outputPass);
 
     // Apply tone mapping & exposure to the renderer
     this._applyToneMapping(this._config.tonemapping);
@@ -958,6 +968,7 @@ export class RenderPipeline {
     this._fxaaPass = null;
     this._vignettePass = null;
     this._colorGradingPass = null;
+    this._outputPass = null;
   }
 
   // ------ Private helpers ---------------------------------------------------------------------------------------------------------------------------------------------------------------------
