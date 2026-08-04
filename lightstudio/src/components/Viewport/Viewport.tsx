@@ -5,6 +5,7 @@ import { useLightsStore } from '../../store/lightsStore';
 import { useAnimationStore } from '../../store/animationStore';
 import { ThreeSceneProvider } from '../../hooks/useThreeScene';
 import { SceneManager, RenderPipeline, LightManager, ModelLoader } from '../../three/engine';
+import { ErikLoader } from '../../three/ErikLoader';
 import { animationEngine, AnimationEngine } from '../../three/AnimationEngine';
 import { EnvironmentLoader } from '../../three/EnvironmentLoader';
 import { getHDRIPresetById } from '../../types/Environment';
@@ -37,6 +38,7 @@ export const Viewport: React.FC<ViewportProps> = ({ sceneManagerRef, onScreensho
   const renderPipelineRef = useRef<RenderPipeline | null>(null);
   const lightManagerRef = useRef<LightManager | null>(null);
   const modelLoaderRef = useRef<ModelLoader | null>(null);
+  const erikLoaderRef = useRef<ErikLoader | null>(null);
   const envLoaderRef = useRef<EnvironmentLoader | null>(null);
   const materialManagerRef = useRef<MaterialManager | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -91,6 +93,9 @@ export const Viewport: React.FC<ViewportProps> = ({ sceneManagerRef, onScreensho
     const modelLoader = new ModelLoader(sceneManager.scene);
     modelLoaderRef.current = modelLoader;
 
+    const erikLoader = new ErikLoader(sceneManager.scene, sceneManager.renderer);
+    erikLoaderRef.current = erikLoader;
+
     // Material Manager
     const materialManager = new MaterialManager();
     materialManagerRef.current = materialManager;
@@ -99,59 +104,67 @@ export const Viewport: React.FC<ViewportProps> = ({ sceneManagerRef, onScreensho
     const envLoader = new EnvironmentLoader();
     envLoaderRef.current = envLoader;
 
+    // Shared onLoaded handler for both the GLB and .erik import paths - both
+    // produce a THREE.Group of standard materials, so the rest of the app
+    // (material editor, outliner, etc.) doesn't need to know which loader ran.
+    const handleModelLoaded = (name: string, getModel: () => THREE.Group | null) => {
+      setIsLoading(false);
+      setLoadProgress(100);
+      setModel('', name);
+
+      setTimeout(() => {
+        const model = getModel();
+        if (model && materialManager) {
+          const savedMaterials = useMaterialEditorStore.getState().materials;
+          const hasSavedStates = savedMaterials.length > 0;
+
+          const matStates = materialManager.extractMaterials(model);
+
+          if (hasSavedStates) {
+            const merged = matStates.map((extracted) => {
+              const saved = savedMaterials.find((s) => s.name === extracted.name);
+              if (saved) {
+                return { ...extracted, ...saved, id: extracted.id };
+              }
+              return extracted;
+            });
+            useMaterialEditorStore.getState().setMaterials(merged);
+
+            requestAnimationFrame(() => {
+              materialManager.rebuildMaterialMap(sceneManager.scene, merged);
+              for (const state of merged) {
+                materialManager.applyMaterialState(state, sceneManager.scene);
+              }
+            });
+          } else {
+            useMaterialEditorStore.getState().setMaterials(matStates);
+            requestAnimationFrame(() => {
+              materialManager.rebuildMaterialMap(sceneManager.scene, matStates);
+            });
+          }
+        }
+      }, 100);
+
+      setTimeout(() => setLoadProgress(0), 1000);
+    };
+
+    const handleModelError = (err: string) => {
+      setIsLoading(false);
+      setLoadProgress(0);
+      setLoadError(err);
+      setTimeout(() => setLoadError(null), 4000);
+    };
+
     modelLoader.setCallbacks({
       onProgress: (p) => setLoadProgress(p),
-      onLoaded: (name) => {
-        setIsLoading(false);
-        setLoadProgress(100);
-        setModel('', name);
+      onLoaded: (name) => handleModelLoaded(name, () => modelLoader.getCurrentModel?.() ?? null),
+      onError: handleModelError,
+    });
 
-        // Extract materials from the loaded model
-        setTimeout(() => {
-          const model = modelLoader.getCurrentModel?.();
-          if (model && materialManager) {
-            // Check if we have saved material states (from a scene file restore)
-            const savedMaterials = useMaterialEditorStore.getState().materials;
-            const hasSavedStates = savedMaterials.length > 0;
-
-            const matStates = materialManager.extractMaterials(model);
-
-            if (hasSavedStates) {
-              // Merge saved edits over the freshly extracted defaults
-              const merged = matStates.map((extracted) => {
-                const saved = savedMaterials.find((s) => s.name === extracted.name);
-                if (saved) {
-                  // Keep the extracted ID (it's linked to the materialMap), but use saved values
-                  return { ...extracted, ...saved, id: extracted.id };
-                }
-                return extracted;
-              });
-              useMaterialEditorStore.getState().setMaterials(merged);
-
-              requestAnimationFrame(() => {
-                materialManager.rebuildMaterialMap(sceneManager.scene, merged);
-                // Apply saved property overrides to Three.js materials
-                for (const state of merged) {
-                  materialManager.applyMaterialState(state, sceneManager.scene);
-                }
-              });
-            } else {
-              useMaterialEditorStore.getState().setMaterials(matStates);
-              requestAnimationFrame(() => {
-                materialManager.rebuildMaterialMap(sceneManager.scene, matStates);
-              });
-            }
-          }
-        }, 100);
-
-        setTimeout(() => setLoadProgress(0), 1000);
-      },
-      onError: (err) => {
-        setIsLoading(false);
-        setLoadProgress(0);
-        setLoadError(err);
-        setTimeout(() => setLoadError(null), 4000);
-      },
+    erikLoader.setCallbacks({
+      onProgress: (p) => setLoadProgress(p),
+      onLoaded: (name) => handleModelLoaded(name, () => erikLoader.getCurrentModel()),
+      onError: handleModelError,
     });
 
     sceneManager.setGrid(true);
@@ -325,6 +338,7 @@ export const Viewport: React.FC<ViewportProps> = ({ sceneManagerRef, onScreensho
       sceneManager.stopRenderLoop();
       renderPipeline.dispose();
       modelLoader.dispose();
+      erikLoader.dispose();
       lightManager.dispose();
       envLoader.dispose();
       materialManager.dispose();
@@ -333,6 +347,7 @@ export const Viewport: React.FC<ViewportProps> = ({ sceneManagerRef, onScreensho
       renderPipelineRef.current = null;
       lightManagerRef.current = null;
       modelLoaderRef.current = null;
+      erikLoaderRef.current = null;
       envLoaderRef.current = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -980,24 +995,27 @@ export const Viewport: React.FC<ViewportProps> = ({ sceneManagerRef, onScreensho
 
       const file = files[0];
       const ext = file.name.toLowerCase().split('.').pop();
-      if (ext === 'glb' || ext === 'gltf') {
+      if (ext === 'glb' || ext === 'gltf' || ext === 'erik') {
         loadModelFile(file);
       }
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [modelLoaderRef]
+    [modelLoaderRef, erikLoaderRef]
   );
 
-  // Load model from file
+  // Load model from file - routes to the .erik importer or the standard
+  // GLTFLoader-based one depending on extension.
   const loadModelFile = useCallback(
     (file: File) => {
-      if (!modelLoaderRef.current) return;
+      const isErik = /\.erik$/i.test(file.name);
+      const loader = isErik ? erikLoaderRef.current : modelLoaderRef.current;
+      if (!loader) return;
       setIsLoading(true);
       setLoadError(null);
       setLoadProgress(0);
-      modelLoaderRef.current.loadFromFile(file);
+      loader.loadFromFile(file);
     },
-    [modelLoaderRef]
+    [modelLoaderRef, erikLoaderRef]
   );
 
   // File picker
@@ -1066,7 +1084,7 @@ export const Viewport: React.FC<ViewportProps> = ({ sceneManagerRef, onScreensho
         >
           {isDragging && (
             <div className="drop-overlay">
-              <span>Drop .glb file to load model</span>
+              <span>Drop .glb or .erik file to load model</span>
             </div>
           )}
 
@@ -1112,7 +1130,7 @@ export const Viewport: React.FC<ViewportProps> = ({ sceneManagerRef, onScreensho
           <input
             ref={fileInputRef}
             type="file"
-            accept=".glb,.gltf"
+            accept=".glb,.gltf,.erik"
             style={{ display: 'none' }}
             onChange={handleFileInput}
           />
