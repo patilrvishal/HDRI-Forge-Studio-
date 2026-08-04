@@ -395,6 +395,20 @@ export const Viewport: React.FC<ViewportProps> = ({ sceneManagerRef, onScreensho
     // Gradient background takes priority over the flat colour / limbo default.
     if (environment.gradientBackground?.enabled) {
       sm.setGradientBackground(environment.gradientBackground);
+
+      // A flat gradient backdrop has no equirect data, so PBR materials
+      // (metals especially, which are lit almost entirely by IBL reflections)
+      // previously got zero environment lighting and rendered as black
+      // silhouettes even though the backdrop itself looked correctly exposed.
+      // Bake the same gradient texture through PMREM so it also lights the
+      // scene, matching what the HDRI Preview's analytical export already does.
+      if (el && sm.scene.background && 'mapping' in sm.scene.background) {
+        const gradTex = sm.scene.background as THREE.Texture;
+        gradTex.mapping = THREE.EquirectangularReflectionMapping;
+        const envMap = sm.pmremGenerator.fromEquirectangular(gradTex).texture;
+        gradTex.mapping = THREE.UVMapping;
+        el.setEnvironmentTexture(sm.scene, envMap, environment.intensity);
+      }
       return;
     }
 
@@ -405,7 +419,7 @@ export const Viewport: React.FC<ViewportProps> = ({ sceneManagerRef, onScreensho
     }
 
     sm.setBackground(environment.background, environment.showBackground);
-  }, [environment.background, environment.showBackground, environment.presetId, environment.gradientBackground, sceneManagerRef, envLoaderRef, backplate]);
+  }, [environment.background, environment.showBackground, environment.presetId, environment.gradientBackground, environment.intensity, sceneManagerRef, envLoaderRef, backplate]);
 
   // Sync ground settings (reflections, fade, color, PBR)
   useEffect(() => {
