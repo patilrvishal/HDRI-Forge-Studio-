@@ -90,7 +90,11 @@ export const HDRIPreviewPanel: React.FC = () => {
   const hdriAssets = useHDRIAssetStore((s) => s.assets);
 
   const [livePreview, setLivePreview] = useState(false);
-  const [exposure, setExposure] = useState(1.0);
+  // Single source of truth = renderSettings.exposure (same value driving the
+  // live viewport and Render Settings > Exposure), so this panel always
+  // reflects the real current exposure and stays in sync either direction.
+  const exposure = useSceneStore((s) => s.renderSettings.exposure);
+  const setSceneExposure = useSceneStore((s) => s.setExposure);
   const [resIndex, setResIndex] = useState(2); // default 2K
   const [format, setFormat] = useState<'hdr' | 'exr'>('hdr');
   const [rendering, setRendering] = useState(false);
@@ -261,7 +265,10 @@ export const HDRIPreviewPanel: React.FC = () => {
           </div>
         )}
 
-        {/* Exposure - display only */}
+        {/* Exposure - live-updates both this preview swatch and the actual
+            viewport render (same value as Render Settings > Exposure).
+            Never touches the exported HDRI/EXR file, which always stays
+            fully linear/unbounded regardless of this setting. */}
         <div>
           <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, marginBottom: 3 }}>
             <span style={{ color: 'var(--text-sec)' }}>View Exposure</span>
@@ -275,11 +282,11 @@ export const HDRIPreviewPanel: React.FC = () => {
             max={5}
             step={0.01}
             value={exposure}
-            onChange={(e) => setExposure(parseFloat(e.target.value))}
+            onChange={(e) => setSceneExposure(parseFloat(e.target.value))}
             style={{ width: '100%' }}
           />
           <div style={{ fontSize: 9, color: 'var(--text-dim)', marginTop: 2 }}>
-            Display only - not baked into the file
+            Also updates the live viewport - the exported file always stays linear
           </div>
         </div>
 
