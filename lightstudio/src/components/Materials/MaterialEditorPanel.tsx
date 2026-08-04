@@ -3,7 +3,7 @@ import * as THREE from 'three';
 import { useMaterialEditorStore } from '../../store/materialEditorStore';
 import { useUIStore } from '../../store/uiStore';
 import type { PBRMaterialState, TextureSlotKey } from '../../types/MaterialEditor';
-import { TEXTURE_SLOT_LABELS, UV2_TEXTURE_SLOTS } from '../../types/MaterialEditor';
+import { TEXTURE_SLOT_LABELS } from '../../types/MaterialEditor';
 import type { MaterialManager } from '../../three/MaterialManager';
 
 interface MaterialEditorPanelProps {
@@ -150,24 +150,29 @@ const MaterialEditorPanel: React.FC<MaterialEditorPanelProps> = ({ materialManag
 
   const selected = materials.find((m) => m.id === selectedId) ?? null;
 
-  // aoMap/lightMap sample the mesh's SECOND uv channel (uv2) in three.js - if
-  // none of the meshes using this material have one, the map silently has no
-  // effect, so surface it as a warning instead of a mysteriously-inert slot.
-  const missingUV2 = useMemo(() => {
-    if (!selected) return false;
+  // Three.js textures read from one of up to 4 UV sets via Texture.channel
+  // (0='uv', 1='uv1', 2='uv2', 3='uv3'). Find which of those attributes the
+  // mesh(es) using this material actually have, so the UI can offer a
+  // channel picker only when there's a real choice, and warn when a slot is
+  // pointed at a channel the mesh doesn't have (three.js silently no-ops it).
+  const UV_ATTR_NAMES = ['uv', 'uv1', 'uv2', 'uv3'] as const;
+  const availableUVChannels = useMemo(() => {
+    if (!selected) return [0];
     const scene = sceneRef.current;
-    if (!scene) return false;
+    if (!scene) return [0];
     const meshNameSet = new Set(selected.meshNames);
     let found = false;
-    let hasUV2 = false;
+    const channels: number[] = [];
     scene.traverse((obj) => {
       if (found) return;
       if (obj instanceof THREE.Mesh && meshNameSet.has(obj.name)) {
         found = true;
-        hasUV2 = !!obj.geometry.attributes.uv2;
+        UV_ATTR_NAMES.forEach((attrName, idx) => {
+          if (obj.geometry.attributes[attrName]) channels.push(idx);
+        });
       }
     });
-    return found && !hasUV2;
+    return channels.length > 0 ? channels : [0];
   }, [selected, sceneRef]);
 
   // Focus search input when opened
@@ -267,6 +272,16 @@ const MaterialEditorPanel: React.FC<MaterialEditorPanelProps> = ({ materialManag
       removeTextureSlot(selectedId, slotKey);
     },
     [selectedId, removeTextureSlot],
+  );
+
+  const updateTextureUVChannel = useMaterialEditorStore((s) => s.updateTextureUVChannel);
+  const handleUVChannelChange = useCallback(
+    (slotKey: TextureSlotKey, channel: number) => {
+      if (!selectedId) return;
+      updateTextureUVChannel(selectedId, slotKey, channel);
+      materialManagerRef.current?.setTextureUVChannel(selectedId, slotKey, channel);
+    },
+    [selectedId, updateTextureUVChannel, materialManagerRef],
   );
 
   const toggleSection = useCallback((section: string) => {
@@ -635,7 +650,7 @@ const MaterialEditorPanel: React.FC<MaterialEditorPanelProps> = ({ materialManag
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 3, marginTop: 4 }}>
                       {TEXTURE_SLOTS.map((slotKey) => {
                         const slot = selected[slotKey];
-                        const showUV2Warning = slot.enabled && UV2_TEXTURE_SLOTS.has(slotKey) && missingUV2;
+                        const showUVWarning = slot.enabled && !availableUVChannels.includes(slot.uvChannel);
                         return (
                           <React.Fragment key={slotKey}>
                           <div
@@ -649,6 +664,22 @@ const MaterialEditorPanel: React.FC<MaterialEditorPanelProps> = ({ materialManag
                             <label className="mat-param-label" style={{ fontSize: 9 }}>
                               {TEXTURE_SLOT_LABELS[slotKey]}
                             </label>
+                            {availableUVChannels.length > 1 && (
+                              <select
+                                value={slot.uvChannel}
+                                onChange={(e) => handleUVChannelChange(slotKey, Number(e.target.value))}
+                                title="UV channel this map samples from"
+                                style={{
+                                  fontSize: 8, color: 'var(--text-dim)', background: 'var(--bg-input)',
+                                  border: '1px solid var(--border)', borderRadius: 3,
+                                  padding: '1px 2px', flexShrink: 0, cursor: 'pointer',
+                                }}
+                              >
+                                {availableUVChannels.map((ch) => (
+                                  <option key={ch} value={ch}>UV{ch === 0 ? '' : ch}</option>
+                                ))}
+                              </select>
+                            )}
                             {slot.enabled && slot.dataUrl ? (
                               <>
                                 <div
@@ -701,9 +732,9 @@ const MaterialEditorPanel: React.FC<MaterialEditorPanelProps> = ({ materialManag
                               onChange={(e) => handleTextureFileChange(slotKey, e)}
                             />
                           </div>
-                          {showUV2Warning && (
+                          {showUVWarning && (
                             <div style={{ fontSize: 8, color: 'var(--warning, #d9a441)', padding: '0 4px 2px' }}>
-                              No second UV channel (uv2) on this mesh — {TEXTURE_SLOT_LABELS[slotKey].toLowerCase()} won't render.
+                              This mesh has no UV{slot.uvChannel === 0 ? '' : slot.uvChannel} channel — {TEXTURE_SLOT_LABELS[slotKey].toLowerCase()} won't render.
                             </div>
                           )}
                           </React.Fragment>

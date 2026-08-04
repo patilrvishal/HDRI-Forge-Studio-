@@ -1,6 +1,6 @@
 import { create } from 'zustand';
-import type { PBRMaterialState, TextureSlotKey } from '../types/MaterialEditor';
-import { createPBRMaterialState, createEmptyTextureSlot } from '../types/MaterialEditor';
+import type { PBRMaterialState, TextureSlotKey, MaterialTextureSlot } from '../types/MaterialEditor';
+import { createPBRMaterialState, createEmptyTextureSlot, UV2_TEXTURE_SLOTS } from '../types/MaterialEditor';
 
 interface MaterialEditorStore {
   /** All extracted materials from the model */
@@ -21,6 +21,8 @@ interface MaterialEditorStore {
   updateTextureSlot: (id: string, slotKey: TextureSlotKey, dataUrl: string, fileName: string) => void;
   /** Remove a texture slot from a material */
   removeTextureSlot: (id: string, slotKey: TextureSlotKey) => void;
+  /** Change which UV set a texture slot samples from (three.js Texture.channel) */
+  updateTextureUVChannel: (id: string, slotKey: TextureSlotKey, channel: number) => void;
   /** Export all material states (for scene save) */
   exportMaterials: () => PBRMaterialState[];
   /** Import material states (for scene load) */
@@ -60,7 +62,10 @@ export const useMaterialEditorStore = create<MaterialEditorStore>((set, get) => 
         m.id === id
           ? {
               ...m,
-              [slotKey]: { enabled: true, dataUrl, fileName },
+              // Preserve whatever UV channel was already set on this slot
+              // (defaults from createEmptyTextureSlot otherwise) rather than
+              // resetting it every time a new image is uploaded into it.
+              [slotKey]: { enabled: true, dataUrl, fileName, uvChannel: m[slotKey].uvChannel },
               // Auto-enable transparency for alpha maps or transmission
               transparent: slotKey === 'alphaMap' ? true : (m.transparent || m.transmission > 0),
             }
@@ -73,7 +78,17 @@ export const useMaterialEditorStore = create<MaterialEditorStore>((set, get) => 
     set((state) => ({
       materials: state.materials.map((m) =>
         m.id === id
-          ? { ...m, [slotKey]: createEmptyTextureSlot() }
+          ? { ...m, [slotKey]: createEmptyTextureSlot(UV2_TEXTURE_SLOTS.has(slotKey) ? 1 : 0) }
+          : m,
+      ),
+    }));
+  },
+
+  updateTextureUVChannel: (id, slotKey, channel) => {
+    set((state) => ({
+      materials: state.materials.map((m) =>
+        m.id === id
+          ? { ...m, [slotKey]: { ...m[slotKey], uvChannel: channel } }
           : m,
       ),
     }));
@@ -89,6 +104,7 @@ export const useMaterialEditorStore = create<MaterialEditorStore>((set, get) => 
       metalnessMap: { ...m.metalnessMap },
       emissiveMap: { ...m.emissiveMap },
       aoMap: { ...m.aoMap },
+      lightMap: { ...m.lightMap },
       bumpMap: { ...m.bumpMap },
       alphaMap: { ...m.alphaMap },
       displacementMap: { ...m.displacementMap },
@@ -100,6 +116,21 @@ export const useMaterialEditorStore = create<MaterialEditorStore>((set, get) => 
   },
 
   importMaterials: (materials) => {
+    // Restore a saved slot against a known-good default, filling in fields
+    // (like uvChannel) that older saved scene files won't have.
+    const restoreSlot = (saved: unknown, base: MaterialTextureSlot): MaterialTextureSlot => {
+      if (saved && typeof saved === 'object' && 'enabled' in saved) {
+        const s = saved as Partial<MaterialTextureSlot>;
+        return {
+          enabled: s.enabled ?? base.enabled,
+          dataUrl: s.dataUrl ?? base.dataUrl,
+          fileName: s.fileName ?? base.fileName,
+          uvChannel: s.uvChannel ?? base.uvChannel,
+        };
+      }
+      return base;
+    };
+
     // Restore each material by merging with a fresh default, ensuring no missing properties
     const restored = materials.map((m, idx) => {
       const base = createPBRMaterialState(idx, m.name || `Material ${idx + 1}`, m.meshNames || []);
@@ -107,15 +138,16 @@ export const useMaterialEditorStore = create<MaterialEditorStore>((set, get) => 
         ...base,
         ...m,
         // Ensure texture slots are properly structured (not plain objects from JSON)
-        map: (m.map && typeof m.map === 'object' && 'enabled' in m.map) ? m.map : base.map,
-        normalMap: (m.normalMap && typeof m.normalMap === 'object' && 'enabled' in m.normalMap) ? m.normalMap : base.normalMap,
-        roughnessMap: (m.roughnessMap && typeof m.roughnessMap === 'object' && 'enabled' in m.roughnessMap) ? m.roughnessMap : base.roughnessMap,
-        metalnessMap: (m.metalnessMap && typeof m.metalnessMap === 'object' && 'enabled' in m.metalnessMap) ? m.metalnessMap : base.metalnessMap,
-        emissiveMap: (m.emissiveMap && typeof m.emissiveMap === 'object' && 'enabled' in m.emissiveMap) ? m.emissiveMap : base.emissiveMap,
-        aoMap: (m.aoMap && typeof m.aoMap === 'object' && 'enabled' in m.aoMap) ? m.aoMap : base.aoMap,
-        bumpMap: (m.bumpMap && typeof m.bumpMap === 'object' && 'enabled' in m.bumpMap) ? m.bumpMap : base.bumpMap,
-        alphaMap: (m.alphaMap && typeof m.alphaMap === 'object' && 'enabled' in m.alphaMap) ? m.alphaMap : base.alphaMap,
-        displacementMap: (m.displacementMap && typeof m.displacementMap === 'object' && 'enabled' in m.displacementMap) ? m.displacementMap : base.displacementMap,
+        map: restoreSlot(m.map, base.map),
+        normalMap: restoreSlot(m.normalMap, base.normalMap),
+        roughnessMap: restoreSlot(m.roughnessMap, base.roughnessMap),
+        metalnessMap: restoreSlot(m.metalnessMap, base.metalnessMap),
+        emissiveMap: restoreSlot(m.emissiveMap, base.emissiveMap),
+        aoMap: restoreSlot(m.aoMap, base.aoMap),
+        lightMap: restoreSlot(m.lightMap, base.lightMap),
+        bumpMap: restoreSlot(m.bumpMap, base.bumpMap),
+        alphaMap: restoreSlot(m.alphaMap, base.alphaMap),
+        displacementMap: restoreSlot(m.displacementMap, base.displacementMap),
         // Restore Infinity from -1 sentinel
         attenuationDistance: m.attenuationDistance === -1 ? Infinity : (m.attenuationDistance ?? Infinity),
         iridescenceThicknessRange: m.iridescenceThicknessRange ?? [100, 400],

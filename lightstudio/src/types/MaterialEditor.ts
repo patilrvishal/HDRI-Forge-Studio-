@@ -10,6 +10,13 @@ export interface MaterialTextureSlot {
   dataUrl: string | null;
   /** Original file name */
   fileName: string;
+  /**
+   * Which of the mesh's UV sets this texture samples (three.js Texture.channel:
+   * 0 = uv, 1 = uv1, 2 = uv2, 3 = uv3). Defaults to 0 for most slots; AO/Lightmap
+   * default to 1 since that's the conventional "second UV set" baked-lighting
+   * channel, matching glTF's occlusionTexture/KHR_materials_ occlusion convention.
+   */
+  uvChannel: number;
 }
 
 export interface PBRMaterialState {
@@ -141,8 +148,8 @@ export const TEXTURE_SLOT_LABELS: Record<TextureSlotKey, string> = {
 /** Texture slots that sample the mesh's second UV channel (uv2) instead of the primary UVs. */
 export const UV2_TEXTURE_SLOTS: ReadonlySet<TextureSlotKey> = new Set(['aoMap', 'lightMap']);
 
-export function createEmptyTextureSlot(): MaterialTextureSlot {
-  return { enabled: false, dataUrl: null, fileName: '' };
+export function createEmptyTextureSlot(uvChannel: number = 0): MaterialTextureSlot {
+  return { enabled: false, dataUrl: null, fileName: '', uvChannel };
 }
 
 export function createPBRMaterialState(
@@ -168,8 +175,8 @@ export function createPBRMaterialState(
     roughnessMap: createEmptyTextureSlot(),
     metalnessMap: createEmptyTextureSlot(),
     emissiveMap: createEmptyTextureSlot(),
-    aoMap: createEmptyTextureSlot(),
-    lightMap: createEmptyTextureSlot(),
+    aoMap: createEmptyTextureSlot(1),
+    lightMap: createEmptyTextureSlot(1),
     bumpMap: createEmptyTextureSlot(),
     alphaMap: createEmptyTextureSlot(),
     normalScale: 1,

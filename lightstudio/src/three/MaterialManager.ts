@@ -91,36 +91,39 @@ export class MaterialManager {
         state.specularColor = '#' + pm.specularColor.getHexString();
       }
 
-      // Note texture slots
+      // Note texture slots - uvChannel picks up the loader-assigned channel
+      // (e.g. GLTFLoader sets it from the glTF texCoord index) so an
+      // embedded AO/lightmap that was authored against uv1 is respected
+      // instead of silently assumed to be on uv2.
       if (mat.map) {
-        state.map = { enabled: true, dataUrl: null, fileName: '(embedded)' };
+        state.map = { enabled: true, dataUrl: null, fileName: '(embedded)', uvChannel: mat.map.channel };
       }
       if (mat.normalMap) {
-        state.normalMap = { enabled: true, dataUrl: null, fileName: '(embedded)' };
+        state.normalMap = { enabled: true, dataUrl: null, fileName: '(embedded)', uvChannel: mat.normalMap.channel };
       }
       if (mat.roughnessMap) {
-        state.roughnessMap = { enabled: true, dataUrl: null, fileName: '(embedded)' };
+        state.roughnessMap = { enabled: true, dataUrl: null, fileName: '(embedded)', uvChannel: mat.roughnessMap.channel };
       }
       if (mat.metalnessMap) {
-        state.metalnessMap = { enabled: true, dataUrl: null, fileName: '(embedded)' };
+        state.metalnessMap = { enabled: true, dataUrl: null, fileName: '(embedded)', uvChannel: mat.metalnessMap.channel };
       }
       if (mat.emissiveMap) {
-        state.emissiveMap = { enabled: true, dataUrl: null, fileName: '(embedded)' };
+        state.emissiveMap = { enabled: true, dataUrl: null, fileName: '(embedded)', uvChannel: mat.emissiveMap.channel };
       }
       if (mat.aoMap) {
-        state.aoMap = { enabled: true, dataUrl: null, fileName: '(embedded)' };
+        state.aoMap = { enabled: true, dataUrl: null, fileName: '(embedded)', uvChannel: mat.aoMap.channel };
       }
       if (mat.lightMap) {
-        state.lightMap = { enabled: true, dataUrl: null, fileName: '(embedded)' };
+        state.lightMap = { enabled: true, dataUrl: null, fileName: '(embedded)', uvChannel: mat.lightMap.channel };
       }
       if (mat.bumpMap) {
-        state.bumpMap = { enabled: true, dataUrl: null, fileName: '(embedded)' };
+        state.bumpMap = { enabled: true, dataUrl: null, fileName: '(embedded)', uvChannel: mat.bumpMap.channel };
       }
       if (mat.alphaMap) {
-        state.alphaMap = { enabled: true, dataUrl: null, fileName: '(embedded)' };
+        state.alphaMap = { enabled: true, dataUrl: null, fileName: '(embedded)', uvChannel: mat.alphaMap.channel };
       }
       if (mat.displacementMap) {
-        state.displacementMap = { enabled: true, dataUrl: null, fileName: '(embedded)' };
+        state.displacementMap = { enabled: true, dataUrl: null, fileName: '(embedded)', uvChannel: mat.displacementMap.channel };
       }
 
       // Store mapping: state.id → [actual Three.js materials]
@@ -358,6 +361,7 @@ export class MaterialManager {
             texture.colorSpace = slotKey === 'map' || slotKey === 'emissiveMap'
               ? THREE.SRGBColorSpace
               : THREE.LinearSRGBColorSpace;
+            texture.channel = slot.uvChannel ?? 0;
             texture.needsUpdate = true;
             const currentMats = this.materialMap.get(state.id);
             if (currentMats) {
@@ -368,6 +372,26 @@ export class MaterialManager {
             }
           });
         }
+      }
+    }
+  }
+
+  /**
+   * Change which UV set an already-assigned texture samples from, without
+   * reloading the image. Needed for embedded textures (dataUrl: null) that
+   * the full applyMaterialState texture loop skips, and cheaper than a
+   * reload for user-uploaded ones too - texture.channel is just an index
+   * into the mesh's uv/uv1/uv2/uv3 attributes.
+   */
+  setTextureUVChannel(materialId: string, slotKey: TextureSlotKey, channel: number): void {
+    const mats = this.materialMap.get(materialId);
+    if (!mats) return;
+    for (const mat of mats) {
+      const texture = (mat as any)[slotKey] as THREE.Texture | null;
+      if (texture) {
+        texture.channel = channel;
+        texture.needsUpdate = true;
+        mat.needsUpdate = true;
       }
     }
   }
