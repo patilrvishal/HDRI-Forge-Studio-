@@ -26,6 +26,17 @@ export interface PBRMaterialState {
   name: string;
   /** Names of meshes that use this material */
   meshNames: string[];
+  /**
+   * Per-mesh AO/Lightmap overrides, keyed by mesh name. Baked maps like AO
+   * and Lightmap are only valid for the specific UV layout they were baked
+   * against - when one material is shared across multiple meshes (e.g. a
+   * car paint material spanning several door panels), each mesh usually has
+   * its own independent UV unwrap, so a single shared AO/Lightmap texture
+   * can't align correctly for all of them. This lets each mesh get its own
+   * bake while everything else (color, roughness, etc.) stays shared.
+   * Absent for a mesh = falls back to the material's shared aoMap/lightMap.
+   */
+  meshTextureOverrides: Record<string, { aoMap?: MaterialTextureSlot; lightMap?: MaterialTextureSlot }>;
 
   // ── PBR Properties (MeshStandardMaterial) ──────────────────────────
   /** Base color (hex string) */
@@ -161,6 +172,7 @@ export function createPBRMaterialState(
     id: `mat_${index}_${Date.now()}`,
     name: name || `Material ${index + 1}`,
     meshNames,
+    meshTextureOverrides: {},
     color: '#cccccc',
     emissive: '#000000',
     emissiveIntensity: 1,

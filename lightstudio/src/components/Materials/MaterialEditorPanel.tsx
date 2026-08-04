@@ -1,6 +1,7 @@
 import React, { useCallback, useRef, useState, useMemo, useEffect } from 'react';
 import * as THREE from 'three';
 import { useMaterialEditorStore } from '../../store/materialEditorStore';
+import type { MeshOverrideKey } from '../../store/materialEditorStore';
 import { useUIStore } from '../../store/uiStore';
 import type { PBRMaterialState, TextureSlotKey } from '../../types/MaterialEditor';
 import { TEXTURE_SLOT_LABELS } from '../../types/MaterialEditor';
@@ -10,11 +11,6 @@ interface MaterialEditorPanelProps {
   materialManagerRef: React.MutableRefObject<MaterialManager | null>;
   sceneRef: React.MutableRefObject<THREE.Scene | null>;
 }
-
-const TEXTURE_SLOTS: TextureSlotKey[] = [
-  'map', 'normalMap', 'roughnessMap', 'metalnessMap',
-  'emissiveMap', 'aoMap', 'lightMap', 'bumpMap', 'alphaMap', 'displacementMap',
-];
 
 interface PropRow {
   label: string;
@@ -32,17 +28,19 @@ interface PropRow {
   iridTupleIndex?: 0 | 1;
   /** Show as integer (no decimals) */
   integerOnly?: boolean;
+  /** Texture slot whose attach/remove control renders inline with this row, instead of a separate list. */
+  mapKey?: TextureSlotKey;
 }
 
 const PROP_ROWS: PropRow[] = [
   // ── Surface ──────────────────────────────────────────────────
-  { label: 'Base Color', key: 'color', min: 0, max: 0, step: 0, section: 'Surface', isColor: true, colorKey: 'color' },
-  { label: 'Metallic', key: 'metalness', min: 0, max: 1, step: 0.001, section: 'Surface' },
-  { label: 'Roughness', key: 'roughness', min: 0, max: 1, step: 0.001, section: 'Surface' },
-  { label: 'Normal Scale', key: 'normalScale', min: 0, max: 2, step: 0.001, section: 'Surface' },
-  { label: 'Bump Scale', key: 'bumpScale', min: 0, max: 2, step: 0.001, section: 'Surface' },
-  { label: 'AO Intensity', key: 'aoMapIntensity', min: 0, max: 3, step: 0.001, section: 'Surface' },
-  { label: 'Lightmap Intensity', key: 'lightMapIntensity', min: 0, max: 3, step: 0.001, section: 'Surface' },
+  { label: 'Base Color', key: 'color', min: 0, max: 0, step: 0, section: 'Surface', isColor: true, colorKey: 'color', mapKey: 'map' },
+  { label: 'Metallic', key: 'metalness', min: 0, max: 1, step: 0.001, section: 'Surface', mapKey: 'metalnessMap' },
+  { label: 'Roughness', key: 'roughness', min: 0, max: 1, step: 0.001, section: 'Surface', mapKey: 'roughnessMap' },
+  { label: 'Normal Scale', key: 'normalScale', min: 0, max: 2, step: 0.001, section: 'Surface', mapKey: 'normalMap' },
+  { label: 'Bump Scale', key: 'bumpScale', min: 0, max: 2, step: 0.001, section: 'Surface', mapKey: 'bumpMap' },
+  { label: 'AO Intensity', key: 'aoMapIntensity', min: 0, max: 3, step: 0.001, section: 'Surface', mapKey: 'aoMap' },
+  { label: 'Lightmap Intensity', key: 'lightMapIntensity', min: 0, max: 3, step: 0.001, section: 'Surface', mapKey: 'lightMap' },
 
   // ── Specular ─────────────────────────────────────────────────
   { label: 'Specular Int.', key: 'specularIntensity', min: 0, max: 1, step: 0.001, section: 'Specular', physicalOnly: true },
@@ -72,18 +70,18 @@ const PROP_ROWS: PropRow[] = [
   { label: 'Irid. Thick. Max', key: 'iridescenceThicknessRange', min: 100, max: 800, step: 1, section: 'Iridescence', physicalOnly: true, iridTupleIndex: 1, integerOnly: true },
 
   // ── Emission ─────────────────────────────────────────────────
-  { label: 'Emissive Color', key: 'emissive', min: 0, max: 0, step: 0, section: 'Emission', isColor: true, colorKey: 'emissive' },
+  { label: 'Emissive Color', key: 'emissive', min: 0, max: 0, step: 0, section: 'Emission', isColor: true, colorKey: 'emissive', mapKey: 'emissiveMap' },
   { label: 'Emissive Int.', key: 'emissiveIntensity', min: 0, max: 5, step: 0.001, section: 'Emission' },
 
   // ── Displacement ───────────────────────────────────────────────
-  { label: 'Displace Scale', key: 'displacementScale', min: 0, max: 5, step: 0.001, section: 'Displacement' },
+  { label: 'Displace Scale', key: 'displacementScale', min: 0, max: 5, step: 0.001, section: 'Displacement', mapKey: 'displacementMap' },
   { label: 'Displace Bias', key: 'displacementBias', min: -1, max: 1, step: 0.001, section: 'Displacement' },
 
   // ── Environment ────────────────────────────────────────────────
   { label: 'Env Map Int.', key: 'envMapIntensity', min: 0, max: 5, step: 0.001, section: 'Environment' },
 
   // ── Settings ─────────────────────────────────────────────────
-  { label: 'Opacity', key: 'opacity', min: 0, max: 1, step: 0.001, section: 'Settings' },
+  { label: 'Opacity', key: 'opacity', min: 0, max: 1, step: 0.001, section: 'Settings', mapKey: 'alphaMap' },
   { label: 'Alpha Test', key: 'alphaTest', min: 0, max: 1, step: 0.001, section: 'Settings' },
 ];
 
@@ -104,7 +102,6 @@ const SECTIONS: SectionDef[] = [
   { name: 'Displacement', defaultExpanded: false },
   { name: 'Environment', defaultExpanded: false },
   { name: 'Settings' },
-  { name: 'Texture Maps' },
 ];
 
 const NUM_INPUT_STYLE: React.CSSProperties = {
@@ -134,6 +131,9 @@ const MaterialEditorPanel: React.FC<MaterialEditorPanelProps> = ({ materialManag
   const updateMaterial = useMaterialEditorStore((s) => s.updateMaterial);
   const updateTextureSlot = useMaterialEditorStore((s) => s.updateTextureSlot);
   const removeTextureSlot = useMaterialEditorStore((s) => s.removeTextureSlot);
+  const updateMeshTextureOverride = useMaterialEditorStore((s) => s.updateMeshTextureOverride);
+  const removeMeshTextureOverride = useMaterialEditorStore((s) => s.removeMeshTextureOverride);
+  const updateMeshTextureOverrideUVChannel = useMaterialEditorStore((s) => s.updateMeshTextureOverrideUVChannel);
 
   const [searchOpen, setSearchOpen] = useState(false);
   const [search, setSearch] = useState('');
@@ -174,6 +174,27 @@ const MaterialEditorPanel: React.FC<MaterialEditorPanelProps> = ({ materialManag
     });
     return channels.length > 0 ? channels : [0];
   }, [selected, sceneRef]);
+
+  /** Same as availableUVChannels but for one specific mesh (per-mesh overrides need per-mesh channel lists). */
+  const getMeshUVChannels = useCallback((meshName: string): number[] => {
+    const scene = sceneRef.current;
+    if (!scene) return [0];
+    let found = false;
+    const channels: number[] = [];
+    scene.traverse((obj) => {
+      if (found) return;
+      if (obj instanceof THREE.Mesh && obj.name === meshName) {
+        found = true;
+        UV_ATTR_NAMES.forEach((attrName, idx) => {
+          if (obj.geometry.attributes[attrName]) channels.push(idx);
+        });
+      }
+    });
+    return channels.length > 0 ? channels : [0];
+  }, [sceneRef]);
+
+  const [expandedPerMesh, setExpandedPerMesh] = useState<Set<TextureSlotKey>>(new Set());
+  const perMeshInputRefs = useRef<Record<string, HTMLInputElement | null>>({});
 
   // Focus search input when opened
   useEffect(() => {
@@ -270,8 +291,9 @@ const MaterialEditorPanel: React.FC<MaterialEditorPanelProps> = ({ materialManag
     (slotKey: TextureSlotKey) => {
       if (!selectedId) return;
       removeTextureSlot(selectedId, slotKey);
+      materialManagerRef.current?.clearTextureSlot(selectedId, slotKey);
     },
-    [selectedId, removeTextureSlot],
+    [selectedId, removeTextureSlot, materialManagerRef],
   );
 
   const updateTextureUVChannel = useMaterialEditorStore((s) => s.updateTextureUVChannel);
@@ -282,6 +304,52 @@ const MaterialEditorPanel: React.FC<MaterialEditorPanelProps> = ({ materialManag
       materialManagerRef.current?.setTextureUVChannel(selectedId, slotKey, channel);
     },
     [selectedId, updateTextureUVChannel, materialManagerRef],
+  );
+
+  const handleMeshOverrideUpload = useCallback((meshName: string, slotKey: MeshOverrideKey) => {
+    perMeshInputRefs.current[`${meshName}::${slotKey}`]?.click();
+  }, []);
+
+  const handleMeshOverrideFileChange = useCallback(
+    (meshName: string, slotKey: MeshOverrideKey, e: React.ChangeEvent<HTMLInputElement>) => {
+      const file = e.target.files?.[0];
+      if (!file || !selectedId) return;
+
+      const reader = new FileReader();
+      reader.onload = () => {
+        const dataUrl = reader.result as string;
+        updateMeshTextureOverride(selectedId, meshName, slotKey, dataUrl, file.name);
+
+        const mm = materialManagerRef.current;
+        const scene = sceneRef.current;
+        if (mm && scene) {
+          const updated = useMaterialEditorStore.getState().materials.find((m) => m.id === selectedId);
+          const uvChannel = updated?.meshTextureOverrides[meshName]?.[slotKey]?.uvChannel ?? 1;
+          mm.setMeshTextureOverride(scene, selectedId, meshName, slotKey, dataUrl, uvChannel);
+        }
+      };
+      reader.readAsDataURL(file);
+      e.target.value = '';
+    },
+    [selectedId, updateMeshTextureOverride, materialManagerRef, sceneRef],
+  );
+
+  const handleMeshOverrideRemove = useCallback(
+    (meshName: string, slotKey: MeshOverrideKey) => {
+      if (!selectedId) return;
+      removeMeshTextureOverride(selectedId, meshName, slotKey);
+      materialManagerRef.current?.clearMeshTextureOverride(selectedId, meshName, slotKey);
+    },
+    [selectedId, removeMeshTextureOverride, materialManagerRef],
+  );
+
+  const handleMeshOverrideUVChannelChange = useCallback(
+    (meshName: string, slotKey: MeshOverrideKey, channel: number) => {
+      if (!selectedId) return;
+      updateMeshTextureOverrideUVChannel(selectedId, meshName, slotKey, channel);
+      materialManagerRef.current?.setMeshTextureOverrideUVChannel(selectedId, meshName, slotKey, channel);
+    },
+    [selectedId, updateMeshTextureOverrideUVChannel, materialManagerRef],
   );
 
   const toggleSection = useCallback((section: string) => {
@@ -383,6 +451,190 @@ const MaterialEditorPanel: React.FC<MaterialEditorPanelProps> = ({ materialManag
     </span>
   );
 
+  // Compact inline texture attach/remove control, embedded directly in a
+  // property row instead of living in a separate "Texture Maps" list -
+  // clicking the icon loads a texture into that slot; a loaded texture shows
+  // a thumbnail with a remove button and, when the mesh has more than one UV
+  // set, a small channel picker.
+  const renderTextureAttach = (slotKey: TextureSlotKey) => {
+    if (!selected) return null;
+    const slot = selected[slotKey];
+    const showUVWarning = slot.enabled && !availableUVChannels.includes(slot.uvChannel);
+    return (
+      <span style={{ display: 'flex', alignItems: 'center', gap: 2, flexShrink: 0 }}>
+        {slot.enabled && slot.dataUrl ? (
+          <>
+            <div
+              title={slot.fileName}
+              onClick={() => handleTextureUpload(slotKey)}
+              style={{
+                width: 16, height: 16, borderRadius: 3, cursor: 'pointer',
+                background: `url(${slot.dataUrl}) center/cover`,
+                border: `1px solid ${showUVWarning ? 'var(--warning, #d9a441)' : 'var(--border)'}`,
+              }}
+            />
+            <button
+              onClick={() => handleRemoveTexture(slotKey)}
+              title="Remove texture"
+              style={{
+                fontSize: 7, color: 'var(--danger)', background: 'none',
+                border: 'none', cursor: 'pointer', padding: '1px 2px', flexShrink: 0,
+              }}
+            >
+              <svg width="7" height="7" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M2 2l8 8M10 2L2 10" />
+              </svg>
+            </button>
+          </>
+        ) : (
+          <button
+            onClick={() => handleTextureUpload(slotKey)}
+            title={`Load ${TEXTURE_SLOT_LABELS[slotKey]} texture`}
+            style={{
+              fontSize: 7, color: 'var(--text-dim)', background: 'var(--bg-input)',
+              border: '1px solid var(--border)', borderRadius: 3, cursor: 'pointer',
+              padding: '2px 4px', flexShrink: 0,
+            }}
+          >
+            +Tex
+          </button>
+        )}
+        {slot.enabled && availableUVChannels.length > 1 && (
+          <select
+            value={slot.uvChannel}
+            onChange={(e) => handleUVChannelChange(slotKey, Number(e.target.value))}
+            title="UV channel this map samples from"
+            style={{
+              fontSize: 7, color: 'var(--text-dim)', background: 'var(--bg-input)',
+              border: '1px solid var(--border)', borderRadius: 3,
+              padding: '0 1px', flexShrink: 0, cursor: 'pointer',
+            }}
+          >
+            {availableUVChannels.map((ch) => (
+              <option key={ch} value={ch}>UV{ch === 0 ? '' : ch}</option>
+            ))}
+          </select>
+        )}
+        {(slotKey === 'aoMap' || slotKey === 'lightMap') && selected.meshNames.length > 1 && (
+          <button
+            onClick={() => setExpandedPerMesh((prev) => {
+              const next = new Set(prev);
+              if (next.has(slotKey)) next.delete(slotKey); else next.add(slotKey);
+              return next;
+            })}
+            title="Set a different texture per mesh - needed when this material spans multiple meshes with independent UV layouts"
+            style={{
+              fontSize: 7, color: 'var(--text-dim)', background: 'none',
+              border: '1px solid var(--border)', borderRadius: 3, cursor: 'pointer',
+              padding: '1px 3px', flexShrink: 0,
+            }}
+          >
+            {selected.meshNames.length} meshes {expandedPerMesh.has(slotKey) ? '▾' : '▸'}
+          </button>
+        )}
+        <input
+          ref={(el) => { textureInputRefs.current[slotKey] = el; }}
+          type="file" accept="image/*"
+          style={{ display: 'none' }}
+          onChange={(e) => handleTextureFileChange(slotKey, e)}
+        />
+      </span>
+    );
+  };
+
+  // Per-mesh AO/Lightmap override list - shown when a material spans
+  // multiple meshes and the user expands the "N meshes" toggle. Each mesh
+  // gets its own compact attach/remove/UV-channel control; an override here
+  // takes priority over the shared texture above for that one mesh only.
+  const renderPerMeshOverrideList = (slotKey: MeshOverrideKey) => {
+    if (!selected) return null;
+    return (
+      <div style={{
+        display: 'flex', flexDirection: 'column', gap: 2,
+        margin: '2px 0 4px 12px', paddingLeft: 6, borderLeft: '1px solid var(--border)',
+      }}>
+        {selected.meshNames.map((meshName) => {
+          const override = selected.meshTextureOverrides[meshName]?.[slotKey];
+          const meshUVChannels = getMeshUVChannels(meshName);
+          const showWarning = override?.enabled && !meshUVChannels.includes(override.uvChannel);
+          const inputKey = `${meshName}::${slotKey}`;
+          return (
+            <div key={meshName} style={{ display: 'flex', alignItems: 'center', gap: 3 }}>
+              <span
+                title={meshName}
+                style={{
+                  fontSize: 8, color: 'var(--text-dim)', flex: 1,
+                  overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                }}
+              >
+                {meshName}
+              </span>
+              {override?.enabled && override.dataUrl ? (
+                <>
+                  <div
+                    title={override.fileName}
+                    onClick={() => handleMeshOverrideUpload(meshName, slotKey)}
+                    style={{
+                      width: 14, height: 14, borderRadius: 3, cursor: 'pointer',
+                      background: `url(${override.dataUrl}) center/cover`,
+                      border: `1px solid ${showWarning ? 'var(--warning, #d9a441)' : 'var(--border)'}`,
+                    }}
+                  />
+                  <button
+                    onClick={() => handleMeshOverrideRemove(meshName, slotKey)}
+                    title="Remove per-mesh override (falls back to the shared texture above)"
+                    style={{
+                      fontSize: 7, color: 'var(--danger)', background: 'none',
+                      border: 'none', cursor: 'pointer', padding: '1px 2px', flexShrink: 0,
+                    }}
+                  >
+                    <svg width="7" height="7" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="2">
+                      <path d="M2 2l8 8M10 2L2 10" />
+                    </svg>
+                  </button>
+                  {meshUVChannels.length > 1 && (
+                    <select
+                      value={override.uvChannel}
+                      onChange={(e) => handleMeshOverrideUVChannelChange(meshName, slotKey, Number(e.target.value))}
+                      title="UV channel this mesh's override samples from"
+                      style={{
+                        fontSize: 7, color: 'var(--text-dim)', background: 'var(--bg-input)',
+                        border: '1px solid var(--border)', borderRadius: 3,
+                        padding: '0 1px', flexShrink: 0, cursor: 'pointer',
+                      }}
+                    >
+                      {meshUVChannels.map((ch) => (
+                        <option key={ch} value={ch}>UV{ch === 0 ? '' : ch}</option>
+                      ))}
+                    </select>
+                  )}
+                </>
+              ) : (
+                <button
+                  onClick={() => handleMeshOverrideUpload(meshName, slotKey)}
+                  title={`Load a ${TEXTURE_SLOT_LABELS[slotKey]} texture just for ${meshName}`}
+                  style={{
+                    fontSize: 7, color: 'var(--text-dim)', background: 'var(--bg-input)',
+                    border: '1px solid var(--border)', borderRadius: 3, cursor: 'pointer',
+                    padding: '1px 4px', flexShrink: 0,
+                  }}
+                >
+                  +Tex
+                </button>
+              )}
+              <input
+                ref={(el) => { perMeshInputRefs.current[inputKey] = el; }}
+                type="file" accept="image/*"
+                style={{ display: 'none' }}
+                onChange={(e) => handleMeshOverrideFileChange(meshName, slotKey, e)}
+              />
+            </div>
+          );
+        })}
+      </div>
+    );
+  };
+
   // Render a slider property row (Blender-style: label | slider | numeric input)
   const renderSliderRow = (row: PropRow) => {
     if (!selected) return null;
@@ -403,9 +655,15 @@ const MaterialEditorPanel: React.FC<MaterialEditorPanelProps> = ({ materialManag
     // For infinity key, slider value is clamped to 20
     const sliderVal = row.infinityKey && (rawVal === Infinity || rawVal >= 20) ? row.max : safeVal;
 
+    const showPerMeshList = (row.mapKey === 'aoMap' || row.mapKey === 'lightMap')
+      && selected.meshNames.length > 1
+      && expandedPerMesh.has(row.mapKey);
+
     return (
-      <div key={inputId} className="mat-param-row">
+      <React.Fragment key={inputId}>
+      <div className="mat-param-row">
         <label className="mat-param-label">{row.label}</label>
+        {row.mapKey && renderTextureAttach(row.mapKey)}
         <input
           type="range"
           min={row.min}
@@ -435,6 +693,8 @@ const MaterialEditorPanel: React.FC<MaterialEditorPanelProps> = ({ materialManag
           style={focusedNumInput === inputId ? NUM_INPUT_FOCUS_STYLE : NUM_INPUT_STYLE}
         />
       </div>
+      {showPerMeshList && row.mapKey && renderPerMeshOverrideList(row.mapKey as MeshOverrideKey)}
+      </React.Fragment>
     );
   };
 
@@ -446,6 +706,7 @@ const MaterialEditorPanel: React.FC<MaterialEditorPanelProps> = ({ materialManag
     return (
       <div key={row.colorKey} className="mat-param-row">
         <label className="mat-param-label">{row.label}</label>
+        {row.mapKey && renderTextureAttach(row.mapKey)}
         <input
           type="color"
           value={hexVal}
@@ -639,112 +900,6 @@ const MaterialEditorPanel: React.FC<MaterialEditorPanelProps> = ({ materialManag
           {/* ── Property sections ─────────────────────────────── */}
           {visibleSections.map((section) => {
             const sectionName = section.name;
-
-            // ── Texture Maps (special rendering) ──────────────
-            if (sectionName === 'Texture Maps') {
-              const expanded = !collapsedSections.has(sectionName);
-              return (
-                <div key={sectionName} style={{ marginBottom: 8 }}>
-                  {renderSectionHeader(sectionName, false)}
-                  {expanded && (
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: 3, marginTop: 4 }}>
-                      {TEXTURE_SLOTS.map((slotKey) => {
-                        const slot = selected[slotKey];
-                        const showUVWarning = slot.enabled && !availableUVChannels.includes(slot.uvChannel);
-                        return (
-                          <React.Fragment key={slotKey}>
-                          <div
-                            style={{
-                              display: 'flex', alignItems: 'center', gap: 4,
-                              padding: '3px 4px', borderRadius: 'var(--radius-sm)',
-                              background: slot.enabled ? 'var(--bg-card)' : 'transparent',
-                              border: `1px solid ${slot.enabled ? 'var(--border-light)' : 'var(--border)'}`,
-                            }}
-                          >
-                            <label className="mat-param-label" style={{ fontSize: 9 }}>
-                              {TEXTURE_SLOT_LABELS[slotKey]}
-                            </label>
-                            {availableUVChannels.length > 1 && (
-                              <select
-                                value={slot.uvChannel}
-                                onChange={(e) => handleUVChannelChange(slotKey, Number(e.target.value))}
-                                title="UV channel this map samples from"
-                                style={{
-                                  fontSize: 8, color: 'var(--text-dim)', background: 'var(--bg-input)',
-                                  border: '1px solid var(--border)', borderRadius: 3,
-                                  padding: '1px 2px', flexShrink: 0, cursor: 'pointer',
-                                }}
-                              >
-                                {availableUVChannels.map((ch) => (
-                                  <option key={ch} value={ch}>UV{ch === 0 ? '' : ch}</option>
-                                ))}
-                              </select>
-                            )}
-                            {slot.enabled && slot.dataUrl ? (
-                              <>
-                                <div
-                                  style={{
-                                    width: 22, height: 22, borderRadius: 3,
-                                    background: `url(${slot.dataUrl}) center/cover`,
-                                    border: '1px solid var(--border)', flexShrink: 0,
-                                  }}
-                                />
-                                <span
-                                  style={{
-                                    flex: 1, fontSize: 8, color: 'var(--text-dim)',
-                                    overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-                                  }}
-                                  title={slot.fileName}
-                                >
-                                  {slot.fileName}
-                                </span>
-                                <button
-                                  onClick={() => handleRemoveTexture(slotKey)}
-                                  style={{
-                                    fontSize: 8, color: 'var(--danger)', background: 'none',
-                                    border: 'none', cursor: 'pointer', padding: '1px 3px', flexShrink: 0,
-                                  }}
-                                >
-                                  <svg width="8" height="8" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="2">
-                                    <path d="M2 2l8 8M10 2L2 10" />
-                                  </svg>
-                                </button>
-                              </>
-                            ) : (
-                              <>
-                                <button
-                                  onClick={() => handleTextureUpload(slotKey)}
-                                  style={{
-                                    fontSize: 8, color: 'var(--text-dim)', background: 'var(--bg-input)',
-                                    border: '1px solid var(--border)', borderRadius: 3, cursor: 'pointer',
-                                    padding: '2px 6px', flexShrink: 0,
-                                  }}
-                                >
-                                  + Load
-                                </button>
-                                <span style={{ fontSize: 8, color: 'var(--text-dim)' }}>None</span>
-                              </>
-                            )}
-                            <input
-                              ref={(el) => { textureInputRefs.current[slotKey] = el; }}
-                              type="file" accept="image/*"
-                              style={{ display: 'none' }}
-                              onChange={(e) => handleTextureFileChange(slotKey, e)}
-                            />
-                          </div>
-                          {showUVWarning && (
-                            <div style={{ fontSize: 8, color: 'var(--warning, #d9a441)', padding: '0 4px 2px' }}>
-                              This mesh has no UV{slot.uvChannel === 0 ? '' : slot.uvChannel} channel — {TEXTURE_SLOT_LABELS[slotKey].toLowerCase()} won't render.
-                            </div>
-                          )}
-                          </React.Fragment>
-                        );
-                      })}
-                    </div>
-                  )}
-                </div>
-              );
-            }
 
             // ── Settings section (sliders + checkboxes) ────────
             if (sectionName === 'Settings') {

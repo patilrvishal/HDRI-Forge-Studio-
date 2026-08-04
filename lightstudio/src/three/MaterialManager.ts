@@ -13,6 +13,12 @@ export class MaterialManager {
   private textureCache = new Map<string, THREE.Texture>();
   /** Map from material ID to the Three.js material(s) in the scene */
   private materialMap = new Map<string, THREE.MeshStandardMaterial[]>();
+  /**
+   * Per-mesh material clones created when a mesh needs its own AO/Lightmap
+   * that differs from the material's shared one (materialId -> meshName ->
+   * that mesh's own cloned material instance).
+   */
+  private perMeshOverrideMap = new Map<string, Map<string, THREE.MeshStandardMaterial>>();
 
   /**
    * Extract all unique MeshStandard/MeshPhysical materials from a model.
@@ -20,6 +26,7 @@ export class MaterialManager {
    */
   extractMaterials(model: THREE.Object3D): PBRMaterialState[] {
     this.materialMap.clear();
+    this.perMeshOverrideMap.clear();
 
     const materialGroups = new Map<THREE.Material, { material: THREE.MeshStandardMaterial; meshNames: string[]; isPhysical: boolean }>();
     let index = 0;
@@ -303,77 +310,121 @@ export class MaterialManager {
       // Downgrade physical → standard if no physical props remain
       // (We keep it as physical to avoid data loss — user might re-enable)
 
-      // Apply standard properties
-      mat.color.set(state.color);
-      mat.emissive.set(state.emissive);
-      mat.emissiveIntensity = state.emissiveIntensity;
-      mat.roughness = state.roughness;
-      mat.metalness = state.metalness;
-      mat.opacity = state.opacity;
-      mat.transparent = state.transparent || state.transmission > 0;
-      mat.side = state.doubleSided ? THREE.DoubleSide : THREE.FrontSide;
-      mat.flatShading = state.flatShading;
-      mat.normalScale = new THREE.Vector2(state.normalScale, state.normalScale);
-      mat.bumpScale = state.bumpScale;
-      mat.aoMapIntensity = state.aoMapIntensity;
-      mat.lightMapIntensity = state.lightMapIntensity;
-      mat.displacementScale = state.displacementScale;
-      mat.displacementBias = state.displacementBias;
-      mat.envMapIntensity = state.envMapIntensity;
-      mat.alphaTest = state.alphaTest;
-      mat.depthWrite = state.depthWrite;
-      mat.colorWrite = state.colorWrite;
+      this.applyPropertiesToMaterial(mat, state);
+    }
 
-      // Apply physical properties if material is MeshPhysicalMaterial
-      if (mat instanceof THREE.MeshPhysicalMaterial) {
-        mat.clearcoat = state.clearcoat;
-        mat.clearcoatRoughness = state.clearcoatRoughness;
-        mat.transmission = state.transmission;
-        mat.transmissionRoughness = state.transmissionRoughness;
-        mat.thickness = state.thickness;
-        mat.ior = state.ior;
-        mat.sheen = state.sheen;
-        mat.sheenRoughness = state.sheenRoughness;
-        mat.sheenColor.set(state.sheenColor);
-        mat.iridescence = state.iridescence;
-        mat.iridescenceIOR = state.iridescenceIOR;
-        mat.iridescenceThicknessRange = new THREE.Vector2(state.iridescenceThicknessRange[0], state.iridescenceThicknessRange[1]);
-        mat.attenuationColor.set(state.attenuationColor);
-        mat.attenuationDistance = state.attenuationDistance === Infinity ? Infinity : state.attenuationDistance;
-        mat.specularIntensity = state.specularIntensity;
-        mat.specularColor.set(state.specularColor);
+    // Per-mesh AO/Lightmap overrides: make sure a clone exists and carries
+    // its own texture for every mesh with one recorded in state (covers the
+    // scene-file restore path, where overrides exist in state before any
+    // clone has been created yet).
+    const meshOverrides = state.meshTextureOverrides ?? {};
+    for (const [meshName, overrides] of Object.entries(meshOverrides)) {
+      if (overrides.aoMap?.enabled && overrides.aoMap.dataUrl) {
+        this.setMeshTextureOverride(scene, state.id, meshName, 'aoMap', overrides.aoMap.dataUrl, overrides.aoMap.uvChannel);
       }
-
-      mat.needsUpdate = true;
-
-      // Textures (only apply user-uploaded textures, don't override embedded ones)
-      const slotKeys: TextureSlotKey[] = [
-        'map', 'normalMap', 'roughnessMap', 'metalnessMap',
-        'emissiveMap', 'aoMap', 'lightMap', 'bumpMap', 'alphaMap', 'displacementMap',
-      ];
-      for (const slotKey of slotKeys) {
-        const slot = state[slotKey];
-        if (slot.enabled && slot.dataUrl) {
-          this.loadTextureAsync(slot.dataUrl).then((texture) => {
-            if (!texture) return;
-            texture.wrapS = THREE.RepeatWrapping;
-            texture.wrapT = THREE.RepeatWrapping;
-            texture.colorSpace = slotKey === 'map' || slotKey === 'emissiveMap'
-              ? THREE.SRGBColorSpace
-              : THREE.LinearSRGBColorSpace;
-            texture.channel = slot.uvChannel ?? 0;
-            texture.needsUpdate = true;
-            const currentMats = this.materialMap.get(state.id);
-            if (currentMats) {
-              for (const m of currentMats) {
-                (m as any)[slotKey] = texture;
-                m.needsUpdate = true;
-              }
-            }
-          });
-        }
+      if (overrides.lightMap?.enabled && overrides.lightMap.dataUrl) {
+        this.setMeshTextureOverride(scene, state.id, meshName, 'lightMap', overrides.lightMap.dataUrl, overrides.lightMap.uvChannel);
       }
     }
+    const overriddenMeshNames = new Set(
+      Object.entries(meshOverrides)
+        .filter(([, o]) => o.aoMap || o.lightMap)
+        .map(([meshName]) => meshName),
+    );
+    const slotKeys: TextureSlotKey[] = [
+      'map', 'normalMap', 'roughnessMap', 'metalnessMap',
+      'emissiveMap', 'aoMap', 'lightMap', 'bumpMap', 'alphaMap', 'displacementMap',
+    ];
+    for (const slotKey of slotKeys) {
+      const slot = state[slotKey];
+      if (slot.enabled && slot.dataUrl) {
+        this.loadTextureAsync(slot.dataUrl).then((texture) => {
+          if (!texture) return;
+          texture.wrapS = THREE.RepeatWrapping;
+          texture.wrapT = THREE.RepeatWrapping;
+          texture.colorSpace = slotKey === 'map' || slotKey === 'emissiveMap'
+            ? THREE.SRGBColorSpace
+            : THREE.LinearSRGBColorSpace;
+          texture.channel = slot.uvChannel ?? 0;
+          texture.needsUpdate = true;
+          for (const m of mats) {
+            (m as any)[slotKey] = texture;
+            m.needsUpdate = true;
+          }
+          // Per-mesh clones for OTHER meshes (no override on this slot) still
+          // track the shared texture; clones whose owning mesh has its own
+          // override for this exact slot keep their own map untouched.
+          if (!(slotKey === 'aoMap' || slotKey === 'lightMap')) {
+            for (const [meshName, clone] of this.perMeshOverrideMap.get(state.id) ?? []) {
+              if (overriddenMeshNames.has(meshName)) continue;
+              (clone as any)[slotKey] = texture;
+              clone.needsUpdate = true;
+            }
+          }
+        });
+      }
+    }
+
+    // Per-mesh clones: shared properties always sync; aoMap/lightMap only
+    // sync from the shared slot when that specific mesh has no override.
+    for (const [meshName, clone] of this.perMeshOverrideMap.get(state.id) ?? []) {
+      this.applyPropertiesToMaterial(clone, state);
+      clone.needsUpdate = true;
+      if (!meshOverrides[meshName]?.aoMap && state.aoMap.enabled && state.aoMap.dataUrl) {
+        this.loadTextureAsync(state.aoMap.dataUrl).then((tex) => {
+          if (tex) { clone.aoMap = tex; clone.needsUpdate = true; }
+        });
+      }
+      if (!meshOverrides[meshName]?.lightMap && state.lightMap.enabled && state.lightMap.dataUrl) {
+        this.loadTextureAsync(state.lightMap.dataUrl).then((tex) => {
+          if (tex) { clone.lightMap = tex; clone.needsUpdate = true; }
+        });
+      }
+    }
+  }
+
+  /** Apply every non-texture PBR property from a state onto a live material. */
+  private applyPropertiesToMaterial(mat: THREE.MeshStandardMaterial, state: PBRMaterialState): void {
+    mat.color.set(state.color);
+    mat.emissive.set(state.emissive);
+    mat.emissiveIntensity = state.emissiveIntensity;
+    mat.roughness = state.roughness;
+    mat.metalness = state.metalness;
+    mat.opacity = state.opacity;
+    mat.transparent = state.transparent || state.transmission > 0;
+    mat.side = state.doubleSided ? THREE.DoubleSide : THREE.FrontSide;
+    mat.flatShading = state.flatShading;
+    mat.normalScale = new THREE.Vector2(state.normalScale, state.normalScale);
+    mat.bumpScale = state.bumpScale;
+    mat.aoMapIntensity = state.aoMapIntensity;
+    mat.lightMapIntensity = state.lightMapIntensity;
+    mat.displacementScale = state.displacementScale;
+    mat.displacementBias = state.displacementBias;
+    mat.envMapIntensity = state.envMapIntensity;
+    mat.alphaTest = state.alphaTest;
+    mat.depthWrite = state.depthWrite;
+    mat.colorWrite = state.colorWrite;
+
+    if (mat instanceof THREE.MeshPhysicalMaterial) {
+      mat.clearcoat = state.clearcoat;
+      mat.clearcoatRoughness = state.clearcoatRoughness;
+      mat.transmission = state.transmission;
+      mat.transmissionRoughness = state.transmissionRoughness;
+      mat.thickness = state.thickness;
+      mat.ior = state.ior;
+      mat.sheen = state.sheen;
+      mat.sheenRoughness = state.sheenRoughness;
+      mat.sheenColor.set(state.sheenColor);
+      mat.iridescence = state.iridescence;
+      mat.iridescenceIOR = state.iridescenceIOR;
+      mat.iridescenceThicknessRange = new THREE.Vector2(state.iridescenceThicknessRange[0], state.iridescenceThicknessRange[1]);
+      mat.attenuationColor.set(state.attenuationColor);
+      mat.attenuationDistance = state.attenuationDistance === Infinity ? Infinity : state.attenuationDistance;
+      mat.specularIntensity = state.specularIntensity;
+      mat.specularColor.set(state.specularColor);
+    }
+
+    mat.needsUpdate = true;
   }
 
   /**
@@ -394,6 +445,114 @@ export class MaterialManager {
         mat.needsUpdate = true;
       }
     }
+  }
+
+  /**
+   * Remove a texture from a material slot on the live scene. removeTextureSlot
+   * in the store only resets UI state - it never touched the actual
+   * THREE.Material, so a removed texture kept rendering until something else
+   * happened to reassign the slot. This clears it directly.
+   */
+  clearTextureSlot(materialId: string, slotKey: TextureSlotKey): void {
+    const mats = this.materialMap.get(materialId);
+    if (!mats) return;
+    for (const mat of mats) {
+      (mat as any)[slotKey] = null;
+      mat.needsUpdate = true;
+    }
+  }
+
+  /** Find a mesh by name anywhere in the scene. */
+  private findMeshByName(scene: THREE.Scene, meshName: string): THREE.Mesh | null {
+    let found: THREE.Mesh | null = null;
+    scene.traverse((obj) => {
+      if (found) return;
+      if (obj instanceof THREE.Mesh && obj.name === meshName) found = obj;
+    });
+    return found;
+  }
+
+  /**
+   * Get (creating if needed) a per-mesh clone of a shared material so one
+   * mesh can carry its own AO/Lightmap independent of the material's shared
+   * slot. The clone starts as a copy of the shared material (so color,
+   * roughness, other maps, etc. all match) and is swapped onto that mesh in
+   * place of the shared instance; applyMaterialState keeps it in sync with
+   * everything except aoMap/lightMap on meshes with an active override.
+   */
+  private getOrCreateMeshClone(scene: THREE.Scene, materialId: string, meshName: string): THREE.MeshStandardMaterial | null {
+    let perMeshMats = this.perMeshOverrideMap.get(materialId);
+    if (!perMeshMats) {
+      perMeshMats = new Map();
+      this.perMeshOverrideMap.set(materialId, perMeshMats);
+    }
+
+    const existing = perMeshMats.get(meshName);
+    if (existing) return existing;
+
+    const baseMats = this.materialMap.get(materialId);
+    const baseMat = baseMats?.[0];
+    const mesh = this.findMeshByName(scene, meshName);
+    if (!baseMat || !mesh) return null;
+
+    const clone = baseMat.clone() as THREE.MeshStandardMaterial;
+    clone.name = baseMat.name;
+    perMeshMats.set(meshName, clone);
+
+    if (Array.isArray(mesh.material)) {
+      mesh.material = mesh.material.map((m) => (m === baseMat ? clone : m));
+    } else if (mesh.material === baseMat) {
+      mesh.material = clone;
+    }
+
+    return clone;
+  }
+
+  /**
+   * Assign a per-mesh AO/Lightmap override - clones the shared material for
+   * this specific mesh (if not already cloned) and loads the texture onto
+   * just that clone, leaving every other mesh using this material untouched.
+   */
+  setMeshTextureOverride(
+    scene: THREE.Scene,
+    materialId: string,
+    meshName: string,
+    slotKey: 'aoMap' | 'lightMap',
+    dataUrl: string,
+    uvChannel: number,
+  ): void {
+    const clone = this.getOrCreateMeshClone(scene, materialId, meshName);
+    if (!clone) return;
+    this.loadTextureAsync(dataUrl).then((texture) => {
+      if (!texture) return;
+      texture.wrapS = THREE.RepeatWrapping;
+      texture.wrapT = THREE.RepeatWrapping;
+      texture.colorSpace = THREE.LinearSRGBColorSpace;
+      texture.channel = uvChannel;
+      texture.needsUpdate = true;
+      (clone as any)[slotKey] = texture;
+      clone.needsUpdate = true;
+    });
+  }
+
+  /** Change the UV channel of an already-assigned per-mesh override, without reloading it. */
+  setMeshTextureOverrideUVChannel(materialId: string, meshName: string, slotKey: 'aoMap' | 'lightMap', channel: number): void {
+    const clone = this.perMeshOverrideMap.get(materialId)?.get(meshName);
+    const texture = clone ? ((clone as any)[slotKey] as THREE.Texture | null) : null;
+    if (texture && clone) {
+      texture.channel = channel;
+      texture.needsUpdate = true;
+      clone.needsUpdate = true;
+    }
+  }
+
+  /** Clear a per-mesh override, reverting that slot to the shared material's aoMap/lightMap immediately. */
+  clearMeshTextureOverride(materialId: string, meshName: string, slotKey: 'aoMap' | 'lightMap'): void {
+    const clone = this.perMeshOverrideMap.get(materialId)?.get(meshName);
+    if (!clone) return;
+    const sharedTexture = this.materialMap.get(materialId)?.[0]?.[slotKey] ?? null;
+    (clone as any)[slotKey] = sharedTexture;
+    clone.needsUpdate = true;
   }
 
   /**

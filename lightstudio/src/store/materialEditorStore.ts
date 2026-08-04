@@ -2,6 +2,8 @@ import { create } from 'zustand';
 import type { PBRMaterialState, TextureSlotKey, MaterialTextureSlot } from '../types/MaterialEditor';
 import { createPBRMaterialState, createEmptyTextureSlot, UV2_TEXTURE_SLOTS } from '../types/MaterialEditor';
 
+export type MeshOverrideKey = 'aoMap' | 'lightMap';
+
 interface MaterialEditorStore {
   /** All extracted materials from the model */
   materials: PBRMaterialState[];
@@ -23,6 +25,12 @@ interface MaterialEditorStore {
   removeTextureSlot: (id: string, slotKey: TextureSlotKey) => void;
   /** Change which UV set a texture slot samples from (three.js Texture.channel) */
   updateTextureUVChannel: (id: string, slotKey: TextureSlotKey, channel: number) => void;
+  /** Assign a per-mesh AO/Lightmap override, overriding the shared material's map for just that mesh */
+  updateMeshTextureOverride: (id: string, meshName: string, slotKey: MeshOverrideKey, dataUrl: string, fileName: string) => void;
+  /** Remove a per-mesh AO/Lightmap override, falling back to the shared material's map for that mesh */
+  removeMeshTextureOverride: (id: string, meshName: string, slotKey: MeshOverrideKey) => void;
+  /** Change UV channel for a per-mesh override */
+  updateMeshTextureOverrideUVChannel: (id: string, meshName: string, slotKey: MeshOverrideKey, channel: number) => void;
   /** Export all material states (for scene save) */
   exportMaterials: () => PBRMaterialState[];
   /** Import material states (for scene load) */
@@ -94,6 +102,62 @@ export const useMaterialEditorStore = create<MaterialEditorStore>((set, get) => 
     }));
   },
 
+  updateMeshTextureOverride: (id, meshName, slotKey, dataUrl, fileName) => {
+    set((state) => ({
+      materials: state.materials.map((m) => {
+        if (m.id !== id) return m;
+        const existing = m.meshTextureOverrides[meshName]?.[slotKey];
+        return {
+          ...m,
+          meshTextureOverrides: {
+            ...m.meshTextureOverrides,
+            [meshName]: {
+              ...m.meshTextureOverrides[meshName],
+              [slotKey]: { enabled: true, dataUrl, fileName, uvChannel: existing?.uvChannel ?? 1 },
+            },
+          },
+        };
+      }),
+    }));
+  },
+
+  removeMeshTextureOverride: (id, meshName, slotKey) => {
+    set((state) => ({
+      materials: state.materials.map((m) => {
+        if (m.id !== id) return m;
+        const meshOverrides = { ...m.meshTextureOverrides[meshName] };
+        delete meshOverrides[slotKey];
+        const meshTextureOverrides = { ...m.meshTextureOverrides };
+        if (Object.keys(meshOverrides).length === 0) {
+          delete meshTextureOverrides[meshName];
+        } else {
+          meshTextureOverrides[meshName] = meshOverrides;
+        }
+        return { ...m, meshTextureOverrides };
+      }),
+    }));
+  },
+
+  updateMeshTextureOverrideUVChannel: (id, meshName, slotKey, channel) => {
+    set((state) => ({
+      materials: state.materials.map((m) => {
+        if (m.id !== id) return m;
+        const existing = m.meshTextureOverrides[meshName]?.[slotKey];
+        if (!existing) return m;
+        return {
+          ...m,
+          meshTextureOverrides: {
+            ...m.meshTextureOverrides,
+            [meshName]: {
+              ...m.meshTextureOverrides[meshName],
+              [slotKey]: { ...existing, uvChannel: channel },
+            },
+          },
+        };
+      }),
+    }));
+  },
+
   exportMaterials: () => {
     return get().materials.map((m) => ({
       ...m,
@@ -108,6 +172,16 @@ export const useMaterialEditorStore = create<MaterialEditorStore>((set, get) => 
       bumpMap: { ...m.bumpMap },
       alphaMap: { ...m.alphaMap },
       displacementMap: { ...m.displacementMap },
+      // Deep clone per-mesh overrides
+      meshTextureOverrides: Object.fromEntries(
+        Object.entries(m.meshTextureOverrides).map(([meshName, overrides]) => [
+          meshName,
+          {
+            ...(overrides.aoMap && { aoMap: { ...overrides.aoMap } }),
+            ...(overrides.lightMap && { lightMap: { ...overrides.lightMap } }),
+          },
+        ]),
+      ),
       // Deep clone iridescence range
       iridescenceThicknessRange: [...m.iridescenceThicknessRange] as [number, number],
       // Ensure Infinity serializes properly for JSON
@@ -148,6 +222,18 @@ export const useMaterialEditorStore = create<MaterialEditorStore>((set, get) => 
         bumpMap: restoreSlot(m.bumpMap, base.bumpMap),
         alphaMap: restoreSlot(m.alphaMap, base.alphaMap),
         displacementMap: restoreSlot(m.displacementMap, base.displacementMap),
+        // Restore per-mesh overrides, defaulting to none for older saved files
+        meshTextureOverrides: m.meshTextureOverrides && typeof m.meshTextureOverrides === 'object'
+          ? Object.fromEntries(
+              Object.entries(m.meshTextureOverrides).map(([meshName, overrides]) => [
+                meshName,
+                {
+                  ...(overrides?.aoMap && { aoMap: restoreSlot(overrides.aoMap, createEmptyTextureSlot(1)) }),
+                  ...(overrides?.lightMap && { lightMap: restoreSlot(overrides.lightMap, createEmptyTextureSlot(1)) }),
+                },
+              ]),
+            )
+          : {},
         // Restore Infinity from -1 sentinel
         attenuationDistance: m.attenuationDistance === -1 ? Infinity : (m.attenuationDistance ?? Infinity),
         iridescenceThicknessRange: m.iridescenceThicknessRange ?? [100, 400],
