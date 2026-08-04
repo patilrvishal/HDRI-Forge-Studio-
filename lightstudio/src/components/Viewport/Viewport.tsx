@@ -493,13 +493,22 @@ export const Viewport: React.FC<ViewportProps> = ({ sceneManagerRef, onScreensho
     envLoaderRef,
   ]);
 
-  // Apply environment intensity WITHOUT reloading the texture
+  // Apply environment intensity WITHOUT reloading the texture.
+  // scene.backgroundIntensity is NOT run through renderer.toneMappingExposure
+  // by three.js (only lit materials are), so View Exposure is folded in here
+  // to keep the background plate's brightness in sync with the HDRI preview.
+  // The preview panel tonemaps with Reinhard + gamma 2.2 (see HDRIPreviewPanel's
+  // tonemapToImageData), which reads much brighter than a raw linear multiply at
+  // the same exposure value - gamma-correcting the multiplier here approximates
+  // that curve so the two stay visually close instead of the viewport crushing
+  // to black far faster than the preview dims.
   useEffect(() => {
     const sm = sceneManagerRef.current;
     if (!sm) return;
     sm.scene.environmentIntensity = environment.intensity;
-    sm.scene.backgroundIntensity = environment.intensity;
-  }, [environment.intensity, sceneManagerRef]);
+    const gammaCorrectedExposure = Math.pow(Math.max(renderSettings.exposure, 0.0001), 1 / 2.2);
+    sm.scene.backgroundIntensity = environment.intensity * gammaCorrectedExposure;
+  }, [environment.intensity, renderSettings.exposure, sceneManagerRef]);
 
   // Restore model from scene file (triggered when _pendingModelDataBase64 is set)
   useEffect(() => {
