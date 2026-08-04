@@ -3,7 +3,7 @@ import * as THREE from 'three';
 import { useMaterialEditorStore } from '../../store/materialEditorStore';
 import { useUIStore } from '../../store/uiStore';
 import type { PBRMaterialState, TextureSlotKey } from '../../types/MaterialEditor';
-import { TEXTURE_SLOT_LABELS } from '../../types/MaterialEditor';
+import { TEXTURE_SLOT_LABELS, UV2_TEXTURE_SLOTS } from '../../types/MaterialEditor';
 import type { MaterialManager } from '../../three/MaterialManager';
 
 interface MaterialEditorPanelProps {
@@ -13,7 +13,7 @@ interface MaterialEditorPanelProps {
 
 const TEXTURE_SLOTS: TextureSlotKey[] = [
   'map', 'normalMap', 'roughnessMap', 'metalnessMap',
-  'emissiveMap', 'aoMap', 'bumpMap', 'alphaMap', 'displacementMap',
+  'emissiveMap', 'aoMap', 'lightMap', 'bumpMap', 'alphaMap', 'displacementMap',
 ];
 
 interface PropRow {
@@ -42,6 +42,7 @@ const PROP_ROWS: PropRow[] = [
   { label: 'Normal Scale', key: 'normalScale', min: 0, max: 2, step: 0.001, section: 'Surface' },
   { label: 'Bump Scale', key: 'bumpScale', min: 0, max: 2, step: 0.001, section: 'Surface' },
   { label: 'AO Intensity', key: 'aoMapIntensity', min: 0, max: 3, step: 0.001, section: 'Surface' },
+  { label: 'Lightmap Intensity', key: 'lightMapIntensity', min: 0, max: 3, step: 0.001, section: 'Surface' },
 
   // ── Specular ─────────────────────────────────────────────────
   { label: 'Specular Int.', key: 'specularIntensity', min: 0, max: 1, step: 0.001, section: 'Specular', physicalOnly: true },
@@ -148,6 +149,26 @@ const MaterialEditorPanel: React.FC<MaterialEditorPanelProps> = ({ materialManag
   const searchInputRef = useRef<HTMLInputElement>(null);
 
   const selected = materials.find((m) => m.id === selectedId) ?? null;
+
+  // aoMap/lightMap sample the mesh's SECOND uv channel (uv2) in three.js - if
+  // none of the meshes using this material have one, the map silently has no
+  // effect, so surface it as a warning instead of a mysteriously-inert slot.
+  const missingUV2 = useMemo(() => {
+    if (!selected) return false;
+    const scene = sceneRef.current;
+    if (!scene) return false;
+    const meshNameSet = new Set(selected.meshNames);
+    let found = false;
+    let hasUV2 = false;
+    scene.traverse((obj) => {
+      if (found) return;
+      if (obj instanceof THREE.Mesh && meshNameSet.has(obj.name)) {
+        found = true;
+        hasUV2 = !!obj.geometry.attributes.uv2;
+      }
+    });
+    return found && !hasUV2;
+  }, [selected, sceneRef]);
 
   // Focus search input when opened
   useEffect(() => {
@@ -614,9 +635,10 @@ const MaterialEditorPanel: React.FC<MaterialEditorPanelProps> = ({ materialManag
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 3, marginTop: 4 }}>
                       {TEXTURE_SLOTS.map((slotKey) => {
                         const slot = selected[slotKey];
+                        const showUV2Warning = slot.enabled && UV2_TEXTURE_SLOTS.has(slotKey) && missingUV2;
                         return (
+                          <React.Fragment key={slotKey}>
                           <div
-                            key={slotKey}
                             style={{
                               display: 'flex', alignItems: 'center', gap: 4,
                               padding: '3px 4px', borderRadius: 'var(--radius-sm)',
@@ -679,6 +701,12 @@ const MaterialEditorPanel: React.FC<MaterialEditorPanelProps> = ({ materialManag
                               onChange={(e) => handleTextureFileChange(slotKey, e)}
                             />
                           </div>
+                          {showUV2Warning && (
+                            <div style={{ fontSize: 8, color: 'var(--warning, #d9a441)', padding: '0 4px 2px' }}>
+                              No second UV channel (uv2) on this mesh — {TEXTURE_SLOT_LABELS[slotKey].toLowerCase()} won't render.
+                            </div>
+                          )}
+                          </React.Fragment>
                         );
                       })}
                     </div>

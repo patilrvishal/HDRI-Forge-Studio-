@@ -53,6 +53,8 @@ export interface PBRMaterialState {
   emissiveMap: MaterialTextureSlot;
   /** Ambient Occlusion map */
   aoMap: MaterialTextureSlot;
+  /** Baked lightmap - requires the mesh to have a second UV channel (uv2) */
+  lightMap: MaterialTextureSlot;
   /** Bump map */
   bumpMap: MaterialTextureSlot;
   /** Alpha map (for cutout transparency) */
@@ -65,6 +67,8 @@ export interface PBRMaterialState {
   bumpScale: number;
   /** AO map intensity */
   aoMapIntensity: number;
+  /** Lightmap intensity */
+  lightMapIntensity: number;
 
   // ── Physical Material Properties (MeshPhysicalMaterial) ────────────
   /** Whether this material uses physical (extended PBR) properties */
@@ -119,7 +123,7 @@ export interface PBRMaterialState {
   colorWrite: boolean;
 }
 
-export type TextureSlotKey = 'map' | 'normalMap' | 'roughnessMap' | 'metalnessMap' | 'emissiveMap' | 'aoMap' | 'bumpMap' | 'alphaMap' | 'displacementMap';
+export type TextureSlotKey = 'map' | 'normalMap' | 'roughnessMap' | 'metalnessMap' | 'emissiveMap' | 'aoMap' | 'lightMap' | 'bumpMap' | 'alphaMap' | 'displacementMap';
 
 export const TEXTURE_SLOT_LABELS: Record<TextureSlotKey, string> = {
   map: 'Albedo',
@@ -128,10 +132,14 @@ export const TEXTURE_SLOT_LABELS: Record<TextureSlotKey, string> = {
   metalnessMap: 'Metalness',
   emissiveMap: 'Emissive',
   aoMap: 'AO',
+  lightMap: 'Lightmap',
   bumpMap: 'Bump',
   alphaMap: 'Alpha',
   displacementMap: 'Displacement',
 };
+
+/** Texture slots that sample the mesh's second UV channel (uv2) instead of the primary UVs. */
+export const UV2_TEXTURE_SLOTS: ReadonlySet<TextureSlotKey> = new Set(['aoMap', 'lightMap']);
 
 export function createEmptyTextureSlot(): MaterialTextureSlot {
   return { enabled: false, dataUrl: null, fileName: '' };
@@ -161,11 +169,13 @@ export function createPBRMaterialState(
     metalnessMap: createEmptyTextureSlot(),
     emissiveMap: createEmptyTextureSlot(),
     aoMap: createEmptyTextureSlot(),
+    lightMap: createEmptyTextureSlot(),
     bumpMap: createEmptyTextureSlot(),
     alphaMap: createEmptyTextureSlot(),
     normalScale: 1,
     bumpScale: 1,
     aoMapIntensity: 1,
+    lightMapIntensity: 1,
     // Physical material defaults
     isPhysical: false,
     clearcoat: 0,

@@ -61,6 +61,7 @@ export class MaterialManager {
       state.normalScale = mat.normalScale?.x ?? 1;
       state.bumpScale = mat.bumpScale;
       state.aoMapIntensity = mat.aoMapIntensity;
+      state.lightMapIntensity = mat.lightMapIntensity;
       state.displacementScale = mat.displacementScale;
       state.displacementBias = mat.displacementBias;
       state.envMapIntensity = mat.envMapIntensity;
@@ -108,6 +109,9 @@ export class MaterialManager {
       }
       if (mat.aoMap) {
         state.aoMap = { enabled: true, dataUrl: null, fileName: '(embedded)' };
+      }
+      if (mat.lightMap) {
+        state.lightMap = { enabled: true, dataUrl: null, fileName: '(embedded)' };
       }
       if (mat.bumpMap) {
         state.bumpMap = { enabled: true, dataUrl: null, fileName: '(embedded)' };
@@ -174,6 +178,7 @@ export class MaterialManager {
     phys.normalScale.copy(mat.normalScale);
     phys.bumpScale = mat.bumpScale;
     phys.aoMapIntensity = mat.aoMapIntensity;
+    phys.lightMapIntensity = mat.lightMapIntensity;
 
     // Copy textures
     phys.map = mat.map;
@@ -182,6 +187,7 @@ export class MaterialManager {
     phys.metalnessMap = mat.metalnessMap;
     phys.emissiveMap = mat.emissiveMap;
     phys.aoMap = mat.aoMap;
+    phys.lightMap = mat.lightMap;
     phys.bumpMap = mat.bumpMap;
     phys.alphaMap = mat.alphaMap;
 
@@ -307,6 +313,7 @@ export class MaterialManager {
       mat.normalScale = new THREE.Vector2(state.normalScale, state.normalScale);
       mat.bumpScale = state.bumpScale;
       mat.aoMapIntensity = state.aoMapIntensity;
+      mat.lightMapIntensity = state.lightMapIntensity;
       mat.displacementScale = state.displacementScale;
       mat.displacementBias = state.displacementBias;
       mat.envMapIntensity = state.envMapIntensity;
@@ -339,7 +346,7 @@ export class MaterialManager {
       // Textures (only apply user-uploaded textures, don't override embedded ones)
       const slotKeys: TextureSlotKey[] = [
         'map', 'normalMap', 'roughnessMap', 'metalnessMap',
-        'emissiveMap', 'aoMap', 'bumpMap', 'alphaMap', 'displacementMap',
+        'emissiveMap', 'aoMap', 'lightMap', 'bumpMap', 'alphaMap', 'displacementMap',
       ];
       for (const slotKey of slotKeys) {
         const slot = state[slotKey];
