@@ -20,6 +20,11 @@ const CATEGORY_TABS: Array<{ key: PresetCategory; label: string }> = [
   { key: 'custom', label: 'Custom' },
 ];
 
+const THUMB_SIZE_KEY = 'lightforge-preset-thumb-size';
+const THUMB_SIZE_MIN = 48;
+const THUMB_SIZE_MAX = 140;
+const THUMB_SIZE_DEFAULT = 64;
+
 export const PresetBrowser: React.FC<PresetBrowserProps> = ({ onGenerateThumbnail }) => {
   const presets = usePresetsStore((s) => s.presets);
   const activeCategory = usePresetsStore((s) => s.activeCategory);
@@ -46,6 +51,27 @@ export const PresetBrowser: React.FC<PresetBrowserProps> = ({ onGenerateThumbnai
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [renderingIds, setRenderingIds] = useState<Set<string>>(new Set());
   const hasStartedRendering = useRef(false);
+
+  // Thumbnail size adjuster — applies to every category (Studio/Outdoor/
+  // Spotlight/Sidelights/Custom) since it drives a shared CSS variable.
+  const [thumbSize, setThumbSize] = useState<number>(() => {
+    try {
+      const stored = Number(localStorage.getItem(THUMB_SIZE_KEY));
+      return Number.isFinite(stored) && stored >= THUMB_SIZE_MIN && stored <= THUMB_SIZE_MAX
+        ? stored
+        : THUMB_SIZE_DEFAULT;
+    } catch {
+      return THUMB_SIZE_DEFAULT;
+    }
+  });
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(THUMB_SIZE_KEY, String(thumbSize));
+    } catch {
+      // ignore storage errors (private browsing, etc.)
+    }
+  }, [thumbSize]);
 
   const showToast = useCallback((msg: string, duration = 2000) => {
     if (toastTimer.current) clearTimeout(toastTimer.current);
@@ -207,17 +233,35 @@ export const PresetBrowser: React.FC<PresetBrowserProps> = ({ onGenerateThumbnai
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', position: 'relative' }}>
-      {/* Category tabs */}
-      <div className="preset-tabs">
-        {CATEGORY_TABS.map((tab) => (
-          <div
-            key={tab.key}
-            className={`preset-tab ${activeCategory === tab.key ? 'active' : ''}`}
-            onClick={() => setActiveCategory(tab.key)}
-          >
-            {tab.label}
-          </div>
-        ))}
+      {/* Category tabs + thumbnail size adjuster */}
+      <div className="preset-tabs" style={{ justifyContent: 'space-between', paddingRight: 6 }}>
+        <div style={{ display: 'flex' }}>
+          {CATEGORY_TABS.map((tab) => (
+            <div
+              key={tab.key}
+              className={`preset-tab ${activeCategory === tab.key ? 'active' : ''}`}
+              onClick={() => setActiveCategory(tab.key)}
+            >
+              {tab.label}
+            </div>
+          ))}
+        </div>
+
+        <div className="preset-size-adjuster" title={`Thumbnail size: ${thumbSize}px`}>
+          <svg width="9" height="9" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.2" opacity="0.6">
+            <rect x="1" y="4" width="3" height="5" />
+            <rect x="6" y="1" width="3" height="8" />
+          </svg>
+          <input
+            type="range"
+            min={THUMB_SIZE_MIN}
+            max={THUMB_SIZE_MAX}
+            step={4}
+            value={thumbSize}
+            onChange={(e) => setThumbSize(Number(e.target.value))}
+            aria-label="Adjust preset thumbnail size"
+          />
+        </div>
       </div>
 
       {/* Search bar */}
@@ -241,7 +285,7 @@ export const PresetBrowser: React.FC<PresetBrowserProps> = ({ onGenerateThumbnai
             {searchQuery ? 'No matching presets' : 'No presets in this category'}
           </div>
         ) : (
-          <div className="preset-grid">
+          <div className="preset-grid" style={{ '--preset-thumb-size': `${thumbSize}px` } as React.CSSProperties}>
             {filteredPresets.map((preset) => (
               <div
                 key={preset.id}

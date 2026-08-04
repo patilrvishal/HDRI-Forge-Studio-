@@ -283,18 +283,92 @@ const MENU_DEFINITIONS = (
 
 const MENU_KEYS = ['Project', 'Edit', 'Create', 'Canvas', 'Window', 'Help'];
 
-const THEME_OPTIONS: Array<{ value: string; label: string }> = [
-  { value: 'purple', label: 'Purple' },
-  { value: 'yellow-orange', label: 'Yellow-Orange' },
-  { value: 'white-orange', label: 'White-Orange' },
-  { value: 'bluish-black', label: 'Bluish-Black' },
+const THEME_OPTIONS: Array<{ value: string; label: string; dot: string }> = [
+  { value: 'purple', label: 'Purple', dot: '#c084fc' },
+  { value: 'yellow-orange', label: 'Yellow-Orange', dot: '#ffc24d' },
+  { value: 'white-orange', label: 'White-Orange', dot: '#fff3e0' },
+  { value: 'bluish-black', label: 'Bluish-Black', dot: '#6c8cff' },
 ];
 
 const THEME_STORAGE_KEY = 'lightforge-accent-theme';
 
+// ── Nav icon set - minimal 14x14 stroke glyphs, matching style ──────────
+const IconHome = () => (
+  <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
+    <path d="M2 7.5L8 2l6 5.5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
+    <path d="M3.5 6.5V13.5a.5.5 0 0 0 .5.5h3v-4h2v4h3a.5.5 0 0 0 .5-.5V6.5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
+  </svg>
+);
+const IconFolder = () => (
+  <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
+    <path d="M2 4.5A1.5 1.5 0 0 1 3.5 3H6l1.5 1.5H12.5A1.5 1.5 0 0 1 14 6v6a1.5 1.5 0 0 1-1.5 1.5h-9A1.5 1.5 0 0 1 2 12z" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round" />
+  </svg>
+);
+const IconEdit = () => (
+  <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
+    <path d="M11 2.5l2.5 2.5L5 13.5H2.5V11z" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round" />
+  </svg>
+);
+const IconCreate = () => (
+  <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
+    <rect x="2.5" y="2.5" width="11" height="11" rx="2" stroke="currentColor" strokeWidth="1.4" />
+    <path d="M8 5.5v5M5.5 8h5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+  </svg>
+);
+const IconCanvas = () => (
+  <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
+    <rect x="2" y="2" width="5" height="5" rx="1" stroke="currentColor" strokeWidth="1.4" />
+    <rect x="9" y="2" width="5" height="5" rx="1" stroke="currentColor" strokeWidth="1.4" />
+    <rect x="2" y="9" width="5" height="5" rx="1" stroke="currentColor" strokeWidth="1.4" />
+    <rect x="9" y="9" width="5" height="5" rx="1" stroke="currentColor" strokeWidth="1.4" />
+  </svg>
+);
+const IconWindow = () => (
+  <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
+    <rect x="2" y="3" width="12" height="10" rx="1.5" stroke="currentColor" strokeWidth="1.4" />
+    <path d="M2 6h12" stroke="currentColor" strokeWidth="1.4" />
+  </svg>
+);
+const IconHelp = () => (
+  <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
+    <circle cx="8" cy="8" r="5.75" stroke="currentColor" strokeWidth="1.4" />
+    <path d="M6.2 6.3a1.8 1.8 0 1 1 2.6 1.6c-.6.3-.9.6-.9 1.2" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+    <circle cx="8" cy="11" r="0.6" fill="currentColor" />
+  </svg>
+);
+
+const NAV_ICONS: Record<string, () => React.ReactElement> = {
+  Home: IconHome,
+  Project: IconFolder,
+  Edit: IconEdit,
+  Create: IconCreate,
+  Canvas: IconCanvas,
+  Window: IconWindow,
+  Help: IconHelp,
+};
+
+/** Layered hexagon "forge" logo mark, matching the app's accent. */
+function LogoMark() {
+  return (
+    <svg width="30" height="30" viewBox="0 0 32 32" fill="none">
+      <path d="M16 2 28 9v14L16 30 4 23V9z" fill="url(#logoGrad)" opacity="0.9" />
+      <path d="M16 2 28 9v14L16 30 4 23V9z" stroke="var(--theme-accent-bright)" strokeWidth="1" opacity="0.6" />
+      <path d="M16 9l7 4v8l-7 4-7-4v-8z" stroke="#fff" strokeOpacity="0.85" strokeWidth="1.3" fill="none" />
+      <path d="M9 13l7 4 7-4M16 17v8" stroke="#fff" strokeOpacity="0.55" strokeWidth="1" />
+      <defs>
+        <linearGradient id="logoGrad" x1="4" y1="2" x2="28" y2="30" gradientUnits="userSpaceOnUse">
+          <stop stopColor="var(--theme-accent-bright)" />
+          <stop offset="1" stopColor="var(--theme-accent)" />
+        </linearGradient>
+      </defs>
+    </svg>
+  );
+}
+
 /** Accent-theme dropdown for the tab-bar highlight + Properties card frame.
  *  Applies a data-theme attribute on <body> that the CSS theme presets key
- *  off of, and persists the choice across reloads. */
+ *  off of, and persists the choice across reloads. Custom button+list
+ *  (not a native select) so it can show a colour swatch dot per option. */
 function ThemeSwitcher() {
   const [theme, setTheme] = useState<string>(() => {
     try {
@@ -303,6 +377,8 @@ function ThemeSwitcher() {
       return 'purple';
     }
   });
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (theme === 'purple') {
@@ -317,19 +393,48 @@ function ThemeSwitcher() {
     }
   }, [theme]);
 
+  useEffect(() => {
+    if (!open) return;
+    const handler = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [open]);
+
+  const current = THEME_OPTIONS.find((o) => o.value === theme) ?? THEME_OPTIONS[0];
+
   return (
-    <select
-      className="theme-switcher"
-      value={theme}
-      onChange={(e) => setTheme(e.target.value)}
-      title="Accent theme"
-    >
-      {THEME_OPTIONS.map((opt) => (
-        <option key={opt.value} value={opt.value}>
-          {opt.label}
-        </option>
-      ))}
-    </select>
+    <div ref={ref} style={{ position: 'relative' }}>
+      <button className="theme-switcher-btn" onClick={() => setOpen((o) => !o)} title="Accent theme">
+        <span className="theme-switcher-dot" style={{ background: current.dot, color: current.dot }} />
+        <span>{current.label}</span>
+        <svg width="8" height="8" viewBox="0 0 8 8" style={{ opacity: 0.7, transform: open ? 'rotate(180deg)' : undefined, transition: 'transform 0.15s' }}>
+          <path d="M1 2.5L4 5.5L7 2.5" stroke="currentColor" strokeWidth="1.3" fill="none" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+      </button>
+      {open && (
+        <div className="context-menu" style={{ position: 'absolute', top: '100%', right: 0, marginTop: 4, minWidth: 150 }}>
+          {THEME_OPTIONS.map((opt) => (
+            <div
+              key={opt.value}
+              className="context-menu-item"
+              onClick={() => {
+                setTheme(opt.value);
+                setOpen(false);
+              }}
+              style={{ gap: 8 }}
+            >
+              <span className="theme-switcher-dot" style={{ background: opt.dot, color: opt.dot, flexShrink: 0 }} />
+              <span>{opt.label}</span>
+              {opt.value === theme && (
+                <span style={{ marginLeft: 'auto', color: 'var(--theme-accent-bright)', fontSize: 11 }}>✓</span>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -413,32 +518,55 @@ export const TopMenubar: React.FC<TopMenubarProps> = ({ sceneManagerRef, onExpor
       style={{
         display: 'flex',
         alignItems: 'center',
-        height: 28,
+        height: 48,
         background: 'var(--bg-deep)',
         borderBottom: '1px solid var(--border)',
         flexShrink: 0,
         zIndex: 100,
         position: 'relative',
+        padding: '0 12px',
+        gap: 4,
       }}
     >
-      {MENU_KEYS.map((key) => (
+      {/* Logo + brand */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, paddingRight: 12, flexShrink: 0 }}>
+        <LogoMark />
+        <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--text)', whiteSpace: 'nowrap' }}>
+          HDRI <span style={{ color: 'var(--theme-accent-bright)' }}>Forge</span> Studio
+        </span>
+        <span
+          style={{
+            fontSize: 9, fontWeight: 600, color: 'var(--text-dim)', background: 'var(--bg-card)',
+            border: '1px solid var(--border-light)', borderRadius: 10, padding: '2px 7px', flexShrink: 0,
+          }}
+        >
+          v2.1.0
+        </span>
+      </div>
+
+      <div style={{ width: 1, alignSelf: 'stretch', margin: '10px 4px', background: 'var(--border-light)', flexShrink: 0 }} />
+
+      {/* Home - static brand/"current location" indicator, resets the view */}
+      <button
+        className="topbar-nav-item active"
+        onClick={() => sceneManagerRef?.current?.animateCameraTo([5, 3, 5], [0, 0.5, 0], 500)}
+        title="Reset to default view"
+      >
+        <IconHome />
+        <span>Home</span>
+      </button>
+
+      {MENU_KEYS.map((key) => {
+        const Icon = NAV_ICONS[key];
+        return (
         <div key={key} style={{ position: 'relative' }}>
           <button
+            className={`topbar-nav-item${openMenu === key ? ' active' : ''}`}
             onClick={() => handleMenuClick(key)}
             onMouseEnter={() => handleMenuHover(key)}
-            style={{
-              padding: '0 10px',
-              height: '100%',
-              fontSize: 11,
-              color: openMenu === key ? 'var(--text)' : 'var(--text-sec)',
-              background: openMenu === key ? 'var(--bg-card)' : 'transparent',
-              border: 'none',
-              cursor: 'pointer',
-              transition: 'all 0.1s',
-              fontFamily: 'inherit',
-            }}
           >
-            {key}
+            {Icon && <Icon />}
+            <span>{key}</span>
           </button>
 
           {/* Dropdown */}
@@ -521,9 +649,11 @@ export const TopMenubar: React.FC<TopMenubarProps> = ({ sceneManagerRef, onExpor
             </div>
           )}
         </div>
-      ))}
+        );
+      })}
 
-      <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', paddingRight: 8 }}>
+      <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 4 }}>
+        <div style={{ width: 1, alignSelf: 'stretch', margin: '10px 4px', background: 'var(--border-light)', flexShrink: 0 }} />
         <ThemeSwitcher />
       </div>
     </div>

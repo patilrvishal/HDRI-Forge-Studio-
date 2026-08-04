@@ -320,32 +320,52 @@ body[data-theme="bluish-black"] {
   border-top-right-radius: 9px;
 }
 
-/* ── Theme switcher dropdown (top-right corner) ─────────────────────── */
-.theme-switcher {
-  height: 22px;
-  padding: 0 22px 0 8px;
-  background: var(--bg-header, var(--bg-card));
-  border: 1px solid var(--border-light);
-  border-radius: 4px;
-  color: var(--text-sec);
-  font-size: 10px;
+/* ── Theme switcher button + dropdown (top-right corner) ────────────── */
+.theme-switcher-btn {
+  display: inline-flex; align-items: center; gap: 7px;
+  height: 28px;
+  padding: 0 10px;
+  background: var(--bg-card);
+  border: 1px solid var(--theme-accent-glow-strong);
+  border-radius: 999px;
+  color: var(--text);
+  font-size: 11px;
+  font-weight: 500;
   cursor: pointer;
-  appearance: none;
-  -webkit-appearance: none;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='5' viewBox='0 0 8 5'%3E%3Cpath fill='%239a9aa4' d='M4 5L0 0h8z'/%3E%3C/svg%3E");
-  background-repeat: no-repeat;
-  background-position: right 8px center;
-  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease, background 0.15s ease;
 }
-.theme-switcher:hover {
+.theme-switcher-btn:hover {
   border-color: var(--theme-accent);
-  box-shadow: 0 0 6px var(--theme-accent-glow-strong);
+  box-shadow: 0 0 8px var(--theme-accent-glow-strong);
 }
-.theme-switcher:focus {
-  border-color: var(--theme-accent-bright);
-  box-shadow: 0 0 0 2px var(--theme-accent-glow-strong);
+.theme-switcher-dot {
+  width: 14px; height: 14px; border-radius: 50%; flex-shrink: 0;
+  box-shadow: 0 0 6px currentColor, inset 0 1px 1px rgba(255, 255, 255, 0.3);
 }
-.theme-switcher option { background: var(--bg-card); color: var(--text); }
+
+/* ── Top bar nav items (icon + label) ────────────────────────────────── */
+.topbar-nav-item {
+  display: inline-flex; align-items: center; gap: 6px;
+  height: 32px;
+  padding: 0 12px;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-sec);
+  background: transparent;
+  border: 1px solid transparent;
+  border-bottom: 2px solid transparent;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: color 0.15s ease, background 0.15s ease, border-color 0.15s ease;
+}
+.topbar-nav-item:hover { color: var(--text); background: rgba(255, 255, 255, 0.04); }
+.topbar-nav-item.active {
+  color: var(--theme-accent-bright);
+  background: var(--theme-accent-bg);
+  border-color: var(--theme-accent-glow-strong);
+  border-bottom-color: var(--theme-accent-bright);
+}
 
 .drop-overlay {
   position: absolute; inset: 0; background: rgba(74, 158, 255, 0.06);
@@ -569,6 +589,22 @@ body[data-theme="bluish-black"] {
 .preset-search {
   font-size: 11px;
   height: 22px;
+}
+
+/* Thumbnail size adjuster - top-right of the Presets category-tab row.
+   Applies to every category since --preset-thumb-size is shared by all
+   .preset-grid instances. */
+.preset-size-adjuster {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--text-dim);
+  flex-shrink: 0;
+  padding-bottom: 4px;
+}
+.preset-size-adjuster input[type="range"] {
+  width: 60px;
+  height: 3px;
 }
 
 .preset-grid {
@@ -1770,7 +1806,10 @@ input[type="range"]:active::-webkit-slider-thumb {
 
 .preset-grid {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  /* Driven by --preset-thumb-size, set inline from the size-adjuster slider
+     in PresetBrowser's tab row; auto-fill reflows the column count as the
+     target tile size changes instead of a fixed column count. */
+  grid-template-columns: repeat(auto-fill, minmax(var(--preset-thumb-size, 72px), 1fr));
   gap: 8px;
   padding: 4px 0;
 }
