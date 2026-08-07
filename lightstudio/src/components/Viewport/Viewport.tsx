@@ -704,14 +704,109 @@ export const Viewport: React.FC<ViewportProps> = ({ sceneManagerRef, onScreensho
       if (el?.tagName === 'INPUT' || el?.tagName === 'TEXTAREA' || el?.isContentEditable) return;
       if (e.ctrlKey || e.metaKey || e.altKey) return;
 
-      if (e.key === 'w' || e.key === 'W') setGizmoMode('translate');
-      if (e.key === 'e' || e.key === 'E') setGizmoMode('rotate');
-      if ((e.key === 'r' || e.key === 'R') && scaleAllowed) setGizmoMode('scale');
-      if (e.key === 'Escape') setGizmoMode(null);
+      if (e.key === 'w' || e.key === 'W') { setGizmoMode('translate'); useUIStore.getState().setActiveTool('move'); }
+      if (e.key === 'e' || e.key === 'E') { setGizmoMode('rotate'); useUIStore.getState().setActiveTool('rotate'); }
+      if ((e.key === 'r' || e.key === 'R') && scaleAllowed) { setGizmoMode('scale'); useUIStore.getState().setActiveTool('scale'); }
+      if (e.key === 'Escape') { setGizmoMode(null); useUIStore.getState().setActiveTool('select'); }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [scaleAllowed]);
+
+  // Left toolbar's Select/Move/Rotate/Scale buttons drive the same gizmo the
+  // W/E/R shortcuts do, so both entry points stay in sync.
+  const activeTool = useUIStore((s) => s.activeTool);
+  useEffect(() => {
+    if (activeTool === 'move') setGizmoMode('translate');
+    else if (activeTool === 'rotate') setGizmoMode('rotate');
+    else if (activeTool === 'scale' && scaleAllowed) setGizmoMode('scale');
+    else if (activeTool === 'select') setGizmoMode(null);
+  }, [activeTool, scaleAllowed]);
+
+  // Grid Snap tool - snaps the transform gizmo to fixed position/rotation/scale steps.
+  const gridSnapEnabled = useUIStore((s) => s.gridSnapEnabled);
+  useEffect(() => {
+    gizmoRef.current?.setSnap(gridSnapEnabled);
+  }, [gridSnapEnabled, gizmoMode]);
+
+  // -- Measure tool -------------------------------------------------------------
+  // Click two points on the model to read the distance between them, in scene units.
+  const [measurePoints, setMeasurePoints] = useState<THREE.Vector3[]>([]);
+  const [measureDistance, setMeasureDistance] = useState<number | null>(null);
+  const measureLineRef = useRef<THREE.Line | null>(null);
+
+  const clearMeasureLine = useCallback(() => {
+    const sm = sceneManagerRef.current;
+    if (measureLineRef.current && sm) {
+      sm.scene.remove(measureLineRef.current);
+      measureLineRef.current.geometry.dispose();
+      (measureLineRef.current.material as THREE.Material).dispose();
+      measureLineRef.current = null;
+    }
+  }, [sceneManagerRef]);
+
+  useEffect(() => {
+    const container = containerRef.current;
+    const sm = sceneManagerRef.current;
+    if (!container || !sm || activeTool !== 'measure') return;
+
+    const onClick = (e: MouseEvent) => {
+      const rect = container.getBoundingClientRect();
+      const mouse = new THREE.Vector2(
+        ((e.clientX - rect.left) / rect.width) * 2 - 1,
+        -((e.clientY - rect.top) / rect.height) * 2 + 1
+      );
+      const raycaster = new THREE.Raycaster();
+      raycaster.setFromCamera(mouse, sm.camera);
+
+      const meshes: THREE.Mesh[] = [];
+      sm.scene.traverse((obj) => {
+        if (obj instanceof THREE.Mesh && !obj.userData?.isHelper && !obj.userData?.isProxy && obj.name !== '__floor__') {
+          meshes.push(obj);
+        }
+      });
+      const hits = raycaster.intersectObjects(meshes, false);
+      if (hits.length === 0) return;
+      const point = hits[0].point.clone();
+
+      setMeasurePoints((prev) => {
+        // A third click starts a fresh measurement.
+        const next = prev.length >= 2 ? [point] : [...prev, point];
+        if (next.length < 2) {
+          setMeasureDistance(null);
+          clearMeasureLine();
+        } else {
+          const dist = next[0].distanceTo(next[1]);
+          setMeasureDistance(dist);
+          clearMeasureLine();
+          const geometry = new THREE.BufferGeometry().setFromPoints(next);
+          const material = new THREE.LineDashedMaterial({ color: 0xffc24d, dashSize: 0.1, gapSize: 0.05, linewidth: 2 });
+          const line = new THREE.Line(geometry, material);
+          line.computeLineDistances();
+          line.userData.isHelper = true;
+          sm.scene.add(line);
+          measureLineRef.current = line;
+        }
+        return next;
+      });
+    };
+
+    container.addEventListener('click', onClick);
+    container.style.cursor = 'crosshair';
+    return () => {
+      container.removeEventListener('click', onClick);
+      container.style.cursor = '';
+    };
+  }, [activeTool, sceneManagerRef, containerRef, clearMeasureLine]);
+
+  // Leaving measure mode clears the in-progress readout and drawn line.
+  useEffect(() => {
+    if (activeTool !== 'measure') {
+      setMeasurePoints([]);
+      setMeasureDistance(null);
+      clearMeasureLine();
+    }
+  }, [activeTool, clearMeasureLine]);
 
   // Sync lights to scene
   useEffect(() => {
@@ -1136,6 +1231,31 @@ export const Viewport: React.FC<ViewportProps> = ({ sceneManagerRef, onScreensho
           />
 
           <CameraBookmarks sceneManagerRef={sceneManagerRef} />
+
+          {activeTool === 'measure' && (
+            <div
+              style={{
+                position: 'absolute',
+                top: 8,
+                left: '50%',
+                transform: 'translateX(-50%)',
+                background: 'var(--bg-panel)',
+                border: '1px solid var(--border)',
+                borderRadius: 'var(--radius)',
+                padding: '4px 12px',
+                fontSize: 11,
+                fontFamily: 'var(--font-mono)',
+                color: 'var(--text)',
+                zIndex: 5,
+              }}
+            >
+              {measureDistance !== null
+                ? `Distance: ${measureDistance.toFixed(3)} units — click to start a new measurement`
+                : measurePoints.length === 1
+                  ? 'Click a second point to measure'
+                  : 'Click a point on the model to start measuring'}
+            </div>
+          )}
         </div>
       </div>
     </ThreeSceneProvider>

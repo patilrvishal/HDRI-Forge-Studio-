@@ -1,5 +1,7 @@
 import React, { useCallback } from 'react';
 import { useUIStore, type ActiveTool } from '../../store/uiStore';
+import { useLightsStore } from '../../store/lightsStore';
+import { useSceneStore } from '../../store/sceneStore';
 import { SceneManager } from '../../three/engine';
 
 interface ToolItem {
@@ -121,25 +123,61 @@ interface LeftToolbarProps {
   sceneManagerRef: React.MutableRefObject<SceneManager | null>;
 }
 
-export const LeftToolbar: React.FC<LeftToolbarProps> = (_sceneManagerRef) => {
+export const LeftToolbar: React.FC<LeftToolbarProps> = ({ sceneManagerRef }) => {
   const activeTool = useUIStore((s) => s.activeTool);
   const setActiveTool = useUIStore((s) => s.setActiveTool);
   const toggleFullscreen = useUIStore((s) => s.toggleFullscreen);
   const setSettingsModal = useUIStore((s) => s.setSettingsModal);
+  const gridSnapEnabled = useUIStore((s) => s.gridSnapEnabled);
+  const toggleGridSnap = useUIStore((s) => s.toggleGridSnap);
+  const selectedLightId = useLightsStore((s) => s.selectedLightId);
+  const lights = useLightsStore((s) => s.lights);
+  const toggleLightSolo = useLightsStore((s) => s.toggleLightSolo);
+  const saveCameraBookmark = useSceneStore((s) => s.saveCameraBookmark);
+  const cameraBookmarks = useSceneStore((s) => s.cameraBookmarks);
+
+  const selectedLight = lights.find((l) => l.id === selectedLightId) ?? null;
 
   const handleToolClick = useCallback(
     (tool: ToolItem) => {
-      if (tool.id === 'fullscreen') {
-        toggleFullscreen();
-        return;
+      switch (tool.id) {
+        case 'fullscreen':
+          toggleFullscreen();
+          return;
+        case 'settings':
+          setSettingsModal(true);
+          return;
+        case 'isolate': {
+          // Solo the selected light so only it lights the scene - click again to un-solo.
+          if (selectedLightId) toggleLightSolo(selectedLightId);
+          return;
+        }
+        case 'bookmark': {
+          // Quick-save the current camera view without the name prompt.
+          const sm = sceneManagerRef.current;
+          if (!sm || cameraBookmarks.length >= 8) return;
+          const camState = sm.getCameraState();
+          saveCameraBookmark(`Camera ${cameraBookmarks.length + 1}`, camState.position, camState.target, camState.fov);
+          return;
+        }
+        case 'gridSnap':
+          toggleGridSnap();
+          return;
+        default:
+          setActiveTool(tool.id as ActiveTool);
       }
-      if (tool.id === 'settings') {
-        setSettingsModal(true);
-        return;
-      }
-      setActiveTool(tool.id as ActiveTool);
     },
-    [setActiveTool, toggleFullscreen, setSettingsModal]
+    [
+      setActiveTool,
+      toggleFullscreen,
+      setSettingsModal,
+      selectedLightId,
+      toggleLightSolo,
+      sceneManagerRef,
+      cameraBookmarks,
+      saveCameraBookmark,
+      toggleGridSnap,
+    ]
   );
 
   return (
@@ -157,18 +195,31 @@ export const LeftToolbar: React.FC<LeftToolbarProps> = (_sceneManagerRef) => {
       }}
     >
       {TOOLS.map((tool) => {
-        const isActive =
-          tool.id === activeTool ||
-          (tool.id === 'fullscreen' && useUIStore.getState().isFullscreen);
+        let isActive = tool.id === activeTool;
+        if (tool.id === 'fullscreen') isActive = useUIStore.getState().isFullscreen;
+        else if (tool.id === 'isolate') isActive = !!selectedLight?.solo;
+        else if (tool.id === 'gridSnap') isActive = gridSnapEnabled;
+        else if (tool.id === 'bookmark') isActive = false; // momentary action, not a mode
+
+        const disabled = tool.id === 'isolate' && !selectedLightId;
 
         return (
           <button
             key={tool.id}
             className={`btn-icon ${isActive ? 'active' : ''}`}
             onClick={() => handleToolClick(tool)}
-            title={`${tool.label}${tool.shortcut ? ` (${tool.shortcut})` : ''}`}
+            disabled={disabled}
+            title={
+              tool.id === 'isolate'
+                ? selectedLightId
+                  ? `${selectedLight?.solo ? 'Un-isolate' : 'Isolate'} selected light (${tool.shortcut})`
+                  : 'Select a light first (Isolate)'
+                : tool.id === 'bookmark'
+                  ? 'Quick-save current camera view (B)'
+                  : `${tool.label}${tool.shortcut ? ` (${tool.shortcut})` : ''}`
+            }
             aria-label={tool.label}
-            style={{ width: 30, height: 30 }}
+            style={{ width: 30, height: 30, opacity: disabled ? 0.4 : 1 }}
           >
             {tool.icon}
           </button>

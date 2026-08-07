@@ -47,6 +47,7 @@ interface UIState {
 
   // Tools
   activeTool: ActiveTool;
+  gridSnapEnabled: boolean;
 
   // Layout
   panelLayout: PanelLayout;
@@ -95,6 +96,7 @@ interface UIState {
 
   // Tools & Layout
   setActiveTool: (tool: ActiveTool) => void;
+  toggleGridSnap: () => void;
   setPanelLayout: (layout: PanelLayout) => void;
   toggleFullscreen: () => void;
   setOpenMenu: (menu: string | null) => void;
@@ -138,6 +140,7 @@ export const useUIStore = create<UIState>((set, get) => ({
   envBrowserModalOpen: false,
   manualModalOpen: false,
   activeTool: 'select',
+  gridSnapEnabled: false,
   panelLayout: 'default',
   isFullscreen: false,
   openMenu: null,
@@ -298,6 +301,7 @@ export const useUIStore = create<UIState>((set, get) => ({
 
   // ── Tools & Layout ────────────────────────────────────────────
   setActiveTool: (tool) => set({ activeTool: tool }),
+  toggleGridSnap: () => set((s) => ({ gridSnapEnabled: !s.gridSnapEnabled })),
   setPanelLayout: (layout) => {
     switch (layout) {
       case 'default':

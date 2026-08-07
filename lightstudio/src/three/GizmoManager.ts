@@ -130,6 +130,13 @@ export class GizmoManager {
     }
   }
 
+  /** Snap translation to 0.5-unit steps and rotation to 15deg steps while enabled. */
+  setSnap(enabled: boolean): void {
+    this.controls.setTranslationSnap(enabled ? 0.5 : null);
+    this.controls.setRotationSnap(enabled ? THREE.MathUtils.degToRad(15) : null);
+    this.controls.setScaleSnap(enabled ? 0.1 : null);
+  }
+
   dispose(): void {
     this.disposed = true;
     this.controls.detach();
