@@ -288,6 +288,7 @@ const THEME_OPTIONS: Array<{ value: string; label: string; dot: string }> = [
   { value: 'yellow-orange', label: 'Yellow-Orange', dot: '#ffc24d' },
   { value: 'white-orange', label: 'White-Orange', dot: '#fff3e0' },
   { value: 'bluish-black', label: 'Bluish-Black', dot: '#6c8cff' },
+  { value: 'red-grey', label: 'Red-Grey', dot: '#e5595f' },
 ];
 
 const THEME_STORAGE_KEY = 'lightforge-accent-theme';

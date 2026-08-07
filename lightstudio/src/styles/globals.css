@@ -290,6 +290,15 @@ body[data-theme="bluish-black"] {
   --theme-accent-glow-strong: rgba(59, 91, 219, 0.2);
 }
 
+/* Red-Grey */
+body[data-theme="red-grey"] {
+  --theme-accent: #b3474d;
+  --theme-accent-bright: #e5595f;
+  --theme-accent-bg: rgba(179, 71, 77, 0.16);
+  --theme-accent-glow: rgba(179, 71, 77, 0.5);
+  --theme-accent-glow-strong: rgba(179, 71, 77, 0.2);
+}
+
 .tab-icon { color: var(--text-dim); transition: color 0.15s ease, filter 0.15s ease; }
 
 .tab-bar-purple .tab-item.active {
