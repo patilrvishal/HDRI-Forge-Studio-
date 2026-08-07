@@ -416,23 +416,35 @@ function ThemeSwitcher() {
       </button>
       {open && (
         <div className="context-menu" style={{ position: 'absolute', top: '100%', right: 0, marginTop: 4, minWidth: 150 }}>
-          {THEME_OPTIONS.map((opt) => (
-            <div
-              key={opt.value}
-              className="context-menu-item"
-              onClick={() => {
-                setTheme(opt.value);
-                setOpen(false);
-              }}
-              style={{ gap: 8 }}
-            >
-              <span className="theme-switcher-dot" style={{ background: opt.dot, color: opt.dot, flexShrink: 0 }} />
-              <span>{opt.label}</span>
-              {opt.value === theme && (
-                <span style={{ marginLeft: 'auto', color: 'var(--theme-accent-bright)', fontSize: 11 }}>✓</span>
-              )}
-            </div>
-          ))}
+          {THEME_OPTIONS.map((opt) => {
+            const isSelected = opt.value === theme;
+            return (
+              <div
+                key={opt.value}
+                className={`context-menu-item${isSelected ? ' selected' : ''}`}
+                onClick={() => {
+                  setTheme(opt.value);
+                  setOpen(false);
+                }}
+                style={{ gap: 9 }}
+              >
+                <span
+                  className="theme-switcher-dot"
+                  style={{
+                    background: opt.dot,
+                    color: opt.dot,
+                    flexShrink: 0,
+                    outline: isSelected ? `1.5px solid ${opt.dot}` : 'none',
+                    outlineOffset: 2,
+                  }}
+                />
+                <span>{opt.label}</span>
+                {isSelected && (
+                  <span style={{ marginLeft: 'auto', color: 'var(--theme-accent-bright)', fontSize: 11, fontWeight: 700 }}>✓</span>
+                )}
+              </div>
+            );
+          })}
         </div>
       )}
     </div>
