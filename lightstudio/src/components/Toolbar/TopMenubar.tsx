@@ -289,9 +289,20 @@ const THEME_OPTIONS: Array<{ value: string; label: string; dot: string }> = [
   { value: 'white-orange', label: 'White-Orange', dot: '#fff3e0' },
   { value: 'bluish-black', label: 'Bluish-Black', dot: '#6c8cff' },
   { value: 'red-grey', label: 'Red-Grey', dot: '#e5595f' },
+  { value: 'bright-cyan', label: 'Bright Cyan', dot: '#22d3ee' },
 ];
 
 const THEME_STORAGE_KEY = 'lightforge-accent-theme';
+
+const PANEL_SHADE_OPTIONS: Array<{ value: string; label: string; dot: string }> = [
+  { value: 'darkest', label: 'Darkest', dot: '#0d0d0f' },
+  { value: 'dark', label: 'Dark', dot: '#141417' },
+  { value: 'medium', label: 'Medium', dot: '#2a292e' },
+  { value: 'light', label: 'Light', dot: '#46444c' },
+  { value: 'lightest', label: 'Lightest', dot: '#625f68' },
+];
+
+const PANEL_SHADE_STORAGE_KEY = 'lightforge-panel-shade';
 
 // ── Nav icon set - minimal 14x14 stroke glyphs, matching style ──────────
 const IconHome = () => (
@@ -429,6 +440,79 @@ function ThemeSwitcher() {
               <span className="theme-switcher-dot" style={{ background: opt.dot, color: opt.dot, flexShrink: 0 }} />
               <span>{opt.label}</span>
               {opt.value === theme && (
+                <span style={{ marginLeft: 'auto', color: 'var(--theme-accent-bright)', fontSize: 11 }}>✓</span>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** Panel-shade dropdown for the overall grey level of app backgrounds
+ *  (deep/panel/card/input/elevated), independent of the accent color above.
+ *  Applies a data-shade attribute on <body> that the CSS shade presets key
+ *  off of, and persists the choice across reloads. */
+function PanelShadeSwitcher() {
+  const [shade, setShade] = useState<string>(() => {
+    try {
+      return localStorage.getItem(PANEL_SHADE_STORAGE_KEY) || 'dark';
+    } catch {
+      return 'dark';
+    }
+  });
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (shade === 'dark') {
+      delete document.body.dataset.shade;
+    } else {
+      document.body.dataset.shade = shade;
+    }
+    try {
+      localStorage.setItem(PANEL_SHADE_STORAGE_KEY, shade);
+    } catch {
+      // ignore storage errors (private browsing, etc.)
+    }
+  }, [shade]);
+
+  useEffect(() => {
+    if (!open) return;
+    const handler = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [open]);
+
+  const current = PANEL_SHADE_OPTIONS.find((o) => o.value === shade) ?? PANEL_SHADE_OPTIONS[1];
+
+  return (
+    <div ref={ref} style={{ position: 'relative' }}>
+      <button className="theme-switcher-btn" onClick={() => setOpen((o) => !o)} title="Panel shade">
+        <span className="theme-switcher-dot" style={{ background: current.dot, color: current.dot, border: '1px solid var(--border-light)' }} />
+        <span>{current.label}</span>
+        <svg width="8" height="8" viewBox="0 0 8 8" style={{ opacity: 0.7, transform: open ? 'rotate(180deg)' : undefined, transition: 'transform 0.15s' }}>
+          <path d="M1 2.5L4 5.5L7 2.5" stroke="currentColor" strokeWidth="1.3" fill="none" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+      </button>
+      {open && (
+        <div className="context-menu" style={{ position: 'absolute', top: '100%', right: 0, marginTop: 4, minWidth: 150 }}>
+          {PANEL_SHADE_OPTIONS.map((opt) => (
+            <div
+              key={opt.value}
+              className="context-menu-item"
+              onClick={() => {
+                setShade(opt.value);
+                setOpen(false);
+              }}
+              style={{ gap: 8 }}
+            >
+              <span className="theme-switcher-dot" style={{ background: opt.dot, color: opt.dot, flexShrink: 0, border: '1px solid var(--border-light)' }} />
+              <span>{opt.label}</span>
+              {opt.value === shade && (
                 <span style={{ marginLeft: 'auto', color: 'var(--theme-accent-bright)', fontSize: 11 }}>✓</span>
               )}
             </div>
@@ -655,6 +739,7 @@ export const TopMenubar: React.FC<TopMenubarProps> = ({ sceneManagerRef, onExpor
 
       <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 4 }}>
         <div style={{ width: 1, alignSelf: 'stretch', margin: '10px 4px', background: 'var(--border-light)', flexShrink: 0 }} />
+        <PanelShadeSwitcher />
         <ThemeSwitcher />
       </div>
     </div>

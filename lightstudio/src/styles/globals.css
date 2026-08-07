@@ -5,33 +5,33 @@
 @tailwind utilities;
 
 :root {
-  /* ── Core backgrounds — neutral studio dark ───────────────── */
-  --bg-deep: #0b0b0d;
-  --bg-panel: #141417;
-  --bg-card: #1c1c20;
-  --bg-input: #0f0f12;
-  --bg-elevated: #222228;
-  /* ── Calm blue accent system (pro DCC look) ───────────────── */
-  --accent: #4a9eff;
-  --accent-bright: #74b4ff;
-  --accent-dim: rgba(74, 158, 255, 0.28);
-  --accent-bg: rgba(74, 158, 255, 0.10);
-  --purple: #4a9eff;
-  --purple-glow: rgba(74, 158, 255, 0.45);
-  --pink: #4a9eff;
-  --pink-glow: rgba(74, 158, 255, 0.35);
-  --neon-gradient: linear-gradient(135deg, #4a9eff 0%, #2f7fe0 100%);
+  /* ── Core backgrounds — deep navy studio look ─────────────── */
+  --bg-deep: #080b14;
+  --bg-panel: #0d1220;
+  --bg-card: #111a2c;
+  --bg-input: #0a0f1c;
+  --bg-elevated: #16213a;
+  /* ── Blue-glow accent system (pro DCC look) ───────────────── */
+  --accent: #3b82f6;
+  --accent-bright: #60a5fa;
+  --accent-dim: rgba(59, 130, 246, 0.30);
+  --accent-bg: rgba(59, 130, 246, 0.12);
+  --purple: #3b82f6;
+  --purple-glow: rgba(59, 130, 246, 0.5);
+  --pink: #3b82f6;
+  --pink-glow: rgba(59, 130, 246, 0.35);
+  --neon-gradient: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
   /* ── Track / thumb ────────────────────────────────────────── */
-  --track: #26262c;
-  --thumb: #4a9eff;
+  --track: #1e2a44;
+  --thumb: #3b82f6;
   /* ── Text hierarchy ──────────────────────────────────────── */
-  --text: #e9e9ec;
-  --text-sec: #9a9aa4;
-  --text-dim: #5e5e68;
+  --text: #e9edf5;
+  --text-sec: #9aa5bd;
+  --text-dim: #5e6884;
   /* ── Borders ──────────────────────────────────────────────── */
-  --border: #26262c;
-  --border-light: #34343c;
-  --border-glow: rgba(74, 158, 255, 0.16);
+  --border: #1e2a44;
+  --border-light: #2a3a5c;
+  --border-glow: rgba(59, 130, 246, 0.35);
   /* ── Semantic ─────────────────────────────────────────────── */
   --danger: #f87171;
   --success: #4ade80;
@@ -39,13 +39,13 @@
   /* ── Typography ───────────────────────────────────────────── */
   --font-ui: 'Inter', system-ui, -apple-system, sans-serif;
   --font-mono: 'JetBrains Mono', 'SF Mono', monospace;
-  --radius: 8px;
-  --radius-sm: 5px;
-  /* ── Glow utilities — subtle, calm ────────────────────────── */
-  --glow-sm: 0 0 8px rgba(74, 158, 255, 0.18);
-  --glow-md: 0 0 14px rgba(74, 158, 255, 0.22);
-  --glow-lg: 0 0 22px rgba(74, 158, 255, 0.26);
-  --panel-glow: 0 0 1px var(--border-glow), inset 0 0 0 1px rgba(255,255,255,0.02);
+  --radius: 14px;
+  --radius-sm: 10px;
+  /* ── Glow utilities — blue neon, matching the reference look ── */
+  --glow-sm: 0 0 10px rgba(59, 130, 246, 0.28);
+  --glow-md: 0 0 18px rgba(59, 130, 246, 0.32);
+  --glow-lg: 0 0 28px rgba(59, 130, 246, 0.36);
+  --panel-glow: 0 0 0 1px var(--border-glow), 0 0 24px rgba(59, 130, 246, 0.10);
 }
 
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -177,20 +177,22 @@ select {
 }
 
 .toggle-track {
-  position: relative; width: 32px; height: 16px;
-  background: var(--track); border-radius: 8px;
+  position: relative; width: 34px; height: 18px;
+  background: var(--track); border: 1px solid var(--border-light);
+  border-radius: 10px;
   cursor: pointer; transition: all 0.25s ease; flex-shrink: 0;
 }
 .toggle-track.on {
   background: var(--accent);
-  box-shadow: 0 0 8px var(--purple-glow);
+  border-color: var(--accent-bright);
+  box-shadow: var(--glow-sm);
 }
 .toggle-track::after {
   content: ''; position: absolute; top: 2px; left: 2px;
   width: 12px; height: 12px; background: var(--text);
   border-radius: 50%; transition: transform 0.25s cubic-bezier(0.34, 1.56, 0.64, 1);
 }
-.toggle-track.on::after { transform: translateX(16px); }
+.toggle-track.on::after { transform: translateX(16px); background: #fff; }
 
 .tooltip { position: relative; }
 .tooltip::after {
@@ -210,43 +212,30 @@ select {
   min-width: 36px; text-align: right; flex-shrink: 0;
 }
 
-/* Recessed "groove" trough the tabs sit in - a solid, clearly-visible border
-   plus a hairline highlight just below it reads as a carved 3D seam rather
-   than a flat 1px rule. */
+/* Pill tab-bar: tabs sit as rounded segments inside a rounded track, the
+   active one lifted out with a soft blue glow border - matches the
+   Environment/Lights/Scene modal reference look. */
 .tab-bar {
-  display: flex; align-items: stretch; gap: 0; padding: 0 4px;
-  background: var(--bg-deep);
-  border-bottom: 2px solid var(--border-light);
-  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.06), inset 0 -4px 6px -4px rgba(0, 0, 0, 0.55);
+  display: flex; align-items: stretch; gap: 3px; padding: 4px;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  box-shadow: none;
 }
 .tab-item {
   position: relative;
-  padding: 8px 10px; font-size: 10px; font-weight: 500;
-  text-transform: uppercase; letter-spacing: 0.5px; white-space: nowrap; flex-shrink: 0;
-  display: flex; align-items: center;
-  color: var(--text-dim); border-bottom: 2px solid transparent;
-  /* Carved vertical divider: a solid border for a clearly-visible seam, plus
-     an inset dark/light pair for depth - both inset so they stay inside this
-     tab's own box (no bleed into the next tab's paint). */
-  border-right: 1px solid var(--border-light);
-  box-shadow: inset -2px 0 3px -2px rgba(0, 0, 0, 0.6), inset 1px 0 0 rgba(255, 255, 255, 0.04);
-  cursor: pointer; transition: color 0.15s ease, border-color 0.15s ease, background 0.15s ease, box-shadow 0.15s ease;
+  padding: 8px 14px; font-size: 10px; font-weight: 600;
+  text-transform: uppercase; letter-spacing: 0.6px; white-space: nowrap; flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center; flex: 1;
+  color: var(--text-dim); border: none; border-radius: calc(var(--radius-sm) - 3px);
+  cursor: pointer; transition: color 0.15s ease, background 0.15s ease, box-shadow 0.15s ease;
 }
 .tab-item:last-child { border-right: none; box-shadow: none; }
-.tab-item:hover { color: var(--text-sec); background: rgba(255, 255, 255, 0.03); }
+.tab-item:hover { color: var(--text-sec); background: rgba(255, 255, 255, 0.04); }
 .tab-item.active {
   color: var(--accent-bright);
-  border-bottom-color: var(--accent-bright);
-  /* Raised card popping out of the darker groove: lighter fill, a bright
-     top edge, and solid dark seams either side simulate a physical lip. */
-  background: var(--bg-panel);
-  border-left: 1px solid var(--border-light);
-  border-right: 1px solid var(--border-light);
-  box-shadow:
-    inset 0 2px 0 rgba(255, 255, 255, 0.1),
-    inset 1px 0 0 rgba(0, 0, 0, 0.5),
-    inset -1px 0 0 rgba(0, 0, 0, 0.5),
-    0 2px 6px rgba(0, 0, 0, 0.35);
+  background: linear-gradient(180deg, var(--accent-bg) 0%, rgba(59, 130, 246, 0.04) 100%);
+  box-shadow: inset 0 0 0 1px var(--border-glow), var(--glow-sm);
 }
 
 /* ═══════════════════════════════════════════════════════════════════════
@@ -299,17 +288,71 @@ body[data-theme="red-grey"] {
   --theme-accent-glow-strong: rgba(179, 71, 77, 0.2);
 }
 
+/* Bright Cyan */
+body[data-theme="bright-cyan"] {
+  --theme-accent: #17b8cf;
+  --theme-accent-bright: #22d3ee;
+  --theme-accent-bg: rgba(34, 211, 238, 0.14);
+  --theme-accent-glow: rgba(34, 211, 238, 0.5);
+  --theme-accent-glow-strong: rgba(34, 211, 238, 0.2);
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   PANEL SHADE — overall grey level of app backgrounds (deep/panel/card/
+   input/elevated + matching borders), independent of the accent color
+   above. Default (no attribute) = "dark", matching the :root values.
+   ═══════════════════════════════════════════════════════════════════════ */
+body[data-shade="darkest"] {
+  --bg-deep: #04060c;
+  --bg-panel: #070a14;
+  --bg-card: #0a0f1c;
+  --bg-input: #03050a;
+  --bg-elevated: #0e1526;
+  --border: #141c30;
+  --border-light: #1c2740;
+  --border-glow: rgba(59, 130, 246, 0.3);
+}
+
+body[data-shade="medium"] {
+  --bg-deep: #141a2c;
+  --bg-panel: #1a2138;
+  --bg-card: #202a46;
+  --bg-input: #101524;
+  --bg-elevated: #263254;
+  --border: #2e3c60;
+  --border-light: #3c4d78;
+  --border-glow: rgba(96, 165, 250, 0.38);
+}
+
+body[data-shade="light"] {
+  --bg-deep: #232c48;
+  --bg-panel: #2c3658;
+  --bg-card: #34406a;
+  --bg-input: #1e2640;
+  --bg-elevated: #3c4a78;
+  --border: #46557f;
+  --border-light: #566798;
+  --border-glow: rgba(96, 165, 250, 0.42);
+}
+
+body[data-shade="lightest"] {
+  --bg-deep: #333f66;
+  --bg-panel: #3d4b78;
+  --bg-card: #465488;
+  --bg-input: #2c3860;
+  --bg-elevated: #4f5f98;
+  --border: #5a6aa0;
+  --border-light: #6c7cb0;
+  --border-glow: rgba(147, 197, 253, 0.45);
+  --text-sec: #c5cee5;
+}
+
 .tab-icon { color: var(--text-dim); transition: color 0.15s ease, filter 0.15s ease; }
 
 .tab-bar-purple .tab-item.active {
   color: var(--theme-accent-bright);
-  border-bottom-color: var(--theme-accent-bright);
-  background: var(--theme-accent-bg);
-  box-shadow:
-    inset 0 2px 0 rgba(255, 255, 255, 0.1),
-    inset 1px 0 0 rgba(0, 0, 0, 0.5),
-    inset -1px 0 0 rgba(0, 0, 0, 0.5),
-    0 2px 10px var(--theme-accent-glow);
+  background: linear-gradient(180deg, var(--theme-accent-bg) 0%, transparent 100%);
+  box-shadow: inset 0 0 0 1px var(--theme-accent-glow-strong), 0 0 12px var(--theme-accent-glow);
   transition: color 0.25s ease, background 0.25s ease, box-shadow 0.25s ease;
 }
 .tab-bar-purple .tab-item.active .tab-icon {
