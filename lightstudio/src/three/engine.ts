@@ -57,6 +57,16 @@ export class SceneManager {
     // subject. This is the standard automotive studio backdrop - a flat colour
     // makes a dark car read as a silhouette with no separation from the void.
     this.scene.background = createLimboBackground();
+    // Depth fog: without it every grid line reads at the same brightness
+    // regardless of distance, which is what makes a floor grid look flat.
+    // Fading distant lines into the background colour is what gives the
+    // "spotlight pool" look - grid crisp near the subject, dissolving into
+    // the dark at the edges of the frame.
+    this.scene.fog = new THREE.Fog(0x05070d, 8, 30);
+    // Soft "spotlight pool" on the floor - a wide, dim additive glow centred
+    // at the origin so the ground reads as lit from above rather than a flat
+    // grid on a flat colour. Independent of any light rig or loaded model.
+    this.scene.add(createFloorSpotlightPool());
 
     this.camera = new THREE.PerspectiveCamera(45, 1, 0.1, 1000);
     this.camera.position.set(5, 3, 5);
@@ -302,7 +312,7 @@ export class SceneManager {
         uniforms: {
           uFadeRadius: { value: merged.fadeRadius },
           uGroundSize: { value: GROUND_SIZE / 2 },
-          uBgColor: { value: new THREE.Color('#0d0d1a') },
+          uBgColor: { value: new THREE.Color('#0a0f1c') },
         },
         vertexShader: /* glsl */ `
           varying vec2 vWorldPos;
@@ -334,7 +344,7 @@ export class SceneManager {
 
   setGrid(visible: boolean): void {
     if (visible && !this.grid) {
-      this.grid = new THREE.GridHelper(20, 40, 0x3a3d44, 0x24262b);
+      this.grid = new THREE.GridHelper(20, 40, 0x3d4a68, 0x212a40);
       this.grid.position.y = 0.005;
       this.grid.userData.isGrid = true; // hide from SceneHierarchy
       this.scene.add(this.grid);
@@ -1482,9 +1492,80 @@ export class ModelLoader {
   private _onProgress: ((progress: number) => void) | null = null;
   private _onLoaded: ((name: string) => void) | null = null;
   private _onError: ((error: string) => void) | null = null;
+  private _contactShadow: THREE.Mesh | null = null;
+  private static _contactShadowTexture: THREE.Texture | null = null;
 
   constructor(scene: THREE.Scene) {
     this._scene = scene;
+  }
+
+  /**
+   * Soft blurred ellipse fading to transparent - a Sketchfab-style "contact
+   * shadow" decal that reads as grounding regardless of the current light
+   * rig, unlike real shadow-map shadows which vanish with no shadow-casting
+   * light selected. Cached on the class since every model reuses the same
+   * gradient, just rescaled per footprint.
+   */
+  private static getContactShadowTexture(): THREE.Texture {
+    if (ModelLoader._contactShadowTexture) return ModelLoader._contactShadowTexture;
+    const size = 512;
+    const canvas = document.createElement('canvas');
+    canvas.width = size;
+    canvas.height = size;
+    const ctx = canvas.getContext('2d')!;
+    const gradient = ctx.createRadialGradient(size / 2, size / 2, 0, size / 2, size / 2, size / 2);
+    gradient.addColorStop(0.0, 'rgba(0, 0, 0, 0.55)');
+    gradient.addColorStop(0.4, 'rgba(0, 0, 0, 0.38)');
+    gradient.addColorStop(0.75, 'rgba(0, 0, 0, 0.14)');
+    gradient.addColorStop(1.0, 'rgba(0, 0, 0, 0)');
+    ctx.fillStyle = gradient;
+    ctx.fillRect(0, 0, size, size);
+    const tex = new THREE.CanvasTexture(canvas);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    tex.needsUpdate = true;
+    ModelLoader._contactShadowTexture = tex;
+    return tex;
+  }
+
+  /** (Re)creates the contact-shadow decal sized to the model's footprint,
+   *  sitting exactly on the grid plane (y=0) so it never floats or clips. */
+  private _updateContactShadow(box: THREE.Box3): void {
+    this._disposeContactShadow();
+
+    const size = box.getSize(new THREE.Vector3());
+    const center = box.getCenter(new THREE.Vector3());
+    const footprint = Math.max(size.x, size.z);
+    if (footprint <= 0) return;
+
+    // Wider than the model's own footprint so the falloff reads as a soft
+    // pool of shadow rather than a hard silhouette.
+    const diameter = footprint * 1.7;
+    const geo = new THREE.PlaneGeometry(diameter, diameter);
+    const mat = new THREE.MeshBasicMaterial({
+      map: ModelLoader.getContactShadowTexture(),
+      transparent: true,
+      depthWrite: false,
+      toneMapped: false,
+    });
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.rotation.x = -Math.PI / 2;
+    // Just above the floor/grid plane (y=0) to avoid z-fighting, aligned to
+    // the model's actual footprint center rather than the world origin.
+    mesh.position.set(center.x, 0.008, center.z);
+    mesh.renderOrder = 1;
+    mesh.userData.isProxy = true; // hide from SceneHierarchy
+    mesh.name = '__contactShadow__';
+    this._contactShadow = mesh;
+    this._scene.add(mesh);
+  }
+
+  private _disposeContactShadow(): void {
+    if (this._contactShadow) {
+      this._scene.remove(this._contactShadow);
+      this._contactShadow.geometry.dispose();
+      (this._contactShadow.material as THREE.Material).dispose();
+      this._contactShadow = null;
+    }
   }
 
   get loading(): boolean { return this._loading; }
@@ -1563,6 +1644,10 @@ export class ModelLoader {
       const center2 = box2.getCenter(new THREE.Vector3());
       gltf.scene.position.sub(center2);
       gltf.scene.position.y += box2.getSize(new THREE.Vector3()).y / 2;
+
+      // Contact shadow sized/placed from the model's FINAL bounding box, so
+      // it lands on the grid plane under the model's actual footprint.
+      this._updateContactShadow(new THREE.Box3().setFromObject(gltf.scene));
 
       this._loading = false;
       this._progress = 100;
@@ -1649,6 +1734,7 @@ export class ModelLoader {
   }
 
   removeCurrentModel(): void {
+    this._disposeContactShadow();
     if (this._currentModel) {
       this._scene.remove(this._currentModel);
       this._currentModel.traverse((child) => {
@@ -1740,6 +1826,47 @@ export function createGradientBackground(config: GradientBackgroundConfig): THRE
   return tex;
 }
 
+/**
+ * Wide, dim additive glow laid flat on the floor at the origin - simulates
+ * an overhead spotlight pool so the grid reads as lit rather than flat,
+ * matching the reference studio look. Independent of the actual light rig.
+ */
+function createFloorSpotlightPool(): THREE.Mesh {
+  const size = 512;
+  const canvas = document.createElement('canvas');
+  canvas.width = size;
+  canvas.height = size;
+  const ctx = canvas.getContext('2d')!;
+  const gradient = ctx.createRadialGradient(size / 2, size / 2, 0, size / 2, size / 2, size / 2);
+  gradient.addColorStop(0.0, 'rgba(120, 150, 200, 0.35)');
+  gradient.addColorStop(0.35, 'rgba(90, 115, 165, 0.18)');
+  gradient.addColorStop(0.7, 'rgba(60, 80, 120, 0.06)');
+  gradient.addColorStop(1.0, 'rgba(0, 0, 0, 0)');
+  ctx.fillStyle = gradient;
+  ctx.fillRect(0, 0, size, size);
+
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.needsUpdate = true;
+
+  const geo = new THREE.PlaneGeometry(16, 16);
+  const mat = new THREE.MeshBasicMaterial({
+    map: tex,
+    transparent: true,
+    depthWrite: false,
+    blending: THREE.AdditiveBlending,
+    toneMapped: false,
+    fog: false,
+  });
+  const mesh = new THREE.Mesh(geo, mat);
+  mesh.rotation.x = -Math.PI / 2;
+  mesh.position.y = 0.006;
+  mesh.renderOrder = 0;
+  mesh.userData.isProxy = true; // hide from SceneHierarchy
+  mesh.name = '__floorSpotlightPool__';
+  return mesh;
+}
+
 export function createLimboBackground(): THREE.Texture {
   const w = 1024;
   const h = 1024;
@@ -1750,21 +1877,30 @@ export function createLimboBackground(): THREE.Texture {
 
   if (!ctx) return new THREE.Texture();
 
-  // Vertical fade - neutral cool studio cyc: dark at the top, lifting to a
-  // brighter horizon so the subject reads against a graded backdrop.
+  // Vertical fade - deep navy studio cyc: near-black at the top, lifting to
+  // a dim blue-grey horizon so the subject reads against a graded backdrop.
   const vertical = ctx.createLinearGradient(0, 0, 0, h);
-  vertical.addColorStop(0.0, '#0c0e11');
-  vertical.addColorStop(0.5, '#1a1d22');
-  vertical.addColorStop(1.0, '#2b2f36');
+  vertical.addColorStop(0.0, '#03050a');
+  vertical.addColorStop(0.5, '#0a0f1c');
+  vertical.addColorStop(1.0, '#1a2338');
   ctx.fillStyle = vertical;
   ctx.fillRect(0, 0, w, h);
 
-  // Soft neutral hotspot behind the subject — cleaner, brighter studio pop
+  // Soft blue hotspot behind the subject — cool studio pop instead of a
+  // neutral-grey one.
   const radial = ctx.createRadialGradient(w / 2, h * 0.58, 0, w / 2, h * 0.58, w * 0.55);
-  radial.addColorStop(0.0, 'rgba(122, 130, 142, 0.42)');
-  radial.addColorStop(0.5, 'rgba(66, 72, 82, 0.20)');
+  radial.addColorStop(0.0, 'rgba(70, 100, 150, 0.38)');
+  radial.addColorStop(0.5, 'rgba(40, 58, 90, 0.18)');
   radial.addColorStop(1.0, 'rgba(0, 0, 0, 0)');
   ctx.fillStyle = radial;
+  ctx.fillRect(0, 0, w, h);
+
+  // Vignette - darken the corners so the frame reads as a contained studio
+  // volume rather than an infinite flat wash, matching the reference look.
+  const vignette = ctx.createRadialGradient(w / 2, h / 2, w * 0.35, w / 2, h / 2, w * 0.75);
+  vignette.addColorStop(0.0, 'rgba(0, 0, 0, 0)');
+  vignette.addColorStop(1.0, 'rgba(0, 1, 4, 0.55)');
+  ctx.fillStyle = vignette;
   ctx.fillRect(0, 0, w, h);
 
   const tex = new THREE.CanvasTexture(canvas);

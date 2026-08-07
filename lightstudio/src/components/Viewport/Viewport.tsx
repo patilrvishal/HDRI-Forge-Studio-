@@ -407,22 +407,29 @@ export const Viewport: React.FC<ViewportProps> = ({ sceneManagerRef, onScreensho
     const el = envLoaderRef.current;
     if (!sm || backplate) return; // Skip if backplate is active
 
-    // Gradient background takes priority over the flat colour / limbo default.
+    // Gradient background takes priority over the flat colour / limbo default
+    // for what's VISIBLE behind the subject - but it must never steal the
+    // actual lighting (scene.environment) away from a real HDRI that's
+    // loaded and active. A custom/preset HDRI's env map is set by its own
+    // effect below and must stay authoritative; overwriting it here on every
+    // intensity-slider tick was why HDRI intensity looked like it did
+    // nothing - the real HDRI was getting replaced by a flat baked gradient
+    // every time this effect re-ran.
+    const hasRealEnvironment = environment.presetId !== 'none' && environment.presetId !== 'none ';
     if (environment.gradientBackground?.enabled) {
       sm.setGradientBackground(environment.gradientBackground);
 
-      // A flat gradient backdrop has no equirect data, so PBR materials
-      // (metals especially, which are lit almost entirely by IBL reflections)
-      // previously got zero environment lighting and rendered as black
-      // silhouettes even though the backdrop itself looked correctly exposed.
-      // Bake the same gradient texture through PMREM so it also lights the
-      // scene, matching what the HDRI Preview's analytical export already does.
-      if (el && sm.scene.background && 'mapping' in sm.scene.background) {
-        const gradTex = sm.scene.background as THREE.Texture;
-        gradTex.mapping = THREE.EquirectangularReflectionMapping;
-        const envMap = sm.pmremGenerator.fromEquirectangular(gradTex).texture;
-        gradTex.mapping = THREE.UVMapping;
-        el.setEnvironmentTexture(sm.scene, envMap, environment.intensity);
+      if (!hasRealEnvironment) {
+        // No real HDRI active - fall back to baking the gradient itself as
+        // the lighting source, so PBR/metal materials (lit almost entirely
+        // by IBL reflections) aren't left with zero environment lighting.
+        if (el && sm.scene.background && 'mapping' in sm.scene.background) {
+          const gradTex = sm.scene.background as THREE.Texture;
+          gradTex.mapping = THREE.EquirectangularReflectionMapping;
+          const envMap = sm.pmremGenerator.fromEquirectangular(gradTex).texture;
+          gradTex.mapping = THREE.UVMapping;
+          el.setEnvironmentTexture(sm.scene, envMap, environment.intensity);
+        }
       }
       return;
     }
