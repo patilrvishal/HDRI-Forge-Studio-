@@ -286,7 +286,7 @@ export const HDRIPreviewPanel: React.FC = () => {
             style={{ width: '100%' }}
           />
           <div style={{ fontSize: 9, color: 'var(--text-dim)', marginTop: 2 }}>
-            Also updates the live viewport - the exported file always stays linear
+            Also updates the live viewport and is baked into the exported file as a linear scale
           </div>
         </div>
 

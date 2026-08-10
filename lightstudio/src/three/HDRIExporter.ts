@@ -96,6 +96,13 @@ export interface HDRIExportOptions {
   capturePoint?: THREE.Vector3;
   /** Optional filename (without extension) */
   filename?: string;
+  /**
+   * View Exposure, baked into the exported data as a linear multiplier so
+   * the file matches what the HDRI Preview panel/viewport show. Default 1.0
+   * (no change). Values still exceed 1.0 where the scene does - this only
+   * scales, it does not clamp/tonemap, so the file stays true HDR.
+   */
+  viewExposure?: number;
 }
 
 // --------- Constants ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
@@ -1139,6 +1146,19 @@ export async function downloadHDRI(
   );
 
   const pixels = await generateAnalyticalHDRI(scene, width, height, cp, layers);
+
+  // Bake View Exposure into the exported data as a linear multiplier, so the
+  // file's brightness matches what the HDRI Preview panel and viewport show.
+  // Still a plain scalar (no Reinhard/gamma), so values stay unbounded and
+  // the file remains true HDR - just scaled, the same way exposure works as
+  // a linear stops multiplier on a real camera.
+  const exposure = options.viewExposure ?? useSceneStore.getState().renderSettings.exposure;
+  if (exposure !== 1.0) {
+    for (let i = 0; i < pixels.length; i++) {
+      pixels[i] *= exposure;
+    }
+    console.log(`[LightForge HDRI] Baked View Exposure ${exposure.toFixed(2)}x into exported data`);
+  }
 
   const baseName = filename ?? `lightforge_hdri_${Date.now()}`;
   const ext = format === 'hdr' ? '.hdr' : '.exr';
