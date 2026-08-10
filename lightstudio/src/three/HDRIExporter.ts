@@ -246,12 +246,13 @@ function evaluateLightRadiance(
       const falloff = softFalloff(angle, visualRadius * GAUSSIAN_SOFTNESS);
       if (falloff <= 0) break;
 
-      // Radiance: intensity * scale / solid_angle_of_disk
-      // This ensures the light appears as a bright HDR hotspot (200-2000 range)
-      // Solid angle of a disk: PI * sin^2(angularRadius)
-      const solidAngle = Math.PI * Math.sin(visualRadius) * Math.sin(visualRadius);
-      const safeSolidAngle = Math.max(1e-6, solidAngle);
-      const radiance = light.intensity * 2000 * falloff * EXPORT_EXPOSURE;
+      // Radiance: intensity * scale, calibrated to land in the documented
+      // 200-2000 HDR hotspot range at typical intensity/distance. This must
+      // NOT also multiply by EXPORT_EXPOSURE - that stacked on top of this
+      // already-tuned constant, pinning point lights ~400,000x too bright so
+      // every intensity from 1 to 1000 clipped identically to pure white in
+      // the tonemapped preview (looked like "brightness does nothing").
+      const radiance = light.intensity * 2000 * falloff;
       result.r = light.color.r * radiance;
       result.g = light.color.g * radiance;
       result.b = light.color.b * radiance;
@@ -297,12 +298,12 @@ function evaluateLightRadiance(
       const falloff = softFalloff(angle, visualRadius * GAUSSIAN_SOFTNESS);
       if (falloff <= 0) break;
 
-      // Radiance with distance decay and cone falloff
+      // Radiance with distance decay and cone falloff. Same tuned constant
+      // as point light - must not also multiply by EXPORT_EXPOSURE (see
+      // point light comment above for why that stacked to always-clipped).
       const decay = light.decay ?? 2;
       const distDecay = Math.pow(Math.max(0.1, dist), -decay) * Math.pow(Math.max(0.1, 5), decay);
-      const solidAngle = Math.PI * Math.sin(visualRadius) * Math.sin(visualRadius);
-      const safeSolidAngle = Math.max(1e-6, solidAngle);
-      const radiance = light.intensity * 2000 * falloff * coneFalloff * distDecay * EXPORT_EXPOSURE;
+      const radiance = light.intensity * 2000 * falloff * coneFalloff * distDecay;
 
       result.r = light.color.r * radiance;
       result.g = light.color.g * radiance;
