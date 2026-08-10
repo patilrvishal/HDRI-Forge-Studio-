@@ -31,6 +31,7 @@
 import * as THREE from 'three';
 import { hdriBase64ToArrayBuffer } from '../store/hdriDataStore';
 import { useHDRIAssetStore } from '../store/hdriAssetStore';
+import { useSceneStore } from '../store/sceneStore';
 import { RGBELoader } from 'three/addons/loaders/RGBELoader.js';
 
 // --------- Types ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
@@ -1111,6 +1112,16 @@ export async function downloadHDRI(
   let layers: EnvLayer[] =
     options.environmentLayers ??
     (await loadActiveHDRILayers(options.environmentGlobalIntensity ?? 1.0));
+
+  // Gradient background acts as its own environment layer, same as a real
+  // loaded HDRI, so the exported file matches what the HDRI Preview panel
+  // shows instead of coming out black whenever no real .hdr is active.
+  if (!options.environmentLayers) {
+    const gb = useSceneStore.getState().environment.gradientBackground;
+    if (gb?.enabled) {
+      layers.push(gradientToEnvLayer(gb, options.environmentGlobalIntensity ?? 1.0));
+    }
+  }
 
   if (layers.length === 0 && options.includeEnvironment && options.environmentTexture) {
     layers = [
