@@ -1596,8 +1596,15 @@ export class ModelLoader {
     try {
       arrayBuffer = await file.arrayBuffer();
       setRawModelData(arrayBuffer, file.name);
-    } catch {
-      // Non-critical - model will load but won't be saveable
+    } catch (e) {
+      // The model still renders, but it can't be embedded in a scene file -
+      // silently swallowing this made "my model didn't come back after
+      // loading a save" impossible to diagnose.
+      console.warn(
+        `[LightForge] Could not buffer "${file.name}" for scene persistence - ` +
+        `the model will render but will NOT be included in saved scene files:`,
+        e,
+      );
     }
 
     const url = URL.createObjectURL(file);

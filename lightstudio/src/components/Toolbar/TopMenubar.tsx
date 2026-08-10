@@ -62,11 +62,12 @@ const MENU_DEFINITIONS = (
       action: async () => {
         const result = await SceneExporter.openSceneFile();
         if (!result) return;
+        const ui = useUIStore.getState();
         try {
           const sceneFile = SceneExporter.fromJSON(result.text);
           const error = SceneExporter.importScene(sceneFile);
           if (error) {
-            alert(error);
+            ui.showToast(error, 'error');
             return;
           }
           // Clear undo history after full scene load
@@ -76,9 +77,10 @@ const MENU_DEFINITIONS = (
             const cam = sceneFile.scene.camera;
             sceneManagerRef.current.setCameraState(cam.position, cam.target, cam.fov);
           }
+          ui.showToast(`Opened "${result.filename}"`, 'success');
         } catch (err) {
           const msg = err instanceof Error ? err.message : 'Failed to open scene file';
-          alert(`Error: ${msg}`);
+          ui.showToast(msg, 'error');
         }
       },
     },
@@ -86,17 +88,32 @@ const MENU_DEFINITIONS = (
       label: 'Save Scene',
       shortcut: 'Ctrl+S',
       action: () => {
-        const data = SceneExporter.exportScene();
-        SceneExporter.downloadSceneFile(data);
+        const ui = useUIStore.getState();
+        try {
+          const data = SceneExporter.exportScene();
+          SceneExporter.downloadSceneFile(data);
+          ui.showToast('Scene saved', 'success');
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : 'Unknown error';
+          console.error('[LightForge] Save failed:', err);
+          ui.showToast(`Save failed: ${msg}`, 'error');
+        }
       },
     },
     saveAs: {
       label: 'Save Scene As...',
       action: () => {
-        const data = SceneExporter.exportScene();
+        const ui = useUIStore.getState();
         const name = prompt('Enter filename:', `lightforge_scene_${Date.now()}.lightscene`);
-        if (name) {
+        if (!name) return;
+        try {
+          const data = SceneExporter.exportScene();
           SceneExporter.downloadSceneFile(data, name);
+          ui.showToast(`Saved as "${name}"`, 'success');
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : 'Unknown error';
+          console.error('[LightForge] Save failed:', err);
+          ui.showToast(`Save failed: ${msg}`, 'error');
         }
       },
     },

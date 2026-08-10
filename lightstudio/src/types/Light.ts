@@ -117,6 +117,11 @@ export const LIGHT_TEMPLATES: Record<string, Partial<Light>> = {
   ies: { type: 'ies', name: 'IES Point Light', color: '#ffe4b5', brightness: 200, falloff: 'custom' },
   spot: { type: 'spot', name: 'Spot Light', color: '#ffffff', brightness: 300, falloff: 'quadratic', spotAngle: 45, spotPenumbra: 0.5 },
   area: { type: 'area', name: 'Area Light', color: '#e8e8ff', brightness: 250, areaLight: true, falloff: 'linear', areaWidth: 2, areaHeight: 2 },
+  // A missing 'directional' entry meant the Add-Light dropdown's "Directional"
+  // option fell through to createDefaultLight({}) and silently produced a
+  // POINT light instead. Sun-style: parallel rays, so distance falloff is
+  // meaningless - hence falloff 'none'.
+  directional: { type: 'directional', name: 'Directional Light', color: '#fff4e6', brightness: 200, falloff: 'none', transform: { spherical: { lat: 50, lng: 45, radius: 8, height: 6 }, position: { x: 5, y: 6, z: 5 }, rotation: { x: 0, y: 0, z: 0, mode: 'euler', enabled: false, repeat: false, advanced: { lR: 0, p1: 0, p2: 0, p3: 0, rR: 0, ro: 0, roat: 0 } } } },
   overhead: { type: 'overhead', name: 'Overhead Box Light', color: '#ffffff', brightness: 200, areaLight: true, spotAngle: 45, spotPenumbra: 0.5, areaWidth: 4, areaHeight: 4, transform: { spherical: { lat: 90, lng: 0, radius: 4, height: 5 }, position: { x: 0, y: 5, z: 0 }, rotation: { x: -90, y: 0, z: 0, mode: 'euler', enabled: true, repeat: false, advanced: { lR: 0, p1: 0, p2: 0, p3: 0, rR: 0, ro: 0, roat: 0 } } } },
   underlight: { type: 'underlight', name: 'Under Grid Light', color: '#4a9eff', brightness: 80, transform: { spherical: { lat: -90, lng: 0, radius: 3, height: -0.5 }, position: { x: 0, y: -0.5, z: 0 }, rotation: { x: 90, y: 0, z: 0, mode: 'euler', enabled: true, repeat: false, advanced: { lR: 0, p1: 0, p2: 0, p3: 0, rR: 0, ro: 0, roat: 0 } } } },
   rim: { type: 'rim', name: 'Rim Light', color: '#4a9eff', brightness: 180, spotAngle: 30, spotPenumbra: 0.3, transform: { spherical: { lat: 10, lng: 180, radius: 6, height: 2 }, position: { x: -6, y: 2, z: 0 }, rotation: { x: 0, y: 0, z: 0, mode: 'euler', enabled: false, repeat: false, advanced: { lR: 0, p1: 0, p2: 0, p3: 0, rR: 0, ro: 0, roat: 0 } } } },

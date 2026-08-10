@@ -531,7 +531,7 @@ const ManualWindow: React.FC<ManualWindowProps> = ({ onClose }) => {
                   <div key={idx} style={{ display: 'flex', flexDirection: 'column', gap: 6, margin: '8px 0' }}>
                     {block.cards?.map((card, i) => (
                       <div key={i} style={{
-                        display: 'flex', gap: 10, padding: '10px 12px',
+                        display: 'flex', gap: 10,
                         background: '#1a1c20', border: '1px solid #2a2d33',
                         borderRadius: 8, padding: '16px 18px',
                       }}>

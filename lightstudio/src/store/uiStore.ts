@@ -49,6 +49,9 @@ interface UIState {
   activeTool: ActiveTool;
   gridSnapEnabled: boolean;
 
+  /** Transient status message shown bottom-centre (save/load/export feedback) */
+  toast: { message: string; kind: 'info' | 'success' | 'error' } | null;
+
   // Layout
   panelLayout: PanelLayout;
   isFullscreen: boolean;
@@ -97,6 +100,8 @@ interface UIState {
   // Tools & Layout
   setActiveTool: (tool: ActiveTool) => void;
   toggleGridSnap: () => void;
+  /** Show a transient status message. Pass null to clear immediately. */
+  showToast: (message: string, kind?: 'info' | 'success' | 'error') => void;
   setPanelLayout: (layout: PanelLayout) => void;
   toggleFullscreen: () => void;
   setOpenMenu: (menu: string | null) => void;
@@ -113,6 +118,9 @@ interface UIState {
   setMaterialPreset: (preset: MaterialPresetKey) => void;
   setPreviewBackground: (bg: PreviewBackground) => void;
 }
+
+/** Module-level so a new toast always cancels the previous one's dismiss timer. */
+let _toastTimer: ReturnType<typeof setTimeout> | null = null;
 
 const DEFAULT_PANEL_VISIBILITY: PanelVisibilityState = {
   leftPanel: true,
@@ -141,6 +149,7 @@ export const useUIStore = create<UIState>((set, get) => ({
   manualModalOpen: false,
   activeTool: 'select',
   gridSnapEnabled: false,
+  toast: null,
   panelLayout: 'default',
   isFullscreen: false,
   openMenu: null,
@@ -302,6 +311,12 @@ export const useUIStore = create<UIState>((set, get) => ({
   // ── Tools & Layout ────────────────────────────────────────────
   setActiveTool: (tool) => set({ activeTool: tool }),
   toggleGridSnap: () => set((s) => ({ gridSnapEnabled: !s.gridSnapEnabled })),
+  showToast: (message, kind = 'info') => {
+    if (_toastTimer !== null) clearTimeout(_toastTimer);
+    set({ toast: { message, kind } });
+    // Errors linger longer - they usually carry an instruction to act on.
+    _toastTimer = setTimeout(() => set({ toast: null }), kind === 'error' ? 6000 : 2600);
+  },
   setPanelLayout: (layout) => {
     switch (layout) {
       case 'default':

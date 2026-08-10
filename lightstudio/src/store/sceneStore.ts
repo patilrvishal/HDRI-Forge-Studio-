@@ -48,6 +48,8 @@ interface SceneStore extends SceneState {
   saveCameraBookmark: (name: string, position: [number, number, number], target: [number, number, number], fov: number) => void;
   loadCameraBookmark: (id: string) => CameraBookmark | undefined;
   removeCameraBookmark: (id: string) => void;
+  /** Replace all bookmarks at once (scene-file restore). */
+  setCameraBookmarks: (bookmarks: CameraBookmark[]) => void;
   
   // Scene load
   loadSceneState: (state: Partial<SceneState>) => void;
@@ -225,6 +227,12 @@ export const useSceneStore = create<SceneStore>((set, get) => ({
     set((state) => ({
       cameraBookmarks: state.cameraBookmarks.filter((b) => b.id !== id),
     }));
+  },
+
+  setCameraBookmarks: (bookmarks) => {
+    // Wholesale replace - used when restoring a scene file. Capped at the
+    // same 8 slots the UI renders.
+    set({ cameraBookmarks: bookmarks.slice(0, 8) });
   },
 
   loadSceneState: (newState) => {

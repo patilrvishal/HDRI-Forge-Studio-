@@ -237,12 +237,11 @@ export class SceneExporter {
       }
 
       // ── Restore camera bookmarks ────────────────────────────────────────
-      if (Array.isArray(data.cameraBookmarks)) {
-        // Re-set bookmarks by directly loading into the store
-        // The sceneStore doesn't have a setBookmarks method, so we use loadSceneState
-        // which will merge. We need to handle this carefully.
-        // For now, bookmarks are supplementary and non-critical.
-      }
+      // These were being written to the file and then silently dropped on
+      // load, so every saved camera slot came back empty.
+      useSceneStore.getState().setCameraBookmarks(
+        Array.isArray(data.cameraBookmarks) ? data.cameraBookmarks : [],
+      );
 
       // ── Restore materials (Phase 10) ─────────────────────────────────────
       if (Array.isArray(data.materials) && data.materials.length > 0) {
@@ -405,14 +404,34 @@ export class SceneExporter {
   }
 
   /**
-   * Quick-save to localStorage (for Ctrl+S).
+   * Quick-save to localStorage (session recovery).
+   *
+   * An embedded model blows the ~5-20MB localStorage quota outright (a car GLB
+   * base64s to 40MB+), which used to throw QuotaExceededError into a silent
+   * catch - the save simply never happened and nothing told the user. Now the
+   * model is dropped and the rest of the rig is still saved, and the caller
+   * gets a result it can surface.
    */
-  static quickSave(): void {
+  static quickSave(): { ok: boolean; modelIncluded: boolean; error?: string } {
     const data = this.exportScene();
+
     try {
       localStorage.setItem('lightstudio_quicksave', JSON.stringify(data));
+      return { ok: true, modelIncluded: data.scene.modelDataBase64 !== null };
     } catch {
-      // Storage full or unavailable — silently fail
+      // Retry without the model payload - the lighting rig is the part worth
+      // recovering, and it is orders of magnitude smaller.
+      try {
+        const slim: SceneFile = { ...data, scene: { ...data.scene, modelDataBase64: null } };
+        localStorage.setItem('lightstudio_quicksave', JSON.stringify(slim));
+        return { ok: true, modelIncluded: false };
+      } catch {
+        return {
+          ok: false,
+          modelIncluded: false,
+          error: 'Browser storage is full. Use Project > Save Scene to save to a file instead.',
+        };
+      }
     }
   }
 

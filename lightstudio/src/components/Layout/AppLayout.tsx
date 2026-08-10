@@ -196,24 +196,47 @@ export const AppLayout: React.FC = () => {
   // Keyboard shortcuts
   useKeyboardShortcuts({
     onSave: () => {
-      SceneExporter.quickSave();
+      // Ctrl+S must do what the Project menu advertises next to this shortcut:
+      // write an actual scene FILE. It previously ran quickSave(), which only
+      // touched localStorage - invisible on success, and silently dropped
+      // entirely once an embedded model pushed it past the storage quota, so
+      // Ctrl+S looked completely dead.
+      const ui = useUIStore.getState();
+      try {
+        const data = SceneExporter.exportScene();
+        SceneExporter.downloadSceneFile(data);
+        // Keep the session-recovery copy too, best-effort.
+        SceneExporter.quickSave();
+        ui.showToast('Scene saved', 'success');
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : 'Unknown error';
+        console.error('[LightForge] Save failed:', err);
+        ui.showToast(`Save failed: ${msg}`, 'error');
+      }
     },
     onOpen: () => {
+      const ui = useUIStore.getState();
       const hist = useHistoryStore.getState();
       hist.pause();
       const data = SceneExporter.quickLoad();
       if (!data) {
         hist.resume();
+        ui.showToast('No auto-saved scene found. Use Project > Open Scene.', 'info');
         return;
       }
       const error = SceneExporter.importScene(data);
       hist.resume();
-      if (!error && sceneManagerRef.current) {
-        sceneManagerRef.current.setCameraState(
-          data.scene.camera.position,
-          data.scene.camera.target,
-          data.scene.camera.fov,
-        );
+      if (error) {
+        ui.showToast(error, 'error');
+      } else {
+        if (sceneManagerRef.current) {
+          sceneManagerRef.current.setCameraState(
+            data.scene.camera.position,
+            data.scene.camera.target,
+            data.scene.camera.fov,
+          );
+        }
+        ui.showToast('Scene restored', 'success');
       }
       useHistoryStore.getState().clear();
     },
@@ -700,6 +723,51 @@ export const AppLayout: React.FC = () => {
 
       {/* Manual / Documentation Modal */}
       {manualModalOpen && <ManualWindow onClose={() => setManualModal(false)} />}
+
+      {/* Transient status toast (save / load / export feedback) */}
+      <StatusToast />
+    </div>
+  );
+};
+
+/** Bottom-centre status message. Silent saves were indistinguishable from
+ *  broken ones, so every save/load path now reports through here. */
+const StatusToast: React.FC = () => {
+  const toast = useUIStore((s) => s.toast);
+  if (!toast) return null;
+
+  const accent =
+    toast.kind === 'error' ? 'var(--danger)'
+    : toast.kind === 'success' ? 'var(--success)'
+    : 'var(--accent)';
+
+  return (
+    <div
+      role="status"
+      aria-live="polite"
+      style={{
+        position: 'fixed',
+        bottom: 34,
+        left: '50%',
+        transform: 'translateX(-50%)',
+        maxWidth: '70vw',
+        display: 'flex',
+        alignItems: 'center',
+        gap: 8,
+        padding: '8px 14px',
+        background: 'var(--bg-elevated)',
+        border: `1px solid ${accent}`,
+        borderRadius: 'var(--radius)',
+        boxShadow: '0 8px 28px rgba(0,0,0,0.5)',
+        color: 'var(--text)',
+        fontSize: 11.5,
+        fontWeight: 500,
+        zIndex: 10000,
+        pointerEvents: 'none',
+      }}
+    >
+      <span style={{ width: 7, height: 7, borderRadius: '50%', background: accent, flexShrink: 0 }} />
+      <span>{toast.message}</span>
     </div>
   );
 };
