@@ -17,9 +17,12 @@ export type PanelKey =
   | 'historyPanel'
   | 'viewportDesign';
 
-export interface PanelVisibilityState {
+// Must be a type alias, not an interface - a mapped type is illegal inside an
+// interface body, which silently collapsed this to {} and made every
+// panelVisibility property access an error.
+export type PanelVisibilityState = {
   [K in PanelKey]: boolean;
-}
+};
 
 interface SavedLayout {
   panels: PanelVisibilityState;
