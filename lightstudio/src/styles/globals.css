@@ -262,6 +262,18 @@ select {
    --theme-accent elsewhere. Default palette = Purple.
    ═══════════════════════════════════════════════════════════════════════ */
 :root {
+  /* Photon (default) - matches the new cyan/violet base accent so the
+     redesign is what you see on first load, not something buried behind
+     the theme dropdown. */
+  --theme-accent: #22d3ee;
+  --theme-accent-bright: #67e8f9;
+  --theme-accent-bg: rgba(34, 211, 238, 0.14);
+  --theme-accent-glow: rgba(34, 211, 238, 0.5);
+  --theme-accent-glow-strong: rgba(34, 211, 238, 0.2);
+}
+
+/* Purple - the old default, now an explicit selectable option */
+body[data-theme="purple"] {
   --theme-accent: #a78bfa;
   --theme-accent-bright: #c084fc;
   --theme-accent-bg: rgba(167, 139, 250, 0.14);

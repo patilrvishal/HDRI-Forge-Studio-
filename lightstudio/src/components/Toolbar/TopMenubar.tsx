@@ -301,6 +301,7 @@ const MENU_DEFINITIONS = (
 const MENU_KEYS = ['Project', 'Edit', 'Create', 'Canvas', 'Window', 'Help'];
 
 const THEME_OPTIONS: Array<{ value: string; label: string; dot: string }> = [
+  { value: 'photon', label: 'Photon', dot: '#22d3ee' },
   { value: 'purple', label: 'Purple', dot: '#c084fc' },
   { value: 'yellow-orange', label: 'Yellow-Orange', dot: '#ffc24d' },
   { value: 'white-orange', label: 'White-Orange', dot: '#fff3e0' },
@@ -390,16 +391,16 @@ function LogoMark() {
 function ThemeSwitcher() {
   const [theme, setTheme] = useState<string>(() => {
     try {
-      return localStorage.getItem(THEME_STORAGE_KEY) || 'purple';
+      return localStorage.getItem(THEME_STORAGE_KEY) || 'photon';
     } catch {
-      return 'purple';
+      return 'photon';
     }
   });
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    if (theme === 'purple') {
+    if (theme === 'photon') {
       delete document.body.dataset.theme;
     } else {
       document.body.dataset.theme = theme;
