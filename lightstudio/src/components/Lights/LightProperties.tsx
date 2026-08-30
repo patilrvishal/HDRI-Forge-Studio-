@@ -273,8 +273,10 @@ export const LightProperties: React.FC = () => {
 
   const isSpotLike = light.type === 'spot' || light.type === 'rim';
   const isAreaLike = light.type === 'area' || light.type === 'overhead';
-  const hasFalloff = light.type === 'point' || light.type === 'spot' || light.type === 'underlight' || light.type === 'ies';
-  const hasShadows = light.type === 'spot' || light.type === 'directional' || light.type === 'point' || light.type === 'rim';
+  // Every type the engine builds as a PointLight or SpotLight (see
+  // engine.ts _createLightByType) responds to decay - 'rim' is a SpotLight
+  // under the hood, so it was silently missing its own Falloff control here.
+  const hasFalloff = light.type === 'point' || isSpotLike || light.type === 'underlight' || light.type === 'ies';
 
   return (
     <div className="light-properties">

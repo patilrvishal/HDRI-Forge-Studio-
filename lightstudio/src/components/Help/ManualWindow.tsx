@@ -476,14 +476,14 @@ const ManualWindow: React.FC<ManualWindowProps> = ({ onClose }) => {
             {currentSection.content.map((block, idx) => {
               if (block.type === 'heading') {
                 return (
-                  <div key={idx} style={{ fontSize: 19, fontWeight: 600, color: '#e8e9eb', marginTop: 28, marginBottom: 12 }}>
+                  <div key={idx} style={{ fontSize: 19, fontWeight: 600, color: 'var(--text)', marginTop: 28, marginBottom: 12 }}>
                     {block.data}
                   </div>
                 );
               }
               if (block.type === 'text') {
                 return (
-                  <div key={idx} style={{ fontSize: 15.5, color: '#b8bcc3', lineHeight: 1.75, marginBottom: 16 }}>
+                  <div key={idx} style={{ fontSize: 15.5, color: 'var(--text-sec)', lineHeight: 1.75, marginBottom: 16 }}>
                     {block.data}
                   </div>
                 );
@@ -492,8 +492,8 @@ const ManualWindow: React.FC<ManualWindowProps> = ({ onClose }) => {
                 return (
                   <div key={idx} style={{ marginBottom: 8, paddingLeft: 12 }}>
                     {block.items?.map((item, i) => (
-                      <div key={i} style={{ fontSize: 15, color: '#b8bcc3', lineHeight: 1.7, marginBottom: 6, display: 'flex', gap: 8 }}>
-                        <span style={{ color: '#5a9cf5', flexShrink: 0 }}>{'\u2022'}</span>
+                      <div key={i} style={{ fontSize: 15, color: 'var(--text-sec)', lineHeight: 1.7, marginBottom: 6, display: 'flex', gap: 8 }}>
+                        <span style={{ color: 'var(--accent)', flexShrink: 0 }}>{'\u2022'}</span>
                         <span>{item}</span>
                       </div>
                     ))}
@@ -532,21 +532,21 @@ const ManualWindow: React.FC<ManualWindowProps> = ({ onClose }) => {
                     {block.cards?.map((card, i) => (
                       <div key={i} style={{
                         display: 'flex', gap: 10,
-                        background: '#1a1c20', border: '1px solid #2a2d33',
+                        background: 'var(--bg-card)', border: '1px solid var(--border)',
                         borderRadius: 8, padding: '16px 18px',
                       }}>
-                        <span style={{ fontSize: 22, color: '#5a9cf5', flexShrink: 0, lineHeight: 1.4 }}>{card.icon}</span>
+                        <span style={{ fontSize: 22, color: 'var(--accent)', flexShrink: 0, lineHeight: 1.4 }}>{card.icon}</span>
                         <div>
                           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                            <span style={{ fontSize: 15, fontWeight: 600, color: '#e8e9eb' }}>{card.title}</span>
+                            <span style={{ fontSize: 15, fontWeight: 600, color: 'var(--text)' }}>{card.title}</span>
                             {card.badge && (
                               <span style={{
-                                fontSize: 11, fontWeight: 600, color: '#5a9cf5',
-                                background: 'rgba(90, 156, 245, 0.15)', padding: '2px 9px', borderRadius: 10,
+                                fontSize: 11, fontWeight: 600, color: 'var(--accent)',
+                                background: 'var(--accent-bg)', padding: '2px 9px', borderRadius: 10,
                               }}>{card.badge}</span>
                             )}
                           </div>
-                          <div style={{ fontSize: 14, color: '#9199a3', lineHeight: 1.6, marginTop: 4 }}>{card.desc}</div>
+                          <div style={{ fontSize: 14, color: 'var(--text-dim)', lineHeight: 1.6, marginTop: 4 }}>{card.desc}</div>
                         </div>
                       </div>
                     ))}
@@ -560,13 +560,13 @@ const ManualWindow: React.FC<ManualWindowProps> = ({ onClose }) => {
                     margin: '8px 0',
                     background: 'rgba(74, 158, 255, 0.06)',
                     border: '1px solid rgba(74, 158, 255, 0.15)',
-                    borderLeft: '3px solid #5a9cf5',
+                    borderLeft: '3px solid var(--accent)',
                     borderRadius: '0 var(--radius-sm) var(--radius-sm) 0',
                     fontSize: 10,
                     color: 'var(--text-sec)',
                     lineHeight: 1.6,
                   }}>
-                    <span style={{ fontWeight: 600, color: '#5a9cf5', marginRight: 4 }}>Tip:</span>
+                    <span style={{ fontWeight: 600, color: 'var(--accent)', marginRight: 4 }}>Tip:</span>
                     {block.data}
                   </div>
                 );
