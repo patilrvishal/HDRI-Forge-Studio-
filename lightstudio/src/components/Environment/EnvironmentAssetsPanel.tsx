@@ -10,10 +10,16 @@ import { Toggle } from '../UI/Toggle';
 const HDRIAssetCard: React.FC<{
   asset: HDRIAsset;
   isSelected: boolean;
+  /** True only when this asset is BOTH flagged active AND the scene's
+   *  environment.presetId is actually '__custom__' - switching to a
+   *  built-in preset via the Environment Browser leaves asset.active
+   *  untouched, so relying on that flag alone kept this card reading
+   *  "ACTIVE" for an HDRI that was no longer driving the scene. */
+  isEnvironmentActive: boolean;
   onSelect: (id: string) => void;
   onRemove: (id: string) => void;
   onUpdate: (id: string, updates: Partial<Pick<HDRIAsset, 'name' | 'intensity' | 'rotation' | 'active'>>) => void;
-}> = ({ asset, isSelected, onSelect, onRemove, onUpdate }) => {
+}> = ({ asset, isSelected, isEnvironmentActive, onSelect, onRemove, onUpdate }) => {
   const [expanded, setExpanded] = useState(isSelected);
 
   // Auto-expand when selected
@@ -71,7 +77,7 @@ const HDRIAssetCard: React.FC<{
         </span>
 
         {/* Active badge */}
-        {asset.active && (
+        {isEnvironmentActive && (
           <span
             style={{
               fontSize: 8,
@@ -141,8 +147,8 @@ const HDRIAssetCard: React.FC<{
           />
           <Toggle
             label="Active"
-            checked={asset.active}
-            onChange={() => onUpdate(asset.id, { active: !asset.active })}
+            checked={isEnvironmentActive}
+            onChange={() => onUpdate(asset.id, { active: !isEnvironmentActive })}
             variant="glossy"
           />
           {/* File info */}
@@ -227,8 +233,13 @@ export const EnvironmentAssetsPanel: React.FC = () => {
         return;
       }
 
-      // Intensity / rotation edits only apply to the asset that is live
-      if (asset.active) {
+      // Intensity / rotation edits only apply to the asset that is actually
+      // live. asset.active alone isn't enough - switching to a built-in
+      // preset via the Environment Browser never clears it, so a stale
+      // "active" custom asset would silently push its slider drags into the
+      // global environment.intensity/rotation that the built-in preset
+      // currently owns.
+      if (asset.active && environment.presetId === '__custom__') {
         if (updates.intensity !== undefined) {
           setEnvironment({ intensity: updates.intensity });
         }
@@ -237,7 +248,7 @@ export const EnvironmentAssetsPanel: React.FC = () => {
         }
       }
     },
-    [updateAsset, setEnvironment, setEnvironmentRotation],
+    [updateAsset, setEnvironment, setEnvironmentRotation, environment.presetId],
   );
 
   const handleRemoveAsset = useCallback(
@@ -364,6 +375,7 @@ export const EnvironmentAssetsPanel: React.FC = () => {
               key={asset.id}
               asset={asset}
               isSelected={asset.id === selectedAssetId}
+              isEnvironmentActive={asset.active && isCustomActive}
               onSelect={handleSelectAsset}
               onRemove={handleRemoveAsset}
               onUpdate={handleUpdateAsset}
