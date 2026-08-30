@@ -637,7 +637,7 @@ export const AppLayout: React.FC = () => {
           fontSize: 10,
           color: 'var(--text-dim)',
           borderTop: '1px solid var(--border)',
-          background: 'linear-gradient(90deg, var(--bg-deep), rgba(74, 158, 255,0.02), var(--bg-deep))',
+          background: 'linear-gradient(90deg, var(--bg-deep), rgba(34, 211, 238,0.02), var(--bg-deep))',
           flexShrink: 0,
         }}
       >

@@ -138,7 +138,7 @@ function drawTimeBar(
   // Track background
   const grad = ctx.createLinearGradient(barX, 0, barX + barW, 0);
   grad.addColorStop(0, 'rgba(74,158,255,0.15)');
-  grad.addColorStop(1, 'rgba(74, 158, 255,0.15)');
+  grad.addColorStop(1, 'rgba(34, 211, 238,0.15)');
   ctx.fillStyle = grad;
   ctx.beginPath();
   ctx.roundRect(barX, barY, barW, barH, 3);
@@ -147,7 +147,7 @@ function drawTimeBar(
   // Progress fill
   const fillGrad = ctx.createLinearGradient(barX, 0, barX + barW * frac, 0);
   fillGrad.addColorStop(0, 'rgba(74,158,255,0.4)');
-  fillGrad.addColorStop(1, 'rgba(74, 158, 255,0.4)');
+  fillGrad.addColorStop(1, 'rgba(34, 211, 238,0.4)');
   ctx.fillStyle = fillGrad;
   ctx.beginPath();
   ctx.roundRect(barX, barY, barW * frac, barH, 3);
@@ -263,7 +263,7 @@ function drawLightVisualization(
 
   // IES pattern visualization
   if (ld.type === 'ies') {
-    ctx.strokeStyle = hexToRgba('#4a9eff', 0.3);
+    ctx.strokeStyle = hexToRgba('#22d3ee', 0.3);
     ctx.lineWidth = 1;
     ctx.setLineDash([3, 3]);
     ctx.beginPath();

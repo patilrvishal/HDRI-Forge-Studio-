@@ -451,7 +451,7 @@ const thumbWrapperStyle: React.CSSProperties = {
 const selectedThumbStyle: React.CSSProperties = {
   borderColor: 'var(--accent)',
   background: 'var(--accent-bg)',
-  boxShadow: '0 0 0 1px var(--accent-dim), 0 0 14px rgba(74, 158, 255, 0.22)',
+  boxShadow: '0 0 0 1px var(--accent-dim), 0 0 14px rgba(34, 211, 238, 0.22)',
 };
 
 const canvasStyle: React.CSSProperties = {

@@ -561,13 +561,24 @@ export const TopMenubar: React.FC<TopMenubarProps> = ({ sceneManagerRef, onExpor
       {/* Logo + brand */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, paddingRight: 12, flexShrink: 0 }}>
         <LogoMark />
-        <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--text)', whiteSpace: 'nowrap' }}>
-          HDRI <span style={{ color: 'var(--theme-accent-bright)' }}>Forge</span> Studio
+        <span style={{ fontFamily: 'var(--font-display)', fontSize: 15, fontWeight: 700, letterSpacing: '-0.01em', color: 'var(--text)', whiteSpace: 'nowrap' }}>
+          HDRI{' '}
+          <span
+            style={{
+              background: 'var(--neon-gradient)',
+              WebkitBackgroundClip: 'text',
+              WebkitTextFillColor: 'transparent',
+              backgroundClip: 'text',
+            }}
+          >
+            Forge
+          </span>{' '}
+          Studio
         </span>
         <span
           style={{
-            fontSize: 9, fontWeight: 600, color: 'var(--text-dim)', background: 'var(--bg-card)',
-            border: '1px solid var(--border-light)', borderRadius: 10, padding: '2px 7px', flexShrink: 0,
+            fontFamily: 'var(--font-mono)', fontSize: 9, fontWeight: 600, color: 'var(--text-dim)', background: 'var(--bg-card)',
+            border: '1px solid var(--border-light)', borderRadius: 999, padding: '2px 8px', flexShrink: 0,
           }}
         >
           v2.1.0

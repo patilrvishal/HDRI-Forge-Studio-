@@ -1,51 +1,58 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&family=Space+Grotesk:wght@500;600;700&display=swap');
 
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
 :root {
-  /* ── Core backgrounds — neutral studio dark ───────────────── */
-  --bg-deep: #0b0b0d;
-  --bg-panel: #141417;
-  --bg-card: #1c1c20;
-  --bg-input: #0f0f12;
-  --bg-elevated: #222228;
-  /* ── Calm blue accent system (pro DCC look) ───────────────── */
-  --accent: #4a9eff;
-  --accent-bright: #74b4ff;
-  --accent-dim: rgba(74, 158, 255, 0.28);
-  --accent-bg: rgba(74, 158, 255, 0.10);
-  --purple: #4a9eff;
-  --purple-glow: rgba(74, 158, 255, 0.45);
-  --pink: #4a9eff;
-  --pink-glow: rgba(74, 158, 255, 0.35);
-  --neon-gradient: linear-gradient(135deg, #4a9eff 0%, #2f7fe0 100%);
+  /* ═══════════════════════════════════════════════════════════════════
+     "Obsidian & Photon" — graphite-carbon base, cyan-to-violet gradient
+     accent. Distinct from the earlier navy/purple attempts: cooler,
+     darker neutrals with a genuine cool-neutral (not blue-tinted) base,
+     and a dual-hue accent instead of a single flat blue.
+     ═══════════════════════════════════════════════════════════════════ */
+  --bg-deep: #08090b;
+  --bg-panel: #101113;
+  --bg-card: #17181c;
+  --bg-input: #0b0c0e;
+  --bg-elevated: #1e2024;
+  /* ── Cyan → violet "photon" accent system ─────────────────── */
+  --accent: #22d3ee;
+  --accent-2: #818cf8;
+  --accent-bright: #67e8f9;
+  --accent-dim: rgba(34, 211, 238, 0.26);
+  --accent-bg: rgba(34, 211, 238, 0.10);
+  --purple: #818cf8;
+  --purple-glow: rgba(129, 140, 248, 0.4);
+  --pink: #22d3ee;
+  --pink-glow: rgba(34, 211, 238, 0.35);
+  --neon-gradient: linear-gradient(135deg, #22d3ee 0%, #818cf8 100%);
   /* ── Track / thumb ────────────────────────────────────────── */
-  --track: #26262c;
-  --thumb: #4a9eff;
+  --track: #24262b;
+  --thumb: #22d3ee;
   /* ── Text hierarchy ──────────────────────────────────────── */
-  --text: #e9e9ec;
-  --text-sec: #9a9aa4;
-  --text-dim: #5e5e68;
+  --text: #eef1f3;
+  --text-sec: #98a0a8;
+  --text-dim: #5a6169;
   /* ── Borders ──────────────────────────────────────────────── */
-  --border: #26262c;
-  --border-light: #34343c;
-  --border-glow: rgba(74, 158, 255, 0.16);
+  --border: #24262b;
+  --border-light: #33363c;
+  --border-glow: rgba(34, 211, 238, 0.22);
   /* ── Semantic ─────────────────────────────────────────────── */
-  --danger: #f87171;
-  --success: #4ade80;
+  --danger: #fb7185;
+  --success: #34d399;
   --warning: #fbbf24;
   /* ── Typography ───────────────────────────────────────────── */
   --font-ui: 'Inter', system-ui, -apple-system, sans-serif;
+  --font-display: 'Space Grotesk', 'Inter', system-ui, sans-serif;
   --font-mono: 'JetBrains Mono', 'SF Mono', monospace;
-  --radius: 8px;
-  --radius-sm: 5px;
-  /* ── Glow utilities — subtle, calm ────────────────────────── */
-  --glow-sm: 0 0 8px rgba(74, 158, 255, 0.18);
-  --glow-md: 0 0 14px rgba(74, 158, 255, 0.22);
-  --glow-lg: 0 0 22px rgba(74, 158, 255, 0.26);
-  --panel-glow: 0 0 1px var(--border-glow), inset 0 0 0 1px rgba(255,255,255,0.02);
+  --radius: 14px;
+  --radius-sm: 9px;
+  /* ── Glow utilities — sharper, more saturated "photon" glow ── */
+  --glow-sm: 0 0 10px rgba(34, 211, 238, 0.24);
+  --glow-md: 0 0 18px rgba(34, 211, 238, 0.28);
+  --glow-lg: 0 0 30px rgba(34, 211, 238, 0.3);
+  --panel-glow: 0 0 1px var(--border-glow), inset 0 0 0 1px rgba(255,255,255,0.03);
 }
 
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -102,20 +109,22 @@ select {
 }
 .panel-header {
   display: flex; align-items: center; justify-content: space-between;
-  padding: 8px 12px; border-bottom: 1px solid var(--border);
-  min-height: 32px; flex-shrink: 0;
-  background: linear-gradient(180deg, rgba(74, 158, 255,0.03) 0%, transparent 100%);
+  padding: 9px 13px; border-bottom: 1px solid var(--border);
+  min-height: 34px; flex-shrink: 0;
+  background: linear-gradient(180deg, rgba(34, 211, 238, 0.045) 0%, transparent 100%);
 }
 .panel-header h3 {
-  font-size: 10px; font-weight: 600; text-transform: uppercase;
-  letter-spacing: 1px; color: var(--accent);
+  font-family: var(--font-display);
+  font-size: 10.5px; font-weight: 600; text-transform: uppercase;
+  letter-spacing: 1.1px; color: var(--accent-bright);
   display: flex; align-items: center; gap: 6px;
 }
 .panel-body { flex: 1; overflow-y: auto; padding: 6px; }
 
 .section-header {
+  font-family: var(--font-display);
   font-size: 10px; font-weight: 600; text-transform: uppercase;
-  letter-spacing: 0.8px; color: var(--text-dim);
+  letter-spacing: 0.9px; color: var(--text-dim);
   padding: 6px 0 4px; border-bottom: 1px solid var(--border); margin-bottom: 6px;
 }
 
@@ -132,7 +141,7 @@ select {
 
 .btn-sm {
   display: inline-flex; align-items: center; gap: 4px;
-  padding: 4px 10px; border-radius: var(--radius-sm); font-size: 11px;
+  padding: 4px 11px; border-radius: var(--radius-sm); font-size: 11px;
   color: var(--text-sec); background: var(--bg-card);
   border: 1px solid var(--border); transition: all 0.2s ease;
 }
@@ -140,18 +149,22 @@ select {
   border-color: var(--accent);
   color: var(--accent-bright);
   box-shadow: var(--glow-sm);
+  transform: translateY(-1px);
 }
 
 .btn-primary {
-  display: inline-flex; align-items: center; justify-content: center; gap: 4px;
-  padding: 5px 12px; border-radius: var(--radius-sm); font-size: 11px;
-  font-weight: 500; color: white; background: var(--neon-gradient);
+  display: inline-flex; align-items: center; justify-content: center; gap: 5px;
+  padding: 6px 14px; border-radius: var(--radius-sm); font-size: 11px;
+  font-family: var(--font-display);
+  font-weight: 600; letter-spacing: 0.2px; color: #051012; background: var(--neon-gradient);
   transition: all 0.2s ease; box-shadow: var(--glow-sm);
 }
 .btn-primary:hover {
   box-shadow: var(--glow-md);
   transform: translateY(-1px);
+  filter: brightness(1.06);
 }
+.btn-primary:active { transform: translateY(0); }
 
 .field-row { display: flex; align-items: center; gap: 6px; margin-bottom: 4px; }
 .field-label { font-size: 11px; color: var(--text-sec); min-width: 58px; flex-shrink: 0; }
@@ -177,20 +190,22 @@ select {
 }
 
 .toggle-track {
-  position: relative; width: 32px; height: 16px;
-  background: var(--track); border-radius: 8px;
+  position: relative; width: 34px; height: 18px;
+  background: var(--track); border: 1px solid var(--border-light);
+  border-radius: 10px;
   cursor: pointer; transition: all 0.25s ease; flex-shrink: 0;
 }
 .toggle-track.on {
-  background: var(--accent);
-  box-shadow: 0 0 8px var(--purple-glow);
+  background: var(--neon-gradient);
+  border-color: transparent;
+  box-shadow: var(--glow-sm);
 }
 .toggle-track::after {
   content: ''; position: absolute; top: 2px; left: 2px;
   width: 12px; height: 12px; background: var(--text);
   border-radius: 50%; transition: transform 0.25s cubic-bezier(0.34, 1.56, 0.64, 1);
 }
-.toggle-track.on::after { transform: translateX(16px); }
+.toggle-track.on::after { transform: translateX(16px); background: #051012; }
 
 .tooltip { position: relative; }
 .tooltip::after {
@@ -210,43 +225,34 @@ select {
   min-width: 36px; text-align: right; flex-shrink: 0;
 }
 
-/* Recessed "groove" trough the tabs sit in - a solid, clearly-visible border
-   plus a hairline highlight just below it reads as a carved 3D seam rather
-   than a flat 1px rule. */
+/* Futuristic segmented pill control: tabs float as rounded chips inside a
+   recessed rounded track, the active one lifted with a photon-gradient
+   underline and soft glow rather than the old carved-groove skeuomorphism. */
 .tab-bar {
-  display: flex; align-items: stretch; gap: 0; padding: 0 4px;
+  display: flex; align-items: stretch; gap: 2px; padding: 3px;
   background: var(--bg-deep);
-  border-bottom: 2px solid var(--border-light);
-  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.06), inset 0 -4px 6px -4px rgba(0, 0, 0, 0.55);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
 }
 .tab-item {
   position: relative;
-  padding: 8px 10px; font-size: 10px; font-weight: 500;
-  text-transform: uppercase; letter-spacing: 0.5px; white-space: nowrap; flex-shrink: 0;
-  display: flex; align-items: center;
-  color: var(--text-dim); border-bottom: 2px solid transparent;
-  /* Carved vertical divider: a solid border for a clearly-visible seam, plus
-     an inset dark/light pair for depth - both inset so they stay inside this
-     tab's own box (no bleed into the next tab's paint). */
-  border-right: 1px solid var(--border-light);
-  box-shadow: inset -2px 0 3px -2px rgba(0, 0, 0, 0.6), inset 1px 0 0 rgba(255, 255, 255, 0.04);
-  cursor: pointer; transition: color 0.15s ease, border-color 0.15s ease, background 0.15s ease, box-shadow 0.15s ease;
+  padding: 8px 12px; font-size: 10px; font-weight: 600;
+  font-family: var(--font-display);
+  text-transform: uppercase; letter-spacing: 0.7px; white-space: nowrap; flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center;
+  color: var(--text-dim); border: none; border-radius: calc(var(--radius-sm) - 3px);
+  cursor: pointer; transition: color 0.15s ease, background 0.15s ease, box-shadow 0.15s ease;
 }
-.tab-item:last-child { border-right: none; box-shadow: none; }
-.tab-item:hover { color: var(--text-sec); background: rgba(255, 255, 255, 0.03); }
+.tab-item:hover { color: var(--text-sec); background: rgba(255, 255, 255, 0.04); }
 .tab-item.active {
   color: var(--accent-bright);
-  border-bottom-color: var(--accent-bright);
-  /* Raised card popping out of the darker groove: lighter fill, a bright
-     top edge, and solid dark seams either side simulate a physical lip. */
-  background: var(--bg-panel);
-  border-left: 1px solid var(--border-light);
-  border-right: 1px solid var(--border-light);
-  box-shadow:
-    inset 0 2px 0 rgba(255, 255, 255, 0.1),
-    inset 1px 0 0 rgba(0, 0, 0, 0.5),
-    inset -1px 0 0 rgba(0, 0, 0, 0.5),
-    0 2px 6px rgba(0, 0, 0, 0.35);
+  background: var(--accent-bg);
+  box-shadow: inset 0 0 0 1px var(--border-glow), 0 0 0 1px rgba(34,211,238,0.05), var(--glow-sm);
+}
+.tab-item.active::after {
+  content: '';
+  position: absolute; left: 14%; right: 14%; bottom: 2px; height: 2px;
+  background: var(--neon-gradient); border-radius: 2px;
 }
 
 /* ═══════════════════════════════════════════════════════════════════════
@@ -303,14 +309,12 @@ body[data-theme="red-grey"] {
 
 .tab-bar-purple .tab-item.active {
   color: var(--theme-accent-bright);
-  border-bottom-color: var(--theme-accent-bright);
   background: var(--theme-accent-bg);
-  box-shadow:
-    inset 0 2px 0 rgba(255, 255, 255, 0.1),
-    inset 1px 0 0 rgba(0, 0, 0, 0.5),
-    inset -1px 0 0 rgba(0, 0, 0, 0.5),
-    0 2px 10px var(--theme-accent-glow);
+  box-shadow: inset 0 0 0 1px var(--theme-accent-glow-strong), 0 0 12px var(--theme-accent-glow);
   transition: color 0.25s ease, background 0.25s ease, box-shadow 0.25s ease;
+}
+.tab-bar-purple .tab-item.active::after {
+  background: var(--theme-accent-bright);
 }
 .tab-bar-purple .tab-item.active .tab-icon {
   color: var(--theme-accent-bright);
@@ -320,26 +324,27 @@ body[data-theme="red-grey"] {
 /* Framed card: rounded double-border with a soft theme-tinted outer glow,
    echoing the reference's embossed panel frame. */
 .properties-card-frame {
-  border-radius: 10px;
+  border-radius: var(--radius);
   box-shadow: 0 0 0 1px var(--theme-accent-glow-strong), 0 10px 28px rgba(0, 0, 0, 0.4);
   transition: box-shadow 0.25s ease;
 }
 .properties-card-frame > div:first-child {
-  border-top-left-radius: 9px;
-  border-top-right-radius: 9px;
+  border-top-left-radius: calc(var(--radius) - 1px);
+  border-top-right-radius: calc(var(--radius) - 1px);
 }
 
 /* ── Theme switcher button + dropdown (top-right corner) ────────────── */
 .theme-switcher-btn {
   display: inline-flex; align-items: center; gap: 7px;
   height: 28px;
-  padding: 0 10px;
+  padding: 0 12px;
   background: var(--bg-card);
   border: 1px solid var(--theme-accent-glow-strong);
   border-radius: 999px;
   color: var(--text);
+  font-family: var(--font-display);
   font-size: 11px;
-  font-weight: 500;
+  font-weight: 600;
   cursor: pointer;
   transition: border-color 0.15s ease, box-shadow 0.15s ease, background 0.15s ease;
 }
@@ -356,10 +361,11 @@ body[data-theme="red-grey"] {
 .topbar-nav-item {
   display: inline-flex; align-items: center; gap: 6px;
   height: 32px;
-  padding: 0 12px;
-  border-radius: 8px;
+  padding: 0 13px;
+  border-radius: var(--radius-sm);
+  font-family: var(--font-display);
   font-size: 12px;
-  font-weight: 500;
+  font-weight: 600;
   color: var(--text-sec);
   background: transparent;
   border: 1px solid transparent;
@@ -377,7 +383,7 @@ body[data-theme="red-grey"] {
 }
 
 .drop-overlay {
-  position: absolute; inset: 0; background: rgba(74, 158, 255, 0.06);
+  position: absolute; inset: 0; background: var(--accent-bg);
   border: 2px dashed var(--accent-bright); border-radius: var(--radius);
   display: flex; align-items: center; justify-content: center; z-index: 50;
   pointer-events: none;
@@ -659,7 +665,7 @@ body[data-theme="red-grey"] {
 
 .preset-card.previewing {
   border-color: var(--accent-bright);
-  box-shadow: 0 0 0 1px var(--accent-dim), var(--glow-md), 0 4px 16px rgba(74, 158, 255, 0.15);
+  box-shadow: 0 0 0 1px var(--accent-dim), var(--glow-md), 0 4px 16px rgba(34, 211, 238, 0.15);
 }
 
 .preset-card:active {
@@ -1136,7 +1142,7 @@ body[data-theme="red-grey"] {
   background: var(--accent);
   z-index: 10;
   pointer-events: none;
-  box-shadow: 0 0 8px rgba(74, 158, 255, 0.4);
+  box-shadow: 0 0 8px rgba(34, 211, 238, 0.4);
 }
 
 .tl-playhead::before {
@@ -1867,7 +1873,7 @@ input[type="range"]:active::-webkit-slider-thumb {
 }
 
 .preset-card:hover .pc-inner {
-  box-shadow: inset 0 0 20px rgba(74, 158, 255, 0.05);
+  box-shadow: inset 0 0 20px rgba(34, 211, 238, 0.05);
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
@@ -1898,7 +1904,7 @@ input[type="range"]:active::-webkit-slider-thumb {
 /* Animated gradient border glow on panels */
 @keyframes borderGlow {
   0%   { border-color: rgba(59, 130, 246, 0.25); box-shadow: 0 0 6px rgba(59, 130, 246, 0.15); }
-  25%  { border-color: rgba(74, 158, 255, 0.40); box-shadow: 0 0 10px rgba(74, 158, 255, 0.25); }
+  25%  { border-color: rgba(34, 211, 238, 0.40); box-shadow: 0 0 10px rgba(34, 211, 238, 0.25); }
   50%  { border-color: rgba(59, 130, 246, 0.40); box-shadow: 0 0 14px rgba(59, 130, 246, 0.25); }
   75%  { border-color: rgba(59, 130, 246, 0.35); box-shadow: 0 0 8px rgba(59, 130, 246, 0.20); }
   100% { border-color: rgba(59, 130, 246, 0.25); box-shadow: 0 0 6px rgba(59, 130, 246, 0.15); }
@@ -1941,8 +1947,8 @@ input[type="range"]:active::-webkit-slider-thumb {
 /* Active / selected element glow */
 .element-glow-active {
   box-shadow:
-    0 0 0 1px rgba(74, 158, 255, 0.5),
-    0 0 10px rgba(74, 158, 255, 0.25),
+    0 0 0 1px rgba(34, 211, 238, 0.5),
+    0 0 10px rgba(34, 211, 238, 0.25),
     0 0 20px rgba(59, 130, 246, 0.1);
   transition: box-shadow 0.3s ease;
 }
@@ -1953,7 +1959,7 @@ input[type="range"]:active::-webkit-slider-thumb {
 }
 .btn-glow:hover {
   box-shadow:
-    0 0 6px rgba(74, 158, 255, 0.35),
+    0 0 6px rgba(34, 211, 238, 0.35),
     0 0 16px rgba(59, 130, 246, 0.15);
 }
 
@@ -1962,8 +1968,8 @@ input[type="range"]:active::-webkit-slider-thumb {
   transition: background 0.15s ease, box-shadow 0.15s ease, width 0.15s ease, height 0.15s ease;
 }
 .resize-handle-glow:hover {
-  background: rgba(74, 158, 255, 0.5) !important;
-  box-shadow: 0 0 8px rgba(74, 158, 255, 0.3);
+  background: rgba(34, 211, 238, 0.5) !important;
+  box-shadow: 0 0 8px rgba(34, 211, 238, 0.3);
 }
 
 /* Skeleton loading for preset thumbnails */
@@ -1973,7 +1979,7 @@ input[type="range"]:active::-webkit-slider-thumb {
   background: linear-gradient(
     90deg,
     var(--bg-input) 25%,
-    rgba(74, 158, 255, 0.06) 50%,
+    rgba(34, 211, 238, 0.06) 50%,
     var(--bg-input) 75%
   );
   background-size: 200% 100%;
@@ -2107,7 +2113,7 @@ input[type="range"]:active::-webkit-slider-thumb {
   gap: 6px;
   padding: 6px 10px;
   border-bottom: 1px solid var(--border);
-  background: rgba(74, 158, 255, 0.04);
+  background: rgba(34, 211, 238, 0.04);
 }
 .mat-selected-chip-name {
   font-size: 11px;
@@ -2236,7 +2242,7 @@ input[type="range"]:active::-webkit-slider-thumb {
   border-radius: 50%;
   background: var(--accent);
   cursor: pointer;
-  box-shadow: 0 0 6px rgba(74, 158, 255, 0.4);
+  box-shadow: 0 0 6px rgba(34, 211, 238, 0.4);
   border: 1.5px solid rgba(255,255,255,0.15);
 }
 .vp-design-panel input[type="range"]::-moz-range-thumb {
@@ -2245,7 +2251,7 @@ input[type="range"]:active::-webkit-slider-thumb {
   border-radius: 50%;
   background: var(--accent);
   cursor: pointer;
-  box-shadow: 0 0 6px rgba(74, 158, 255, 0.4);
+  box-shadow: 0 0 6px rgba(34, 211, 238, 0.4);
   border: 1.5px solid rgba(255,255,255,0.15);
 }
 
@@ -2335,8 +2341,8 @@ input[type="range"]:active::-webkit-slider-thumb {
 .glossy-toggle.on .glossy-toggle-label {
   justify-content: flex-end; padding-right: 7px;
   color: #d3ecff;
-  text-shadow: 0 0 6px rgba(74, 158, 255, 0.9);
-  background: radial-gradient(ellipse 70% 100% at right, rgba(74, 158, 255, 0.4), transparent 75%);
+  text-shadow: 0 0 6px rgba(34, 211, 238, 0.9);
+  background: radial-gradient(ellipse 70% 100% at right, rgba(34, 211, 238, 0.4), transparent 75%);
 }
 .glossy-toggle.off .glossy-toggle-label {
   justify-content: flex-start; padding-left: 7px;
@@ -2381,13 +2387,13 @@ input[type="range"]:active::-webkit-slider-thumb {
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.09),
     inset 0 -3px 5px rgba(0, 0, 0, 0.55),
-    0 0 10px rgba(74, 158, 255, 0.25);
+    0 0 10px rgba(34, 211, 238, 0.25);
 }
 .glossy-3d-trial .field-select:focus {
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.09),
     0 0 0 2px var(--accent-dim),
-    0 0 12px rgba(74, 158, 255, 0.45);
+    0 0 12px rgba(34, 211, 238, 0.45);
 }
 
 /* Text inputs and numeric fields get the same glossy pill treatment for
@@ -2404,5 +2410,5 @@ input[type="range"]:active::-webkit-slider-thumb {
   box-shadow:
     inset 0 2px 4px rgba(0, 0, 0, 0.6),
     0 0 0 2px var(--accent-dim),
-    0 0 12px rgba(74, 158, 255, 0.4);
+    0 0 12px rgba(34, 211, 238, 0.4);
 }

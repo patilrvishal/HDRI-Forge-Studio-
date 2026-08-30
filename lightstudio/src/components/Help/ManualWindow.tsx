@@ -420,7 +420,7 @@ const ManualWindow: React.FC<ManualWindowProps> = ({ onClose }) => {
                       style={{
                         padding: '6px 12px 6px 26px', fontSize: 10,
                         color: activeSection === section.id ? 'var(--accent-bright)' : 'var(--text-sec)',
-                        background: activeSection === section.id ? 'rgba(74, 158, 255, 0.08)' : 'transparent',
+                        background: activeSection === section.id ? 'rgba(34, 211, 238, 0.08)' : 'transparent',
                         borderRight: activeSection === section.id ? '2px solid var(--accent)' : '2px solid transparent',
                         cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6, transition: 'all 0.1s',
                       }}
@@ -558,8 +558,8 @@ const ManualWindow: React.FC<ManualWindowProps> = ({ onClose }) => {
                   <div key={idx} style={{
                     padding: '8px 12px',
                     margin: '8px 0',
-                    background: 'rgba(74, 158, 255, 0.06)',
-                    border: '1px solid rgba(74, 158, 255, 0.15)',
+                    background: 'rgba(34, 211, 238, 0.06)',
+                    border: '1px solid rgba(34, 211, 238, 0.15)',
                     borderLeft: '3px solid var(--accent)',
                     borderRadius: '0 var(--radius-sm) var(--radius-sm) 0',
                     fontSize: 10,
