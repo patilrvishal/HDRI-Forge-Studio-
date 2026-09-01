@@ -25,6 +25,8 @@ import type { AnimatedProperty } from '../../types/Animation';
 import { MaterialManager } from '../../three/MaterialManager';
 import { useMaterialEditorStore } from '../../store/materialEditorStore';
 import { useUIStore } from '../../store/uiStore';
+import { useHDRIShapesStore } from '../../store/hdriShapesStore';
+import { compositeShapesCanvas } from '../../three/HDRIShapesLayer';
 
 interface ViewportProps {
   sceneManagerRef: React.MutableRefObject<SceneManager | null>;
@@ -54,6 +56,8 @@ export const Viewport: React.FC<ViewportProps> = ({ sceneManagerRef, onScreensho
   const showGrid = useSceneStore((s) => s.showGrid);
   const turntable = useSceneStore((s) => s.turntable);
   const environment = useSceneStore((s) => s.environment);
+  const hdriShapes = useHDRIShapesStore((s) => s.shapes);
+  const hdriLivePreview = useHDRIShapesStore((s) => s.livePreview);
   const renderSettings = useSceneStore((s) => s.renderSettings);
   const setModel = useSceneStore((s) => s.setModel);
   const setExposure = useSceneStore((s) => s.setExposure);
@@ -545,6 +549,32 @@ export const Viewport: React.FC<ViewportProps> = ({ sceneManagerRef, onScreensho
     const gammaCorrectedExposure = Math.pow(Math.max(renderSettings.exposure, 0.0001), 1 / 2.2);
     sm.scene.backgroundIntensity = environment.intensity * gammaCorrectedExposure;
   }, [environment.intensity, renderSettings.exposure, sceneManagerRef]);
+
+  // Sync HDRI Shapes onto the live 3D viewport when Live Preview is on.
+  // Runs AFTER the other environment effects above so it wins the last write
+  // to scene.background/environment - shapes are meant to override whatever
+  // preset/HDRI/gradient is active underneath, exactly like the HDRI Preview
+  // panel's own compositing. Turning Live Preview off leaves the viewport
+  // exactly as the other effects already set it (no extra cleanup needed,
+  // since they run again independently whenever their own deps change).
+  useEffect(() => {
+    const sm = sceneManagerRef.current;
+    const el = envLoaderRef.current;
+    if (!sm || !el) return;
+    if (!hdriLivePreview || hdriShapes.length === 0) return;
+
+    const gb = environment.gradientBackground?.enabled ? environment.gradientBackground : null;
+    const canvas = compositeShapesCanvas(hdriShapes, gb);
+    const canvasTex = new THREE.CanvasTexture(canvas);
+    canvasTex.mapping = THREE.EquirectangularReflectionMapping;
+    canvasTex.needsUpdate = true;
+
+    const envMap = sm.pmremGenerator.fromEquirectangular(canvasTex).texture;
+    el.setEnvironmentTexture(sm.scene, envMap, environment.intensity);
+    sm.scene.background = canvasTex;
+    sm.scene.backgroundRotation = new THREE.Euler(0, 0, 0);
+    sm.scene.environmentRotation = new THREE.Euler(0, 0, 0);
+  }, [hdriShapes, hdriLivePreview, environment.gradientBackground, environment.intensity, sceneManagerRef, envLoaderRef]);
 
   // Restore model from scene file (triggered when _pendingModelDataBase64 is set)
   useEffect(() => {

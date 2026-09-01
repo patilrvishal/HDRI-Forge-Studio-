@@ -1230,18 +1230,26 @@ function loadHDRITexture(buffer: ArrayBuffer): Promise<THREE.DataTexture | null>
  * Without this, the gradient only ever painted scene.background - it never
  * reached the exporter or the HDRI preview, which both read EnvLayer[].
  */
-export function gradientToEnvLayer(config: {
+export interface GradientBackgroundConfig {
   type: 'linear' | 'radial' | 'conic';
   angle: number;
   stops: { color: string; position: number; opacity: number }[];
-}, intensity = 1.0): EnvLayer {
-  const w = 1024;
-  const h = 512;
-  const canvas = document.createElement('canvas');
-  canvas.width = w;
-  canvas.height = h;
-  const ctx = canvas.getContext('2d')!;
+}
 
+/**
+ * Paint the gradient background directly onto an existing 2D context.
+ * Factored out of gradientToEnvLayer so the HDRI Shapes compositor can use
+ * the exact same gradient as its base fill, with shapes painted on top in
+ * the SAME canvas (true alpha-over compositing) rather than as a separate
+ * additive env layer, which is what makes a black shape actually block the
+ * gradient beneath it instead of just contributing zero on top of it.
+ */
+export function paintGradientOntoContext(
+  ctx: CanvasRenderingContext2D,
+  w: number,
+  h: number,
+  config: GradientBackgroundConfig,
+): void {
   let gradient: CanvasGradient;
   if (config.type === 'radial') {
     gradient = ctx.createRadialGradient(w / 2, h / 2, 0, w / 2, h / 2, w * 0.6);
@@ -1270,6 +1278,17 @@ export function gradientToEnvLayer(config: {
 
   ctx.fillStyle = gradient;
   ctx.fillRect(0, 0, w, h);
+}
+
+export function gradientToEnvLayer(config: GradientBackgroundConfig, intensity = 1.0): EnvLayer {
+  const w = 1024;
+  const h = 512;
+  const canvas = document.createElement('canvas');
+  canvas.width = w;
+  canvas.height = h;
+  const ctx = canvas.getContext('2d')!;
+
+  paintGradientOntoContext(ctx, w, h, config);
 
   // Read the canvas ONCE into an ImageData buffer. sampleEnvTexture's canvas
   // path (Path C) calls getImageData(px, py, 1, 1) per sampled pixel, which is

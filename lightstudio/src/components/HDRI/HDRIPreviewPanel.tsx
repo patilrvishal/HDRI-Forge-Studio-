@@ -3,6 +3,8 @@ import * as THREE from 'three';
 import { useLightsStore } from '../../store/lightsStore';
 import { useSceneStore } from '../../store/sceneStore';
 import { useHDRIAssetStore } from '../../store/hdriAssetStore';
+import { useHDRIShapesStore } from '../../store/hdriShapesStore';
+import type { HDRIShapeType } from '../../types/HDRIShape';
 import { Toggle } from '../UI/Toggle';
 
 import {
@@ -12,6 +14,7 @@ import {
   downloadHDRI,
   type EnvLayer,
 } from '../../three/HDRIExporter';
+import { compositeShapesCanvas, shapesCanvasToEnvLayer } from '../../three/HDRIShapesLayer';
 
 /** Preview is always rendered small so it stays interactive. */
 const PREVIEW_W = 512;
@@ -89,7 +92,18 @@ export const HDRIPreviewPanel: React.FC = () => {
   const environment = useSceneStore((s) => s.environment);
   const hdriAssets = useHDRIAssetStore((s) => s.assets);
 
-  const [livePreview, setLivePreview] = useState(false);
+  const shapes = useHDRIShapesStore((s) => s.shapes);
+  const selectedShapeId = useHDRIShapesStore((s) => s.selectedShapeId);
+  const addShape = useHDRIShapesStore((s) => s.addShape);
+  const removeShape = useHDRIShapesStore((s) => s.removeShape);
+  const selectShape = useHDRIShapesStore((s) => s.selectShape);
+  const updateShape = useHDRIShapesStore((s) => s.updateShape);
+  const reorderShape = useHDRIShapesStore((s) => s.reorderShape);
+  const selectedShape = shapes.find((sh) => sh.id === selectedShapeId) ?? null;
+
+  const livePreview = useHDRIShapesStore((s) => s.livePreview);
+  const setLivePreview = useHDRIShapesStore((s) => s.setLivePreview);
+  const draggingRef = useRef(false);
   // Single source of truth = renderSettings.exposure (same value driving the
   // live viewport and Render Settings > Exposure), so this panel always
   // reflects the real current exposure and stays in sync either direction.
@@ -119,7 +133,15 @@ export const HDRIPreviewPanel: React.FC = () => {
       // loaded HDRI, so it shows up in the preview and export instead of only
       // painting the viewport backdrop.
       const gb = useSceneStore.getState().environment.gradientBackground;
-      if (gb?.enabled) {
+      const currentShapes = useHDRIShapesStore.getState().shapes;
+
+      if (currentShapes.length > 0) {
+        // Shapes are painted directly onto the gradient's own canvas (true
+        // alpha-over) so a black shape actually blocks what's beneath it,
+        // instead of being summed as a separate additive layer.
+        const canvas = compositeShapesCanvas(currentShapes, gb?.enabled ? gb : null);
+        layers.push(shapesCanvasToEnvLayer(canvas, environment.intensity ?? 1.0));
+      } else if (gb?.enabled) {
         layers.push(gradientToEnvLayer(gb, environment.intensity ?? 1.0));
       }
 
@@ -164,7 +186,7 @@ export const HDRIPreviewPanel: React.FC = () => {
     return () => {
       if (timerRef.current) window.clearTimeout(timerRef.current);
     };
-  }, [livePreview, lights, environment, hdriAssets, renderPreview]);
+  }, [livePreview, lights, environment, hdriAssets, shapes, renderPreview]);
 
   /** Exposure only re-paints - no need to re-run the expensive pixel loop. */
   useEffect(() => {
@@ -202,6 +224,47 @@ export const HDRIPreviewPanel: React.FC = () => {
   const clipPct = stats ? ((stats.clipped / stats.total) * 100).toFixed(1) : '0.0';
   const clipWarn = stats ? stats.clipped / stats.total > 0.25 : false;
 
+  /** Click-drag on the preview to reposition the selected shape (u/v). */
+  const uvFromEvent = (e: React.PointerEvent<HTMLCanvasElement>): { u: number; v: number } | null => {
+    const canvas = canvasRef.current;
+    if (!canvas) return null;
+    const rect = canvas.getBoundingClientRect();
+    const u = Math.min(1, Math.max(0, (e.clientX - rect.left) / rect.width));
+    const v = Math.min(1, Math.max(0, (e.clientY - rect.top) / rect.height));
+    return { u, v };
+  };
+
+  const handleCanvasPointerDown = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    if (!selectedShapeId) return;
+    const uv = uvFromEvent(e);
+    if (!uv) return;
+    draggingRef.current = true;
+    (e.target as HTMLCanvasElement).setPointerCapture(e.pointerId);
+    updateShape(selectedShapeId, uv);
+  };
+
+  const handleCanvasPointerMove = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    if (!draggingRef.current || !selectedShapeId) return;
+    const uv = uvFromEvent(e);
+    if (!uv) return;
+    updateShape(selectedShapeId, uv);
+  };
+
+  const handleCanvasPointerUp = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    draggingRef.current = false;
+    try {
+      (e.target as HTMLCanvasElement).releasePointerCapture(e.pointerId);
+    } catch {
+      // ignore - capture may already be released
+    }
+  };
+
+  const shapeTypeButtons: Array<{ type: HDRIShapeType; label: string }> = [
+    { type: 'rectangle', label: 'Rectangle' },
+    { type: 'circle', label: 'Circle' },
+    { type: 'gradient-strip', label: 'Grad Strip' },
+  ];
+
   return (
     <div style={{ display: 'flex', height: '100%', gap: 12, padding: 10, overflow: 'auto' }}>
       {/* Preview canvas */}
@@ -220,11 +283,15 @@ export const HDRIPreviewPanel: React.FC = () => {
       >
         <canvas
           ref={canvasRef}
+          onPointerDown={handleCanvasPointerDown}
+          onPointerMove={handleCanvasPointerMove}
+          onPointerUp={handleCanvasPointerUp}
           style={{
             maxWidth: '100%',
             maxHeight: '100%',
             objectFit: 'contain',
             imageRendering: 'auto',
+            cursor: selectedShapeId ? 'crosshair' : 'default',
           }}
         />
         {rendering && (
@@ -264,6 +331,207 @@ export const HDRIPreviewPanel: React.FC = () => {
             Auto-refresh is off. Use Refresh Preview for a one-off render.
           </div>
         )}
+
+        {/* HDRI Shapes - composite lights/blockers painted directly onto
+            the HDRI. Click-drag on the preview to reposition the selected
+            one; stacking order (top of list = top of stack) is what makes
+            a black shape actually block whatever is beneath it. */}
+        <div style={{ borderTop: '1px solid var(--border)', paddingTop: 8, marginTop: 2 }}>
+          <div className="section-header" style={{ marginBottom: 6 }}>HDRI Shapes</div>
+
+          <div style={{ display: 'flex', gap: 3, marginBottom: 6 }}>
+            {shapeTypeButtons.map((b) => (
+              <button
+                key={b.type}
+                onClick={() => addShape(b.type)}
+                title={`Add ${b.label}`}
+                style={{
+                  flex: 1,
+                  fontSize: 9,
+                  padding: '5px 2px',
+                  background: 'transparent',
+                  color: 'var(--text-sec)',
+                  border: '1px solid var(--border)',
+                  borderRadius: 3,
+                  cursor: 'pointer',
+                }}
+              >
+                + {b.label}
+              </button>
+            ))}
+          </div>
+
+          {shapes.length === 0 && (
+            <div style={{ fontSize: 9, color: 'var(--text-dim)', lineHeight: 1.4, marginBottom: 6 }}>
+              No shapes yet. Add one above, then click-drag on the preview to position it.
+            </div>
+          )}
+
+          {shapes.length > 0 && (
+            <div
+              style={{
+                display: 'flex',
+                flexDirection: 'column-reverse',
+                gap: 2,
+                marginBottom: 6,
+                maxHeight: 120,
+                overflowY: 'auto',
+              }}
+            >
+              {shapes.map((sh, idx) => (
+                <div
+                  key={sh.id}
+                  onClick={() => selectShape(sh.id)}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 5,
+                    padding: '3px 5px',
+                    fontSize: 10,
+                    borderRadius: 3,
+                    cursor: 'pointer',
+                    background: sh.id === selectedShapeId ? 'var(--accent)' : 'transparent',
+                    color: sh.id === selectedShapeId ? '#fff' : 'var(--text-sec)',
+                  }}
+                >
+                  <span
+                    style={{
+                      width: 10,
+                      height: 10,
+                      borderRadius: sh.type === 'circle' ? '50%' : 2,
+                      background: sh.color,
+                      opacity: sh.visible ? 1 : 0.3,
+                      flexShrink: 0,
+                      border: '1px solid rgba(255,255,255,0.25)',
+                    }}
+                  />
+                  <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {sh.name}
+                  </span>
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      updateShape(sh.id, { visible: !sh.visible });
+                    }}
+                    title="Toggle visible"
+                    style={{ background: 'none', border: 'none', color: 'inherit', cursor: 'pointer', fontSize: 10, padding: 0 }}
+                  >
+                    {sh.visible ? '◉' : '○'}
+                  </button>
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      reorderShape(sh.id, 'up');
+                    }}
+                    disabled={idx === shapes.length - 1}
+                    title="Move up (paints later / on top)"
+                    style={{ background: 'none', border: 'none', color: 'inherit', cursor: 'pointer', fontSize: 10, padding: 0, opacity: idx === shapes.length - 1 ? 0.3 : 1 }}
+                  >
+                    {'↑'}
+                  </button>
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      reorderShape(sh.id, 'down');
+                    }}
+                    disabled={idx === 0}
+                    title="Move down"
+                    style={{ background: 'none', border: 'none', color: 'inherit', cursor: 'pointer', fontSize: 10, padding: 0, opacity: idx === 0 ? 0.3 : 1 }}
+                  >
+                    {'↓'}
+                  </button>
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      removeShape(sh.id);
+                    }}
+                    title="Delete"
+                    style={{ background: 'none', border: 'none', color: 'inherit', cursor: 'pointer', fontSize: 10, padding: 0 }}
+                  >
+                    {'✕'}
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {selectedShape && (
+            <div
+              style={{
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 6,
+                padding: 6,
+                background: 'var(--bg-deep, #0a0a0c)',
+                border: '1px solid var(--border)',
+                borderRadius: 3,
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <span style={{ fontSize: 10, color: 'var(--text-sec)' }}>Color</span>
+                <input
+                  type="color"
+                  value={selectedShape.color}
+                  onChange={(e) => updateShape(selectedShape.id, { color: e.target.value })}
+                  style={{ width: 28, height: 18, padding: 0, border: '1px solid var(--border)', borderRadius: 2, background: 'none', cursor: 'pointer' }}
+                />
+              </div>
+
+              {(
+                [
+                  ['opacity', 'Opacity', 0, 200],
+                  ['softness', 'Softness', 0, 100],
+                  ['width', 'Width', 0.02, 1],
+                  ['height', 'Height', 0.02, 1],
+                ] as const
+              ).map(([key, label, min, max]) => (
+                <div key={key}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 10, marginBottom: 2 }}>
+                    <span style={{ color: 'var(--text-sec)' }}>{label}</span>
+                    <span style={{ color: 'var(--text-dim)', fontFamily: 'var(--font-mono)' }}>
+                      {key === 'width' || key === 'height'
+                        ? selectedShape[key].toFixed(2)
+                        : Math.round(selectedShape[key])}
+                    </span>
+                  </div>
+                  <input
+                    type="range"
+                    min={min}
+                    max={max}
+                    step={key === 'width' || key === 'height' ? 0.01 : 1}
+                    value={selectedShape[key]}
+                    onChange={(e) => updateShape(selectedShape.id, { [key]: parseFloat(e.target.value) })}
+                    style={{ width: '100%' }}
+                  />
+                </div>
+              ))}
+
+              {selectedShape.type !== 'circle' && (
+                <div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 10, marginBottom: 2 }}>
+                    <span style={{ color: 'var(--text-sec)' }}>Rotation</span>
+                    <span style={{ color: 'var(--text-dim)', fontFamily: 'var(--font-mono)' }}>
+                      {Math.round(selectedShape.rotation)}°
+                    </span>
+                  </div>
+                  <input
+                    type="range"
+                    min={0}
+                    max={360}
+                    step={1}
+                    value={selectedShape.rotation}
+                    onChange={(e) => updateShape(selectedShape.id, { rotation: parseFloat(e.target.value) })}
+                    style={{ width: '100%' }}
+                  />
+                </div>
+              )}
+
+              <div style={{ fontSize: 9, color: 'var(--text-dim)', lineHeight: 1.4 }}>
+                Drag directly on the preview to reposition.
+              </div>
+            </div>
+          )}
+        </div>
 
         {/* Exposure - live-updates both this preview swatch and the actual
             viewport render (same value as Render Settings > Exposure).
