@@ -62,9 +62,17 @@ interface ExtractedLight {
 }
 
 /**
- * One environment HDRI layer contributing to the export.
- * Multiple active layers are additively blended, exactly like
- * stacking world textures in Blender.
+ * One environment HDRI layer contributing to the export/preview.
+ *
+ * Layers composite in array order using `opacity` as an alpha-blend against
+ * whatever earlier layers already accumulated (background-first, each
+ * later layer painted "over" the last) - matching how HDRI Shapes and area
+ * lights already occlude rather than just adding brightness on top. A
+ * layer with opacity=100 (the default - see grading fields below) fully
+ * replaces what's beneath it, same as plain addition used to behave when
+ * there was only ever one real HDRI layer; opacity<100 lets it blend
+ * through, and this is also what gives moving a Custom HDRI up/down the
+ * layer stack an actual visible effect.
  */
 export interface EnvLayer {
   /** Decoded equirectangular HDR texture (from RGBELoader). */
@@ -73,6 +81,58 @@ export interface EnvLayer {
   intensity: number;
   /** Rotation around the Y axis, in RADIANS. */
   rotation: number;
+  /** 0-100, default 100 (fully opaque - same as the old purely-additive
+   *  behavior). How much this layer blends over the accumulated result of
+   *  every earlier layer. */
+  opacity?: number;
+  /** -100..100, default 0 (no change). Contrast pivoted around mid-grey. */
+  contrast?: number;
+  /** Default 1 (no change). Gamma curve on top of the decoded HDR values. */
+  gamma?: number;
+  /** -100..100, default 0 (no change). Desaturate toward luminance at
+   *  -100, oversaturate at +100. */
+  saturation?: number;
+}
+
+/** Apply gamma -> contrast -> saturation to a linear RGB color, in that
+ *  order (gamma reshapes the curve first, contrast pivots around the
+ *  resulting mid-grey, saturation is a post-process on top of both) -
+ *  shared by every place that samples a graded EnvLayer, so the HDRI
+ *  Preview panel and the exported file always agree on the exact math. */
+function applyColorGrading(
+  color: THREE.Color,
+  contrast: number | undefined,
+  gamma: number | undefined,
+  saturation: number | undefined,
+): THREE.Color {
+  let r = color.r, g = color.g, b = color.b;
+
+  if (gamma !== undefined && gamma !== 1) {
+    const invGamma = 1 / Math.max(0.01, gamma);
+    r = Math.pow(Math.max(0, r), invGamma);
+    g = Math.pow(Math.max(0, g), invGamma);
+    b = Math.pow(Math.max(0, b), invGamma);
+  }
+
+  if (contrast) {
+    // -100..100 -> a multiplicative factor pivoted at 0.5 (mid-grey in
+    // display space) - values above 1.0 stay proportionally more extreme
+    // instead of clamping, since this operates in unbounded HDR space.
+    const factor = (100 + contrast) / 100;
+    r = (r - 0.5) * factor + 0.5;
+    g = (g - 0.5) * factor + 0.5;
+    b = (b - 0.5) * factor + 0.5;
+  }
+
+  if (saturation) {
+    const lum = r * 0.2126 + g * 0.7152 + b * 0.0722;
+    const factor = (100 + saturation) / 100;
+    r = lum + (r - lum) * factor;
+    g = lum + (g - lum) * factor;
+    b = lum + (b - lum) * factor;
+  }
+
+  return new THREE.Color(Math.max(0, r), Math.max(0, g), Math.max(0, b));
 }
 
 /** Options for the main downloadHDRI() entry point. */
@@ -570,14 +630,39 @@ lights.forEach((l, i) => {
 
       let r = 0, g = 0, b = 0;
 
-      // Background first: every active environment HDRI layer (additive
-      // blend between layers - that part is unchanged).
+      // Background first: every active environment layer, composited in
+      // array order (the same order shown/reorderable in the Light List
+      // panel's layer stack).
+      //
+      // Real Custom HDRI asset layers carry an explicit `opacity` and
+      // ALPHA-COMPOSITE over whatever earlier layers already accumulated -
+      // this is what makes moving one up/down the stack (and its Opacity
+      // slider) actually visible: 100% fully replaces what's beneath it,
+      // lower values blend through. The HDRI Shapes/Gradient composite
+      // layer (built in HDRIPreviewPanel/downloadHDRI) deliberately leaves
+      // `opacity` undefined and stays purely ADDITIVE instead - its base
+      // fill covers the whole frame as a placeholder (near-black, or the
+      // gradient), not real content, so alpha-replacing the whole frame
+      // with it would blank out every real HDRI layer everywhere the
+      // shape/gradient doesn't actually paint something, which is exactly
+      // the "everything else disappears" bug fixed earlier this session.
       for (let i = 0; i < envLayers.length; i++) {
         const layer = envLayers[i];
-        const e = sampleEnvTexture(layer.texture, dir, layer.rotation, layer.intensity);
-        r += e.r;
-        g += e.g;
-        b += e.b;
+        const raw = sampleEnvTexture(layer.texture, dir, layer.rotation, layer.intensity);
+        const e = (layer.contrast || layer.saturation || (layer.gamma !== undefined && layer.gamma !== 1))
+          ? applyColorGrading(raw, layer.contrast, layer.gamma, layer.saturation)
+          : raw;
+
+        if (layer.opacity !== undefined) {
+          const alpha = Math.max(0, Math.min(1, layer.opacity / 100));
+          r = r * (1 - alpha) + e.r * alpha;
+          g = g * (1 - alpha) + e.g * alpha;
+          b = b * (1 - alpha) + e.b * alpha;
+        } else {
+          r += e.r;
+          g += e.g;
+          b += e.b;
+        }
       }
 
       // Composite each light on top of that background.
@@ -1463,6 +1548,10 @@ export async function loadActiveHDRILayers(globalIntensity = 1.0): Promise<EnvLa
         texture,
         intensity: asset.intensity * globalIntensity,
         rotation: (asset.rotation * Math.PI) / 180,
+        opacity: asset.opacity,
+        contrast: asset.contrast,
+        gamma: asset.gamma,
+        saturation: asset.saturation,
       });
 
       console.log(

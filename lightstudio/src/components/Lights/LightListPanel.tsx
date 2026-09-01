@@ -192,6 +192,7 @@ export const LightListPanel: React.FC = () => {
   const selectHDRIAssetRaw = useHDRIAssetStore((s) => s.selectAsset);
   const removeHDRIAsset = useHDRIAssetStore((s) => s.removeAsset);
   const updateHDRIAsset = useHDRIAssetStore((s) => s.updateAsset);
+  const setAssetsOrder = useHDRIAssetStore((s) => s.setAssetsOrder);
   const setEnvironment = useSceneStore((s) => s.setEnvironment);
 
   const filteredLights = useMemo(() => {
@@ -251,45 +252,53 @@ export const LightListPanel: React.FC = () => {
   useEffect(() => {
     setLayerOrder((prev) => {
       const known = new Set(prev);
-      const live = new Set([...shapes.map((s) => s.id), ...filteredLights.map((l) => l.id)]);
+      const live = new Set([...shapes.map((s) => s.id), ...filteredLights.map((l) => l.id), ...hdriAssets.map((a) => a.id)]);
       // Drop ids for deleted items, keep the rest in their existing order.
       const kept = prev.filter((id) => live.has(id));
       // New items land at the top of the list (index 0), matching
       // Photoshop's "new layer appears above the current selection".
-      const added = [...shapes, ...filteredLights].map((x) => x.id).filter((id) => !known.has(id));
+      const added = [...shapes, ...filteredLights, ...hdriAssets].map((x) => x.id).filter((id) => !known.has(id));
       if (added.length === 0 && kept.length === prev.length) return prev;
       return [...added, ...kept];
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [shapes, filteredLights]);
+  }, [shapes, filteredLights, hdriAssets]);
 
   const combinedLayers = useMemo(() => {
     const shapeById = new Map(shapes.map((s) => [s.id, s]));
     const lightById = new Map(filteredLights.map((l) => [l.id, l]));
+    const assetById = new Map(hdriAssets.map((a) => [a.id, a]));
     return layerOrder
       .map((id) => {
         const shape = shapeById.get(id);
         if (shape) return { kind: 'shape' as const, shape };
         const light = lightById.get(id);
         if (light) return { kind: 'light' as const, light };
+        const asset = assetById.get(id);
+        if (asset) return { kind: 'hdri' as const, asset };
         return null;
       })
       .filter((x): x is NonNullable<typeof x> => x !== null);
-  }, [layerOrder, shapes, filteredLights]);
+  }, [layerOrder, shapes, filteredLights, hdriAssets]);
 
   const commitLayerOrder = useCallback(
     (next: string[]) => {
       setLayerOrder(next);
       const shapeIds = new Set(shapes.map((s) => s.id));
       const lightIds = new Set(filteredLights.map((l) => l.id));
-      // `next` is top-of-list-first (display order). Shapes' own store array
-      // is bottom-of-stack-first (paint order, index 0 painted first/lowest),
-      // the exact opposite - reverse before committing so "drag to the top
-      // of the panel" really does mean "paints last / sits on top".
+      const assetIds = new Set(hdriAssets.map((a) => a.id));
+      // `next` is top-of-list-first (display order). Shapes' (and HDRI
+      // assets') own store array is bottom-of-stack-first (paint/composite
+      // order, index 0 painted/blended first/lowest), the exact opposite -
+      // reverse before committing so "drag to the top of the panel" really
+      // does mean "renders last / sits on top", consistent for every layer
+      // kind (see the alpha-composite order in loadActiveHDRILayers's
+      // consumer, generateAnalyticalHDRI).
       setShapesOrder(next.filter((id) => shapeIds.has(id)).reverse());
       setLightsOrder(next.filter((id) => lightIds.has(id)));
+      setAssetsOrder(next.filter((id) => assetIds.has(id)).reverse());
     },
-    [shapes, filteredLights, setShapesOrder, setLightsOrder],
+    [shapes, filteredLights, hdriAssets, setShapesOrder, setLightsOrder, setAssetsOrder],
   );
 
   // "+ New Layer" popup - a single entry point matching Photoshop's "create
@@ -444,74 +453,74 @@ export const LightListPanel: React.FC = () => {
           </div>
         )}
 
-        {/* --- Custom HDRI layers --- */}
-        {hdriAssets.length > 0 && (
-          <>
-            <SectionLabel count={hdriAssets.length}>Custom HDRI</SectionLabel>
-            <div className="light-list">
-              {hdriAssets.map((asset) => {
-                const isSelected = asset.id === selectedHDRIAssetId;
-                return (
-                  <div
-                    key={asset.id}
-                    className={`light-list-item ${isSelected ? 'selected' : ''} ${!asset.active ? 'dimmed' : ''}`}
-                    onClick={(e) => { e.stopPropagation(); selectHDRIAsset(asset.id); }}
-                  >
-                    <div className="light-drag-handle" style={{ opacity: 0.15, cursor: 'default' }}>
-                      <svg width="8" height="12" viewBox="0 0 8 12" fill="currentColor">
-                        <circle cx="2" cy="2" r="1" /><circle cx="6" cy="2" r="1" />
-                        <circle cx="2" cy="6" r="1" /><circle cx="6" cy="6" r="1" />
-                        <circle cx="2" cy="10" r="1" /><circle cx="6" cy="10" r="1" />
-                      </svg>
-                    </div>
-                    <div className="light-type-icon" style={{ color: 'var(--text-sec)' }}>{HDRI_ICON}</div>
-                    <div className="light-item-name">
-                      <span className="light-name-text" title={asset.fileName}>{asset.name}</span>
-                      <span className="light-type-label">hdri{asset.active ? ' · active' : ''}</span>
-                    </div>
-                    <div className="light-item-actions">
-                      <button
-                        className={`btn-icon ${asset.active ? '' : 'dimmed'}`}
-                        style={{ width: 20, height: 20 }}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          if (!asset.active) selectHDRIAsset(asset.id);
-                          else updateHDRIAsset(asset.id, { active: false });
-                        }}
-                        title={asset.active ? 'Deactivate' : 'Activate as environment'}
-                      >
-                        <EyeIcon visible={asset.active} />
-                      </button>
-                      <button
-                        className="btn-icon"
-                        style={{ width: 20, height: 20 }}
-                        onClick={(e) => { e.stopPropagation(); removeHDRIAsset(asset.id); }}
-                        title="Remove HDRI"
-                      >
-                        <svg width="10" height="10" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.2">
-                          <path d="M2 3h8M4.5 3V2a.5.5 0 01.5-.5h2a.5.5 0 01.5.5v1M9 3l-.5 7a1 1 0 01-1 .9H4.5a1 1 0 01-1-.9L3 3" />
-                        </svg>
-                      </button>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </>
-        )}
-
-        {/* --- Shapes + Lights, freely interleaved in ONE draggable list.
-              Top of list = top of shape paint stack (Photoshop convention);
-              a light's position here is purely presentational (a light
-              always adds its radiance regardless of list position) but
-              still drags freely to anywhere, exactly like any other layer. --- */}
+        {/* --- Shapes + Lights + Custom HDRI, freely interleaved in ONE
+              draggable list. Top of list = top of shape paint stack /
+              renders-last-so-sits-on-top for HDRI layers (Photoshop
+              convention); a light's position here is purely presentational
+              (a light always adds its radiance regardless of list position)
+              but still drags freely to anywhere, exactly like any other
+              layer. --- */}
         {combinedLayers.length > 0 && (
           <>
-            <SectionLabel count={combinedLayers.length}>Shapes &amp; Lights</SectionLabel>
+            <SectionLabel count={combinedLayers.length}>Shapes, Lights &amp; HDRI</SectionLabel>
             <div className="light-list" onClick={() => setShapeContextMenu(null)}>
               {combinedLayers.map((item, index) => {
                 const isDragging = dragState !== null && dragState.dragIndex === index;
                 const isDragOver = dragState !== null && dragState.overIndex === index && dragState.dragIndex !== index;
+
+                if (item.kind === 'hdri') {
+                  const asset = item.asset;
+                  const isSelected = asset.id === selectedHDRIAssetId;
+                  return (
+                    <div
+                      key={asset.id}
+                      className={`light-list-item ${isSelected ? 'selected' : ''} ${isDragging ? 'dragging' : ''} ${isDragOver ? 'drag-over' : ''} ${!asset.active ? 'dimmed' : ''}`}
+                      draggable
+                      onClick={(e) => { e.stopPropagation(); selectHDRIAsset(asset.id); }}
+                      onDragStart={() => handleDragStart(index)}
+                      onDragOver={(e) => handleDragOver(e, index)}
+                      onDrop={() => handleDrop(index)}
+                      onDragEnd={handleDragEnd}
+                    >
+                      <div className="light-drag-handle" title="Drag to reorder">
+                        <svg width="8" height="12" viewBox="0 0 8 12" fill="currentColor" opacity="0.35">
+                          <circle cx="2" cy="2" r="1" /><circle cx="6" cy="2" r="1" />
+                          <circle cx="2" cy="6" r="1" /><circle cx="6" cy="6" r="1" />
+                          <circle cx="2" cy="10" r="1" /><circle cx="6" cy="10" r="1" />
+                        </svg>
+                      </div>
+                      <div className="light-type-icon" style={{ color: 'var(--text-sec)' }}>{HDRI_ICON}</div>
+                      <div className="light-item-name">
+                        <span className="light-name-text" title={asset.fileName}>{asset.name}</span>
+                        <span className="light-type-label">hdri{asset.active ? ' · active' : ''}</span>
+                      </div>
+                      <div className="light-item-actions">
+                        <button
+                          className={`btn-icon ${asset.active ? '' : 'dimmed'}`}
+                          style={{ width: 18, height: 18 }}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            if (!asset.active) selectHDRIAsset(asset.id);
+                            else updateHDRIAsset(asset.id, { active: false });
+                          }}
+                          title={asset.active ? 'Deactivate' : 'Activate'}
+                        >
+                          <EyeIcon visible={asset.active} />
+                        </button>
+                        <button
+                          className="btn-icon"
+                          style={{ width: 18, height: 18 }}
+                          onClick={(e) => { e.stopPropagation(); removeHDRIAsset(asset.id); }}
+                          title="Remove HDRI"
+                        >
+                          <svg width="10" height="10" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.2">
+                            <path d="M2 3h8M4.5 3V2a.5.5 0 01.5-.5h2a.5.5 0 01.5.5v1M9 3l-.5 7a1 1 0 01-1 .9H4.5a1 1 0 01-1-.9L3 3" />
+                          </svg>
+                        </button>
+                      </div>
+                    </div>
+                  );
+                }
 
                 if (item.kind === 'shape') {
                   const shape = item.shape;

@@ -12,13 +12,44 @@ export interface HDRIAsset {
   blobUrl: string | null;
   /** Base64-encoded raw HDRI data for scene file persistence */
   dataBase64: string | null;
-  /** Per-asset intensity multiplier (blended with global intensity) */
+  /** Per-asset intensity multiplier (blended with global intensity) - this
+   *  IS the asset's exposure control: a linear brightness multiplier on top
+   *  of the loaded HDR data, same role "Exposure" plays elsewhere in the app. */
   intensity: number;
-  /** Per-asset rotation offset in degrees */
+  /** Per-asset rotation offset in degrees, around the world Y axis. An
+   *  equirectangular environment map has no meaningful X/Z tilt in this
+   *  engine (it represents the surroundings at infinite distance, not a
+   *  physical object with its own orientation) - Y is the only rotation
+   *  that corresponds to something a user can actually see change. */
   rotation: number;
+  /** How much this HDRI blends over whatever is beneath it in the layer
+   *  stack (0-100) - 100 = fully opaque, 0 = fully see-through to whatever
+   *  the next layer down renders. Independent of intensity: a dim HDRI at
+   *  100% opacity still fully replaces what's beneath it; a bright one at
+   *  20% opacity still only partially shows through. */
+  opacity: number;
+  /** -100..100. Post-process contrast adjustment applied when sampling this
+   *  HDRI, pivoted around mid-grey (0.5 in linear space after tonemap). */
+  contrast: number;
+  /** Gamma curve applied on top of the HDRI's own decoded values. 1 = no
+   *  change; <1 brightens midtones, >1 darkens them. */
+  gamma: number;
+  /** -100..100. Post-process saturation adjustment (desaturate toward
+   *  luminance at -100, oversaturate at +100). */
+  saturation: number;
   /** Whether this asset is currently active/selected */
   active: boolean;
 }
+
+/** Defaults for the new grading fields, so every existing call site that
+ *  constructs an HDRIAsset without them (scene-file import from before
+ *  these existed, etc.) still gets sane, no-op values. */
+export const HDRI_ASSET_GRADING_DEFAULTS = {
+  opacity: 100,
+  contrast: 0,
+  gamma: 1,
+  saturation: 0,
+} as const;
 
 interface HDRIAssetStore {
   assets: HDRIAsset[];
@@ -33,9 +64,14 @@ interface HDRIAssetStore {
   /** Select an asset (makes it active) */
   selectAsset: (id: string | null) => void;
   /** Update per-asset properties */
-  updateAsset: (id: string, updates: Partial<Pick<HDRIAsset, 'name' | 'intensity' | 'rotation' | 'active'>>) => void;
+  updateAsset: (id: string, updates: Partial<Pick<HDRIAsset, 'name' | 'intensity' | 'rotation' | 'active' | 'opacity' | 'contrast' | 'gamma' | 'saturation'>>) => void;
   /** Set the blob URL on an asset (after creating from base64 restore) */
   setAssetBlobUrl: (id: string, url: string) => void;
+  /** Reorder the whole assets array to match the given id sequence - keeps
+   *  this store's array order in sync with the unified cross-type Layers
+   *  panel, the same pattern lightsStore/hdriShapesStore already use.
+   *  Array order IS render/compositing order (see loadActiveHDRILayers). */
+  setAssetsOrder: (ids: string[]) => void;
   /** Import assets from scene file restore */
   importAssets: (assets: HDRIAsset[]) => void;
   /** Export all assets (for scene file save) */
@@ -87,14 +123,16 @@ export const useHDRIAssetStore = create<HDRIAssetStore>((set, get) => ({
       dataBase64: arrayBufferToBase64(arrayBuffer),
       intensity: 1.0,
       rotation: 0,
+      ...HDRI_ASSET_GRADING_DEFAULTS,
       active: true,
     };
-    // Deactivate all others, activate the new one
+    // Newly added HDRIs join the stack active, same as a new light or shape
+    // - they do NOT deactivate whatever else was already active. Multiple
+    // Custom HDRIs are meant to coexist (loadActiveHDRILayers blends every
+    // active one together); the old "only one can ever be active" behavior
+    // here was inconsistent with that and with how lights/shapes work.
     set((s) => ({
-      assets: [
-        ...s.assets.map((a) => ({ ...a, active: false })),
-        asset,
-      ],
+      assets: [...s.assets, asset],
       selectedAssetId: id,
     }));
     return asset;
@@ -138,14 +176,32 @@ export const useHDRIAssetStore = create<HDRIAssetStore>((set, get) => ({
     }));
   },
 
+  setAssetsOrder: (ids) => {
+    set((s) => {
+      const byId = new Map(s.assets.map((a) => [a.id, a]));
+      const ordered: HDRIAsset[] = [];
+      for (const id of ids) {
+        const a = byId.get(id);
+        if (a) { ordered.push(a); byId.delete(id); }
+      }
+      for (const a of s.assets) {
+        if (byId.has(a.id)) ordered.push(a);
+      }
+      return { assets: ordered };
+    });
+  },
+
   importAssets: (assets) => {
     // Clear existing blob URLs
     get().assets.forEach((a) => {
       if (a.blobUrl) URL.revokeObjectURL(a.blobUrl);
     });
-    // Import without blobUrls (they'll be restored separately from base64)
+    // Import without blobUrls (restored separately from base64) - backfill
+    // the grading fields for scene files saved before they existed, so an
+    // older project still loads with sane (no-op) values instead of
+    // `undefined` propagating into sliders/math downstream.
     set({
-      assets: assets.map((a) => ({ ...a, blobUrl: null })),
+      assets: assets.map((a) => ({ ...HDRI_ASSET_GRADING_DEFAULTS, ...a, blobUrl: null })),
       selectedAssetId: assets.find((a) => a.active)?.id ?? null,
     });
   },

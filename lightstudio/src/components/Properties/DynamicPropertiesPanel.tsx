@@ -4,8 +4,10 @@ import { useSceneHierarchyStore } from '../../store/sceneHierarchyStore';
 import { useLightsStore } from '../../store/lightsStore';
 import { useHDRIShapesStore } from '../../store/hdriShapesStore';
 import { useUIStore } from '../../store/uiStore';
+import { useHDRIAssetStore } from '../../store/hdriAssetStore';
 import { LightProperties } from '../Lights/LightProperties';
 import { HDRIShapeProperties } from '../Lights/HDRIShapeProperties';
+import { CustomHDRIProperties } from '../Environment/CustomHDRIProperties';
 
 /* ═══════════════════════════════════════════════════════════════════
    Utility: find a Three.js object by UUID in the scene
@@ -574,6 +576,7 @@ export const DynamicPropertiesPanel: React.FC<DynamicPropertiesPanelProps> = ({ 
   const selectedId = useSceneHierarchyStore((s) => s.selectedId);
   const selectedLightId = useLightsStore((s) => s.selectedLightId);
   const selectedShapeId = useHDRIShapesStore((s) => s.selectedShapeId);
+  const selectedHDRIAssetId = useHDRIAssetStore((s) => s.selectedAssetId);
   const selectLight = useLightsStore((s) => s.selectLight);
   const setRightPanelTab = useUIStore((s) => s.setRightPanelTab);
   const showPanel = useUIStore((s) => s.showPanel);
@@ -666,6 +669,16 @@ export const DynamicPropertiesPanel: React.FC<DynamicPropertiesPanelProps> = ({ 
     return (
       <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
         <HDRIShapeProperties />
+      </div>
+    );
+  }
+
+  // Priority 4: No hierarchy/light/shape selection, but a Custom HDRI is
+  // selected via the Light List panel.
+  if (selectedHDRIAssetId) {
+    return (
+      <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+        <CustomHDRIProperties />
       </div>
     );
   }
