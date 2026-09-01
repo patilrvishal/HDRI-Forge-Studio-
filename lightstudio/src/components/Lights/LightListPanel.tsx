@@ -218,12 +218,18 @@ export const LightListPanel: React.FC = () => {
       selectHDRIAssetRaw(id);
       selectLightRaw(null);
       selectShapeRaw(null);
+      // Clicking a Custom HDRI row both selects it (for the Properties
+      // panel) AND makes it the live environment - selectAsset() itself no
+      // longer touches `active` (that used to silently deactivate every
+      // HDRI whenever a light/shape got selected elsewhere), so this is now
+      // the one explicit place that flips it on.
+      updateHDRIAsset(id, { active: true });
       const asset = hdriAssets.find((a) => a.id === id);
       if (asset?.blobUrl) {
         setEnvironment({ hdri: asset.blobUrl, presetId: '__custom__', showBackground: true });
       }
     },
-    [hdriAssets, selectHDRIAssetRaw, selectLightRaw, selectShapeRaw, setEnvironment],
+    [hdriAssets, selectHDRIAssetRaw, selectLightRaw, selectShapeRaw, setEnvironment, updateHDRIAsset],
   );
 
   const [shapeContextMenu, setShapeContextMenu] = useState<{ x: number; y: number; shapeId: string } | null>(null);

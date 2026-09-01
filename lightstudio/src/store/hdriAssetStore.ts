@@ -113,11 +113,17 @@ export const useHDRIAssetStore = create<HDRIAssetStore>((set, get) => ({
   },
 
   selectAsset: (id) => {
-    // Activate the selected one, deactivate others
-    set((s) => ({
-      selectedAssetId: id,
-      assets: s.assets.map((a) => ({ ...a, active: a.id === id })),
-    }));
+    // Selection is a pure UI concern (which row is highlighted / shown in
+    // the Properties panel) and must NEVER touch `active` (whether an asset
+    // is actually included in the render). Those two used to be the same
+    // assignment here - deselecting to edit something else calls this with
+    // id=null, which unconditionally set every asset's `active` to
+    // `a.id === null` (always false, since no real asset has a null id),
+    // silently hiding every Custom HDRI the instant a light or shape got
+    // selected. Activating a specific asset as the live environment is a
+    // deliberate, separate action - see LightListPanel's selectHDRIAsset
+    // wrapper, which calls updateAsset(id, { active: true }) explicitly.
+    set({ selectedAssetId: id });
   },
 
   updateAsset: (id, updates) => {
