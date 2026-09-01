@@ -413,36 +413,41 @@ export const Viewport: React.FC<ViewportProps> = ({ sceneManagerRef, onScreensho
     const el = envLoaderRef.current;
     if (!sm || backplate) return; // Skip if backplate is active
 
-    // Gradient background takes priority over the flat colour / limbo default
-    // for what's VISIBLE behind the subject - but it must never steal the
-    // actual lighting (scene.environment) away from a real HDRI that's
-    // loaded and active. A custom/preset HDRI's env map is set by its own
-    // effect below and must stay authoritative; overwriting it here on every
-    // intensity-slider tick was why HDRI intensity looked like it did
-    // nothing - the real HDRI was getting replaced by a flat baked gradient
-    // every time this effect re-ran.
-    const hasRealEnvironment = environment.presetId !== 'none' && environment.presetId !== 'none ';
+    // Gradient background takes priority over the flat colour / limbo
+    // default for what's VISIBLE behind the subject, AND now also owns the
+    // reflection/lighting environment while it's shown - previously only
+    // the backdrop switched to the gradient while a real HDRI's reflections
+    // kept showing untouched, which read as broken (the object looked like
+    // it belonged to a different scene than its own backdrop). Toggling
+    // back off restores the real HDRI's own environment map via
+    // el.getCurrentEnvTexture() below, which is untouched by the bake here
+    // - it goes through the public setEnvironmentTexture (scene.environment
+    // only) rather than the private setEnvironmentTextureDirect that owns
+    // that cached reference (see loadHDRI/generateFromPreset).
     if (environment.gradientBackground?.enabled) {
       sm.setGradientBackground(environment.gradientBackground);
 
-      if (!hasRealEnvironment) {
-        // No real HDRI active - fall back to baking the gradient itself as
-        // the lighting source, so PBR/metal materials (lit almost entirely
-        // by IBL reflections) aren't left with zero environment lighting.
-        //
-        // createGradientBackground() already sets EquirectangularReflection-
-        // Mapping on this texture (so it displays as a proper spherical sky
-        // dome behind the subject, matching HDRI Preview's equirect render
-        // instead of a flat screen-aligned backdrop) - that mapping must be
-        // left in place afterward, not reset to UVMapping, or the dome
-        // collapses back to a flat image the instant this effect re-runs.
-        if (el && sm.scene.background && 'mapping' in sm.scene.background) {
-          const gradTex = sm.scene.background as THREE.Texture;
-          const envMap = sm.pmremGenerator.fromEquirectangular(gradTex).texture;
-          el.setEnvironmentTexture(sm.scene, envMap, environment.intensity);
-        }
+      // createGradientBackground() already sets EquirectangularReflection-
+      // Mapping on this texture (so it displays as a proper spherical sky
+      // dome behind the subject, matching HDRI Preview's equirect render,
+      // and can be fed straight into pmremGenerator for reflections) - that
+      // mapping must be left in place afterward, not reset to UVMapping, or
+      // the dome collapses back to a flat image the instant this effect
+      // re-runs.
+      if (el && sm.scene.background && 'mapping' in sm.scene.background) {
+        const gradTex = sm.scene.background as THREE.Texture;
+        const envMap = sm.pmremGenerator.fromEquirectangular(gradTex).texture;
+        el.setEnvironmentTexture(sm.scene, envMap, environment.intensity);
       }
       return;
+    }
+
+    // Gradient disabled - restore whichever real environment (custom HDRI
+    // or built-in preset) was actually loaded, in case reflections are
+    // still showing the gradient bake from above.
+    if (el) {
+      const realEnv = el.getCurrentEnvTexture();
+      if (realEnv) el.setEnvironmentTexture(sm.scene, realEnv, environment.intensity);
     }
 
     // If a custom HDRI is loaded, let it manage the background via setBackgroundFromEnv
