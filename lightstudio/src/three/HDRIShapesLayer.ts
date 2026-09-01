@@ -14,13 +14,6 @@ function hexToRgb(hex: string): [number, number, number] {
 }
 
 /**
- * Paint one shape onto the context using standard alpha "source-over"
- * compositing - this is what makes stacking order actually mean something:
- * a shape painted later overwrites whatever pixels it covers, including a
- * pure-black shape fully occluding (blocking) anything beneath it, exactly
- * like a real HDRI blocker/flag.
- */
-/**
  * How far a shape's footprint should stretch horizontally at a given row,
  * matching how a real HDRI light patch behaves on an equirectangular map:
  * longitude lines converge at the poles, so a patch of fixed angular size
@@ -29,13 +22,23 @@ function hexToRgb(hex: string): [number, number, number] {
  * smears around the band, exactly like moving a real light there would.
  * cy/h is the normalized v (0 = north pole, 1 = south pole); colatitude
  * theta runs 0..PI with sin(theta) = 1 at the equator and -> 0 at the poles.
+ * Capped at 4x (rather than a larger/unbounded value) so a single stretched
+ * shape's own left/right wrap-around copies (see compositeShapesCanvas)
+ * don't overlap themselves and double up their alpha.
  */
 function poleSpreadFactor(cy: number, h: number): number {
   const theta = (cy / h) * Math.PI;
-  const sinTheta = Math.max(Math.sin(theta), 0.12);
-  return Math.min(1 / sinTheta, 6);
+  const sinTheta = Math.max(Math.sin(theta), 0.14);
+  return Math.min(1 / sinTheta, 4);
 }
 
+/**
+ * Paint one shape onto the context using standard alpha "source-over"
+ * compositing - this is what makes stacking order actually mean something:
+ * a shape painted later overwrites whatever pixels it covers, including a
+ * pure-black shape fully occluding (blocking) anything beneath it, exactly
+ * like a real HDRI blocker/flag.
+ */
 function paintShape(ctx: CanvasRenderingContext2D, shape: HDRIShape, w: number, h: number, cx: number): void {
   const cy = shape.v * h;
   const sw = Math.max(2, shape.width * w);
@@ -76,30 +79,21 @@ function paintShape(ctx: CanvasRenderingContext2D, shape: HDRIShape, w: number, 
     ctx.fillStyle = grad;
     ctx.fillRect(-sw / 2, -sh / 2, sw, sh);
   } else {
-    // Rectangle - feathered edges via a box-shaped radial-ish falloff.
-    // Two nested rects: an inner hard-edged core, then a fading border.
-    const featherPx = Math.max(1, Math.min(sw, sh) * 0.5 * feather);
-    if (featherPx < 1.5) {
-      ctx.fillStyle = `rgba(${r}, ${g}, ${b}, ${alpha})`;
-      ctx.fillRect(-sw / 2, -sh / 2, sw, sh);
-    } else {
-      // Draw the solid core, then stroke a feathered blur-like border using
-      // repeated shrinking rects with decreasing alpha - cheap and matches
-      // the "soft edge" look without needing filter: blur() (unsupported in
-      // headless/older canvas contexts and hard to control precisely).
-      const core = { w: Math.max(0, sw - featherPx * 2), h: Math.max(0, sh - featherPx * 2) };
-      ctx.fillStyle = `rgba(${r}, ${g}, ${b}, ${alpha})`;
-      ctx.fillRect(-core.w / 2, -core.h / 2, core.w, core.h);
-
-      const steps = 8;
-      for (let i = 0; i < steps; i++) {
-        const t = i / steps;
-        const stepAlpha = alpha * (1 - t) * 0.6;
-        const grow = featherPx * (t + 1 / steps);
-        ctx.fillStyle = `rgba(${r}, ${g}, ${b}, ${stepAlpha})`;
-        ctx.fillRect(-core.w / 2 - grow, -core.h / 2 - grow, core.w + grow * 2, core.h + grow * 2);
-      }
-    }
+    // Rectangle - a single flat-alpha fill blurred with the canvas's native
+    // filter. Previously this stacked several manually-grown, semi-transparent
+    // rects to fake a soft edge; each was independently alpha-blended onto
+    // the destination, so once pole-spread stretched a shape wide enough
+    // for its own wrap-around ghost copies (see compositeShapesCanvas) to
+    // overlap, those overlapping semi-transparent rings re-blended on top
+    // of each other and produced a repeating wavy/domed silhouette instead
+    // of a clean stretch. A single blurred fill has only one alpha value
+    // per pixel, so overlapping copies now blend the same simple way a
+    // real HDRI light patch does.
+    const featherPx = Math.min(sw, sh) * 0.5 * feather;
+    ctx.filter = featherPx > 0.5 ? `blur(${featherPx}px)` : 'none';
+    ctx.fillStyle = `rgba(${r}, ${g}, ${b}, ${alpha})`;
+    ctx.fillRect(-sw / 2, -sh / 2, sw, sh);
+    ctx.filter = 'none';
   }
 
   ctx.restore();
