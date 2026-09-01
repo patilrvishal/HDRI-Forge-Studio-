@@ -431,8 +431,17 @@ export const HDRIPreviewPanel: React.FC = () => {
         style={{
           flex: 1,
           display: 'flex',
-          alignItems: zoom <= 1 ? 'center' : 'flex-start',
-          justifyContent: zoom <= 1 ? 'center' : 'flex-start',
+          // Deliberately NOT 'center'/'center' here. Flexbox centers an
+          // overflowing child by clipping equally off both edges and
+          // starting scroll at 0 already past the clipped portion, so the
+          // instant the canvas grew past the container (zoom > ~100-150%)
+          // the "before center" content became permanently unreachable and
+          // the image visually snapped toward one edge every time zoom
+          // pushed it further past the fit point. `margin: auto` on the
+          // canvas itself (below) is the standard fix: it centers the
+          // canvas when there's spare room, same as this, but degrades to
+          // a normal scrollable overflow - starting at true (0,0) - once it
+          // doesn't fit, instead of clipping.
           background: '#0a0a0c',
           border: '1px solid var(--border)',
           borderRadius: 4,
@@ -454,8 +463,7 @@ export const HDRIPreviewPanel: React.FC = () => {
           style={{
             width: DISPLAY_BASE_W * zoom,
             height: DISPLAY_BASE_H * zoom,
-            maxWidth: zoom <= 1 ? '100%' : 'none',
-            maxHeight: zoom <= 1 ? '100%' : 'none',
+            margin: 'auto',
             flexShrink: 0,
             imageRendering: 'auto',
             cursor: selectedLight || (selectedShapeId && !selectedShapeData?.locked) ? 'crosshair' : 'default',
