@@ -209,6 +209,65 @@ export const SPOTLIGHT_META = [
 ];
 
 // ═══════════════════════════════════════════════════════════════════
+//  LIGHT PROFILES (14) — single-modifier presets, each a fully
+//  self-contained real light (not a decorative thumbnail): drop one into
+//  an existing rig the way you'd rack a softbox, strip, or snoot onto a
+//  real stand. What makes each one distinct is genuinely functional -
+//  areaWidth/areaHeight, spotAngle/spotPenumbra, and edgeSoftness are
+//  baked into the preset (see PresetLight's optional shape fields) and
+//  land on the actual Light object through presetToLights, not just the
+//  position/color every other preset category varies.
+// ═══════════════════════════════════════════════════════════════════
+
+export const LIGHT_PROFILE_PRESETS: PresetLight[][] = [
+  // 1. Small Softbox — compact, punchy, moderately soft
+  [pl('Small Softbox', 'area', '#fff6ec', 220, 45, 45, 3.5, 5, { areaLight: true, falloff: 'linear', areaWidth: 0.8, areaHeight: 0.8, edgeSoftness: 45 })],
+  // 2. Large Softbox — big, gentle wraparound light
+  [pl('Large Softbox', 'area', '#fff8f2', 260, 40, 45, 4, 5, { areaLight: true, falloff: 'linear', areaWidth: 2.5, areaHeight: 2, edgeSoftness: 75 })],
+  // 3. Octabox — the roundest a rectangle gets: big, very soft, flattering falloff
+  [pl('Octabox', 'area', '#fffaf5', 250, 45, 30, 4, 5, { areaLight: true, falloff: 'linear', areaWidth: 2.2, areaHeight: 2.2, edgeSoftness: 85 })],
+  // 4. Strip Light Vertical — tall and narrow, classic edge/rim kicker
+  [pl('Strip Light (Vertical)', 'area', '#f0f4ff', 200, 25, 120, 3, 5, { areaLight: true, falloff: 'linear', areaWidth: 0.4, areaHeight: 3, edgeSoftness: 35 })],
+  // 5. Strip Light Horizontal — wide and thin, catchlight bar / hairlight
+  [pl('Strip Light (Horizontal)', 'area', '#f0f4ff', 200, 70, 0, 5, 4, { areaLight: true, falloff: 'linear', areaWidth: 3, areaHeight: 0.4, edgeSoftness: 35 })],
+  // 6. Beauty Dish — punchy contrast with a defined but not harsh edge
+  [pl('Beauty Dish', 'area', '#fff2e0', 300, 55, 0, 3.5, 4, { areaLight: true, falloff: 'linear', areaWidth: 1.2, areaHeight: 1.2, edgeSoftness: 25 })],
+  // 7. Ring Light — flat, shadowless beauty/product fill from camera axis
+  [pl('Ring Light', 'ies', '#fff8f0', 180, 15, 0, 1.6, 3, { falloff: 'linear' })],
+  // 8. Umbrella Bounce — broad, low-contrast, slightly uneven bounce feel
+  [pl('Umbrella Bounce', 'area', '#fff4e8', 160, 35, 300, 3, 5, { areaLight: true, falloff: 'linear', areaWidth: 2, areaHeight: 2, edgeSoftness: 90 })],
+  // 9. Window Light — large, cool, very soft daylight-style side fill
+  [pl('Window Light', 'area', '#e8f0ff', 200, 30, 270, 3.5, 6, { areaLight: true, falloff: 'linear', areaWidth: 3, areaHeight: 4, edgeSoftness: 80, colorProfile: 'daylight' })],
+  // 10. Snoot Spot — very narrow controlled beam, hard edge
+  [pl('Snoot Spot', 'spot', '#ffffff', 380, 50, 60, 4, 5, { spotAngle: 12, spotPenumbra: 0.05 })],
+  // 11. Barn Door Spot — medium controlled beam, moderate edge
+  [pl('Barn Door Spot', 'spot', '#ffefd8', 340, 45, 60, 4, 5, { spotAngle: 35, spotPenumbra: 0.35, colorProfile: 'tungsten' })],
+  // 12. Fresnel Hard — wide, crisp, high-output hard light
+  [pl('Fresnel Hard', 'spot', '#ffffff', 450, 40, 45, 4, 6, { spotAngle: 55, spotPenumbra: 0.05 })],
+  // 13. Gobo/Cookie Spot — tight, dramatic, hard-edged accent
+  [pl('Gobo Spot', 'spot', '#e8e0ff', 320, 60, 200, 4, 5, { spotAngle: 18, spotPenumbra: 0.1 })],
+  // 14. Kicker Rim Strip — narrow edge light from behind, classic separation kicker
+  [pl('Kicker Rim', 'rim', '#c8d8ff', 220, 15, 175, 2.5, 6)],
+];
+
+export const LIGHT_PROFILE_META = [
+  { id: 'profile_softbox_s', name: 'Small Softbox', description: 'Compact softbox - punchy key with gentle falloff', tags: ['softbox', 'key', 'modifier'] },
+  { id: 'profile_softbox_l', name: 'Large Softbox', description: 'Big softbox - broad, gentle wraparound light', tags: ['softbox', 'fill', 'modifier'] },
+  { id: 'profile_octabox', name: 'Octabox', description: 'Large octagonal-style softbox, the softest falloff here', tags: ['octabox', 'soft', 'modifier'] },
+  { id: 'profile_strip_v', name: 'Strip Light (Vertical)', description: 'Tall narrow strip - classic edge/rim kicker', tags: ['strip', 'edge', 'modifier'] },
+  { id: 'profile_strip_h', name: 'Strip Light (Horizontal)', description: 'Wide thin strip - catchlight bar / hairlight', tags: ['strip', 'catchlight', 'modifier'] },
+  { id: 'profile_beautydish', name: 'Beauty Dish', description: 'Defined, punchy contrast without a harsh edge', tags: ['beauty', 'dish', 'modifier'] },
+  { id: 'profile_ringlight', name: 'Ring Light', description: 'Flat, near-shadowless beauty/product fill', tags: ['ring', 'beauty', 'modifier'] },
+  { id: 'profile_umbrella', name: 'Umbrella Bounce', description: 'Broad, low-contrast bounced-light feel', tags: ['umbrella', 'bounce', 'modifier'] },
+  { id: 'profile_window', name: 'Window Light', description: 'Large, cool, very soft daylight-style side fill', tags: ['window', 'daylight', 'modifier'] },
+  { id: 'profile_snoot', name: 'Snoot Spot', description: 'Very narrow controlled beam, hard edge', tags: ['snoot', 'narrow', 'modifier'] },
+  { id: 'profile_barndoor', name: 'Barn Door Spot', description: 'Medium controlled beam, warm and moderate edge', tags: ['barndoor', 'controlled', 'modifier'] },
+  { id: 'profile_fresnel', name: 'Fresnel Hard', description: 'Wide, crisp, high-output hard light', tags: ['fresnel', 'hard', 'modifier'] },
+  { id: 'profile_gobo', name: 'Gobo Spot', description: 'Tight, dramatic, hard-edged accent light', tags: ['gobo', 'accent', 'modifier'] },
+  { id: 'profile_kicker', name: 'Kicker Rim', description: 'Narrow edge light from behind for separation', tags: ['kicker', 'rim', 'modifier'] },
+];
+
+// ═══════════════════════════════════════════════════════════════════
 //  LEGACY SIDE LIGHTS (kept for backward compat)
 // ═══════════════════════════════════════════════════════════════════
 

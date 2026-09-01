@@ -8,6 +8,7 @@ import {
   OUTDOOR_PRESETS, OUTDOOR_META,
   SPOTLIGHT_PRESETS, SPOTLIGHT_META,
   SIDELIGHT_PRESETS, SIDELIGHT_META,
+  LIGHT_PROFILE_PRESETS, LIGHT_PROFILE_META,
 } from '../data/presets';
 import { generatePresetThumbnail } from '../types/Preset';
 
@@ -41,6 +42,8 @@ function buildBuiltins(): Preset[] {
   SPOTLIGHT_META.forEach((m, i) => push(m.id, m.name, 'spotlight', m.description, m.tags, SPOTLIGHT_PRESETS[i]));
   // Sidelights (1 legacy)
   SIDELIGHT_META.forEach((m, i) => push(m.id, m.name, 'sidelights', m.description, m.tags, SIDELIGHT_PRESETS[i]));
+  // Light Profiles (14) - single functional modifier presets
+  LIGHT_PROFILE_META.forEach((m, i) => push(m.id, m.name, 'lightprofiles', m.description, m.tags, LIGHT_PROFILE_PRESETS[i]));
 
   return out;
 }
@@ -51,7 +54,7 @@ function generateId(): string {
   return `${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
 }
 
-type PresetCategory = 'sidelights' | 'studio' | 'outdoor' | 'spotlight' | 'custom';
+type PresetCategory = 'sidelights' | 'studio' | 'outdoor' | 'spotlight' | 'lightprofiles' | 'custom';
 
 interface PresetsState {
   presets: Preset[];

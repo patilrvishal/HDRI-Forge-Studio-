@@ -11,12 +11,21 @@ export interface PresetLight {
   areaLight: boolean;
   falloff: Light['falloff'];
   transform: Light['transform'];
+  /** Optional shape-defining fields - what actually makes a "Light Profile"
+   *  (softbox vs. strip vs. snoot vs. fresnel) more than just a differently
+   *  positioned/colored light. All optional so older presets without them
+   *  still fall through to createDefaultLight's own defaults. */
+  areaWidth?: number;
+  areaHeight?: number;
+  spotAngle?: number;
+  spotPenumbra?: number;
+  edgeSoftness?: number;
 }
 
 export interface Preset {
   id: string;
   name: string;
-  category: 'sidelights' | 'studio' | 'outdoor' | 'spotlight' | 'custom';
+  category: 'sidelights' | 'studio' | 'outdoor' | 'spotlight' | 'lightprofiles' | 'custom';
   description: string;
   thumbnail: string; // base64 data URL
   tags: string[];
@@ -37,6 +46,11 @@ export function presetToLights(preset: Preset): Light[] {
       areaLight: pl.areaLight,
       falloff: pl.falloff,
       transform: { ...pl.transform },
+      ...(pl.areaWidth !== undefined ? { areaWidth: pl.areaWidth } : {}),
+      ...(pl.areaHeight !== undefined ? { areaHeight: pl.areaHeight } : {}),
+      ...(pl.spotAngle !== undefined ? { spotAngle: pl.spotAngle } : {}),
+      ...(pl.spotPenumbra !== undefined ? { spotPenumbra: pl.spotPenumbra } : {}),
+      ...(pl.edgeSoftness !== undefined ? { edgeSoftness: pl.edgeSoftness } : {}),
     })
   );
 }

@@ -14,6 +14,7 @@ interface PresetBrowserProps {
 type PresetCategory = Preset['category'];
 
 const CATEGORY_TABS: Array<{ key: PresetCategory; label: string }> = [
+  { key: 'lightprofiles', label: 'Light Profiles' },
   { key: 'studio', label: 'Studio' },
   { key: 'outdoor', label: 'Outdoor' },
   { key: 'spotlight', label: 'Spotlight' },
