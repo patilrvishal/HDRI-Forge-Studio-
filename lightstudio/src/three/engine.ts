@@ -1233,11 +1233,11 @@ export class LightManager {
       // Map brightness 0-1000 to intensity 0-10
       lightObj.intensity = (ld.brightness / 1000) * 10;
 
-      // Apply opacity (only meaningful via distance/decay for physically-based)
-      // We scale intensity by opacity/100 to simulate dimming
-      if (ld.opacity < 100) {
-        lightObj.intensity *= ld.opacity / 100;
-      }
+      // Opacity is a 0-200% linear intensity multiplier. The old `< 100`
+      // guard meant only the dimming half of the slider (0-100%) ever did
+      // anything - 100-200% silently no-op'd, so cranking Opacity past 100%
+      // (as in a genuine bug report) had zero visible effect.
+      lightObj.intensity *= ld.opacity / 100;
 
       // Falloff
       if (lightObj instanceof THREE.PointLight || lightObj instanceof THREE.SpotLight) {
