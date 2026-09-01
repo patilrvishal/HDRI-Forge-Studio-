@@ -57,6 +57,8 @@ interface ExtractedLight {
   normal?: THREE.Vector3;
   /** HemisphereLight only */
   groundColor?: THREE.Color;
+  /** RectAreaLight only - 0..1, see the alpha-composite note in evaluateLightRadiance. */
+  opacity?: number;
 }
 
 /**
@@ -214,14 +216,20 @@ function softFalloff(angle: number, radius: number): number {
  * @param light        - Extracted light data.
  * @param dir          - Normalized world direction being evaluated.
  * @param capturePoint - World-space capture position.
- * @returns Radiance color (linear, can be >> 1.0 for true HDR).
+ * @returns Radiance color (linear, can be >> 1.0 for true HDR), plus - for
+ *   rect area lights only - `coverage`: how much of this pixel the light's
+ *   physical rectangle actually covers (0..1, already feathered by Edge
+ *   Softness). The caller uses this to alpha-composite the rectangle as an
+ *   occluding "card" over the background rather than adding it on top (see
+ *   the main render loop) - undefined for every other light type, which
+ *   have no physical footprint and stay purely additive.
  */
 function evaluateLightRadiance(
   light: ExtractedLight,
   dir: THREE.Vector3,
   capturePoint: THREE.Vector3,
-): THREE.Color {
-  const result = { r: 0, g: 0, b: 0 };
+): { r: number; g: number; b: number; coverage?: number } {
+  const result: { r: number; g: number; b: number; coverage?: number } = { r: 0, g: 0, b: 0 };
 
   switch (light.type) {
     // ------ Point Light ------------------------------------------------------------------------------------------------------------------------------------------------------------------------
@@ -406,6 +414,7 @@ function evaluateLightRadiance(
       result.r = light.color.r * radiance;
       result.g = light.color.g * radiance;
       result.b = light.color.b * radiance;
+      result.coverage = coverage;
       break;
     }
 
@@ -423,7 +432,7 @@ function evaluateLightRadiance(
     }
   }
 
-  return new THREE.Color(result.r, result.g, result.b);
+  return result;
 }
 
 function smoothstepHDRI(t: number): number {
@@ -561,21 +570,48 @@ lights.forEach((l, i) => {
 
       let r = 0, g = 0, b = 0;
 
-      // Sum all light contributions
-      for (let i = 0; i < lights.length; i++) {
-        const c = evaluateLightRadiance(lights[i], dir, capturePoint);
-        r += c.r;
-        g += c.g;
-        b += c.b;
-      }
-
-      // Add every active environment HDRI layer (additive blend)
+      // Background first: every active environment HDRI layer (additive
+      // blend between layers - that part is unchanged).
       for (let i = 0; i < envLayers.length; i++) {
         const layer = envLayers[i];
         const e = sampleEnvTexture(layer.texture, dir, layer.rotation, layer.intensity);
         r += e.r;
         g += e.g;
         b += e.b;
+      }
+
+      // Composite each light on top of that background.
+      //
+      // Rect area lights have a real physical footprint (a card), so they
+      // ALPHA-COMPOSITE over the background rather than adding to it - a
+      // black/dark-colored panel is still an opaque card blocking whatever
+      // is behind it, exactly like the HDRI Shapes layer. Purely additive
+      // blending (the old behaviour) meant a light's visibility was
+      // entirely a function of its own brightness*color: a dark color
+      // computed near-zero radiance, which added to the background changed
+      // it by nothing, so the light silently "disappeared" instead of
+      // rendering as its own (dark) patch - Opacity had no way to bring it
+      // back since it only ever scaled that same near-zero contribution.
+      // Alpha = coverage (the rectangle's feathered footprint) x opacity,
+      // so Opacity now does what its name says: 100% = fully opaque card in
+      // the light's actual color, 0% = fully see-through to the background,
+      // independent of how dark or bright that color happens to be.
+      //
+      // Every other light type has no physical footprint (a point/spot/
+      // directional/hemisphere light is just a glow, not a card), so they
+      // stay purely additive, same as before.
+      for (let i = 0; i < lights.length; i++) {
+        const c = evaluateLightRadiance(lights[i], dir, capturePoint);
+        if (c.coverage !== undefined) {
+          const alpha = Math.max(0, Math.min(1, c.coverage * (lights[i].opacity ?? 1)));
+          r = r * (1 - alpha) + c.r * alpha;
+          g = g * (1 - alpha) + c.g * alpha;
+          b = b * (1 - alpha) + c.b * alpha;
+        } else {
+          r += c.r;
+          g += c.g;
+          b += c.b;
+        }
       }
 
       // Drop shadows darken the already-summed result, same as a Photoshop
@@ -737,6 +773,7 @@ function extractLightsFromScene(scene: THREE.Scene): ExtractedLight[] {
         // silently falling back to the same default every time.
         edgeSoftness: typeof child.userData.edgeSoftness === 'number' ? child.userData.edgeSoftness : undefined,
         dropShadow: child.userData.dropShadow,
+        opacity: typeof child.userData.opacity === 'number' ? child.userData.opacity : 1,
       });
       return;
     }

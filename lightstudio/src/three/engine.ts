@@ -1176,6 +1176,11 @@ export class LightManager {
     lightObj.userData.lightId = ld.id;
     lightObj.userData.edgeSoftness = ld.edgeSoftness ?? 50;
     lightObj.userData.dropShadow = ld.dropShadow;
+    // Raw 0-1 opacity, separate from the baked-into-intensity value below -
+    // the HDRI exporter needs this on its own to alpha-composite an area
+    // light's rectangle as an occluding "card" rather than a purely additive
+    // glow (see the identical stash in _updateLight for why).
+    lightObj.userData.opacity = (ld.opacity ?? 100) / 100;
 
     const helper = this._createHelper(ld.type, lightObj as THREE.Light, ld);
     if (helper) {
@@ -1206,6 +1211,7 @@ export class LightManager {
 
     lightObj.userData.edgeSoftness = ld.edgeSoftness ?? 50;
     lightObj.userData.dropShadow = ld.dropShadow;
+    lightObj.userData.opacity = (ld.opacity ?? 100) / 100;
     lightObj.position.set(px, py, pz);
     lightObj.visible = shouldShow;
 
