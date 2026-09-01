@@ -150,9 +150,20 @@ export const HDRIPreviewPanel: React.FC = () => {
   const [exporting, setExporting] = useState(false);
   const [stats, setStats] = useState<{ max: number; clipped: number; total: number } | null>(null);
   const [zoom, setZoom] = useState(1);
-  const zoomClamp = (z: number) => Math.max(0.5, Math.min(4, z));
+  const zoomClamp = (z: number) => Math.max(0.5, Math.min(16, z));
   const previewContainerRef = useRef<HTMLDivElement>(null);
   const panRef = useRef<{ active: boolean; lastX: number; lastY: number }>({ active: false, lastX: 0, lastY: 0 });
+
+  // Region zoom (Alt+drag a box to zoom straight to it) - the drawn box is
+  // tracked in CONTAINER-local pixels so the dashed overlay can be absolutely
+  // positioned inside the (already position:relative) preview container.
+  const regionDragRef = useRef<{ active: boolean; startX: number; startY: number } | null>(null);
+  const [regionRect, setRegionRect] = useState<{ x: number; y: number; w: number; h: number } | null>(null);
+  // After a region-zoom or 1:1/Fit jump, this holds the (0..1) point within
+  // the canvas that should end up centered in the viewport once the new zoom
+  // has actually been laid out - applied in the effect below, one frame
+  // later, since scrollWidth/height only reflect the NEW zoom after re-render.
+  const pendingFocusRef = useRef<{ fx: number; fy: number } | null>(null);
 
   const timerRef = useRef<number | null>(null);
   const layersRef = useRef<EnvLayer[]>([]);
@@ -174,6 +185,99 @@ export const HDRIPreviewPanel: React.FC = () => {
     container.addEventListener('wheel', handleWheel, { passive: false });
     return () => container.removeEventListener('wheel', handleWheel);
   }, []);
+
+  /** Re-centers the viewport on whatever focal point a region-zoom / 1:1 /
+   *  Fit jump requested, once the canvas has actually resized at the new
+   *  zoom (hence the rAF - reading getBoundingClientRect() synchronously in
+   *  the same tick as setZoom() would still see the OLD layout). */
+  useEffect(() => {
+    const focus = pendingFocusRef.current;
+    if (!focus) return;
+    pendingFocusRef.current = null;
+    requestAnimationFrame(() => {
+      const canvas = canvasRef.current;
+      const container = previewContainerRef.current;
+      if (!canvas || !container) return;
+      const canvasRect = canvas.getBoundingClientRect();
+      const containerRect = container.getBoundingClientRect();
+      const targetX = canvasRect.left + focus.fx * canvasRect.width;
+      const targetY = canvasRect.top + focus.fy * canvasRect.height;
+      const desiredX = containerRect.left + containerRect.width / 2;
+      const desiredY = containerRect.top + containerRect.height / 2;
+      container.scrollLeft += targetX - desiredX;
+      container.scrollTop += targetY - desiredY;
+    });
+  }, [zoom]);
+
+  /** Zoom to native 1:1 - one screen pixel per rendered image pixel,
+   *  independent of the page/OS display scale, mirroring HDR Light Studio's
+   *  "1:1 pixel view". Centers on whatever's currently in view. */
+  const zoomToActualPixels = () => {
+    const res = renderedResRef.current ?? RESOLUTIONS[resIndex];
+    pendingFocusRef.current = { fx: 0.5, fy: 0.5 };
+    setZoom(zoomClamp(res.w / DISPLAY_BASE_W));
+  };
+
+  /** Zoom to fit the whole image inside the visible container. */
+  const zoomToFit = () => {
+    const container = previewContainerRef.current;
+    if (!container) return;
+    const fitZoom = Math.min(container.clientWidth / DISPLAY_BASE_W, container.clientHeight / DISPLAY_BASE_H);
+    pendingFocusRef.current = { fx: 0.5, fy: 0.5 };
+    setZoom(zoomClamp(fitZoom));
+  };
+
+  /** Alt+drag a box on the preview to zoom straight to that region - draws a
+   *  dashed selection rect (regionRect, in container-local px) while
+   *  dragging, then computes the zoom level that makes the box fill the
+   *  container and re-centers on its middle. */
+  const startRegionZoom = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    const container = previewContainerRef.current;
+    if (!container) return;
+    const rect = container.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+    regionDragRef.current = { active: true, startX: x, startY: y };
+    setRegionRect({ x, y, w: 0, h: 0 });
+    (e.target as HTMLCanvasElement).setPointerCapture(e.pointerId);
+  };
+
+  const updateRegionZoom = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    const container = previewContainerRef.current;
+    const drag = regionDragRef.current;
+    if (!container || !drag) return;
+    const rect = container.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+    setRegionRect({
+      x: Math.min(x, drag.startX),
+      y: Math.min(y, drag.startY),
+      w: Math.abs(x - drag.startX),
+      h: Math.abs(y - drag.startY),
+    });
+  };
+
+  const commitRegionZoom = () => {
+    regionDragRef.current = null;
+    const r = regionRect;
+    setRegionRect(null);
+    const canvas = canvasRef.current;
+    const container = previewContainerRef.current;
+    // Ignore near-zero drags (a stray Alt+click) rather than zooming to a
+    // meaningless sliver.
+    if (!r || !canvas || !container || r.w < 8 || r.h < 8) return;
+
+    const canvasRect = canvas.getBoundingClientRect();
+    const containerRect = container.getBoundingClientRect();
+    const centerXClient = containerRect.left + r.x + r.w / 2;
+    const centerYClient = containerRect.top + r.y + r.h / 2;
+    const fx = Math.min(1, Math.max(0, (centerXClient - canvasRect.left) / canvasRect.width));
+    const fy = Math.min(1, Math.max(0, (centerYClient - canvasRect.top) / canvasRect.height));
+
+    const newZoom = zoomClamp(zoom * Math.min(container.clientWidth / r.w, container.clientHeight / r.h));
+    pendingFocusRef.current = { fx, fy };
+    setZoom(newZoom);
+  };
 
   /** Render the preview buffer, then paint it. */
   const renderPreview = useCallback(async (resIndexOverride?: number) => {
@@ -348,6 +452,13 @@ export const HDRIPreviewPanel: React.FC = () => {
     // Right button is reserved for panning (handled on the container) - only
     // the left button places a light/shape.
     if (e.button !== 0) return;
+    // Alt+left-drag is reserved for region zoom, takes priority over placing
+    // a light/shape so you can still frame a close-up even with one selected.
+    if (e.altKey) {
+      e.preventDefault();
+      startRegionZoom(e);
+      return;
+    }
     if (selectedLight) {
       const uv = uvFromEvent(e);
       if (!uv) return;
@@ -365,6 +476,10 @@ export const HDRIPreviewPanel: React.FC = () => {
   };
 
   const handleCanvasPointerMove = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    if (regionDragRef.current?.active) {
+      updateRegionZoom(e);
+      return;
+    }
     if (!draggingRef.current) return;
     if (selectedLight) {
       const uv = uvFromEvent(e);
@@ -379,6 +494,15 @@ export const HDRIPreviewPanel: React.FC = () => {
   };
 
   const handleCanvasPointerUp = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    if (regionDragRef.current?.active) {
+      try {
+        (e.target as HTMLCanvasElement).releasePointerCapture(e.pointerId);
+      } catch {
+        // ignore - capture may already be released
+      }
+      commitRegionZoom();
+      return;
+    }
     draggingRef.current = false;
     try {
       (e.target as HTMLCanvasElement).releasePointerCapture(e.pointerId);
@@ -470,6 +594,22 @@ export const HDRIPreviewPanel: React.FC = () => {
           }}
         />
 
+        {/* Region-zoom drag box (Alt+drag) */}
+        {regionRect && regionRect.w > 1 && regionRect.h > 1 && (
+          <div
+            style={{
+              position: 'absolute',
+              left: regionRect.x,
+              top: regionRect.y,
+              width: regionRect.w,
+              height: regionRect.h,
+              border: '1px dashed var(--accent)',
+              background: 'rgba(34,211,238,0.12)',
+              pointerEvents: 'none',
+            }}
+          />
+        )}
+
         {/* Zoom controls */}
         <div
           style={{
@@ -509,17 +649,54 @@ export const HDRIPreviewPanel: React.FC = () => {
               <line x1="5" y1="1" x2="5" y2="9" />
             </svg>
           </button>
+          <span style={{ width: 1, height: 14, background: 'var(--border)', margin: '0 2px' }} />
+          <button
+            className="btn-icon"
+            style={{ width: 24, height: 20, fontSize: 8, fontFamily: 'var(--font-mono)' }}
+            onClick={zoomToActualPixels}
+            title="Zoom to 1:1 (actual pixels)"
+          >
+            1:1
+          </button>
+          <button
+            className="btn-icon"
+            style={{ width: 20, height: 20 }}
+            onClick={zoomToFit}
+            title="Fit to view"
+          >
+            <svg width="11" height="11" viewBox="0 0 11 11" fill="none" stroke="currentColor" strokeWidth="1.2">
+              <path d="M1 4V1h3M10 4V1H7M1 7v3h3M10 7v3H7" />
+            </svg>
+          </button>
           <button
             className="btn-icon"
             style={{ width: 20, height: 20 }}
             onClick={() => setZoom(1)}
-            title="Reset zoom"
+            title="Reset zoom (100%)"
           >
             <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.4">
               <rect x="1.5" y="1.5" width="7" height="7" rx="1" />
             </svg>
           </button>
         </div>
+
+        {/* Hint for the region-zoom gesture - low-key, only shown once zoomed
+            in enough that panning/framing actually matters. */}
+        {zoom <= 1.01 && (
+          <div
+            style={{
+              position: 'absolute',
+              bottom: 6,
+              left: 8,
+              fontSize: 9,
+              color: 'var(--text-dim)',
+              fontFamily: 'var(--font-mono)',
+              pointerEvents: 'none',
+            }}
+          >
+            Alt+drag to zoom to region · Right-drag to pan
+          </div>
+        )}
 
         {rendering && (
           <div

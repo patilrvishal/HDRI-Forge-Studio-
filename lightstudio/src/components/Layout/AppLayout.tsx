@@ -254,10 +254,25 @@ export const AppLayout: React.FC = () => {
     onFrameAll: () => {
       sceneManagerRef.current?.animateCameraTo([5, 3, 5], [0, 0.5, 0], 500);
     },
-    toggleIsolate: () => setActiveTool('isolate'),
+    toggleIsolate: () => {
+      // Same action as the left-toolbar Isolate button: solo the selected
+      // light so it's the only one lighting the scene, press again to
+      // restore the rest. (This used to only flip the active *tool* mode,
+      // which did nothing on its own - the toolbar button was the only way
+      // to actually solo a light.)
+      const id = useLightsStore.getState().selectedLightId;
+      if (id) useLightsStore.getState().toggleLightSolo(id);
+    },
     toggleVisibility: () => {
       const id = useLightsStore.getState().selectedLightId;
       if (id) useLightsStore.getState().toggleLightVisibility(id);
+    },
+    cycleLight: (direction) => {
+      const { lights, selectedLightId, selectLight } = useLightsStore.getState();
+      if (lights.length === 0) return;
+      const idx = lights.findIndex((l) => l.id === selectedLightId);
+      const nextIdx = idx === -1 ? 0 : (idx + direction + lights.length) % lights.length;
+      selectLight(lights[nextIdx].id);
     },
     toggleTurntable,
     toggleFullscreen,
@@ -276,6 +291,78 @@ export const AppLayout: React.FC = () => {
     },
   });
 
+  // ── Drag-and-drop project file opening ────────────────────────────────
+  // Drop a .hfs/.lightscene/.json project file anywhere on the app window to
+  // open it - same effect as Project > Open Scene, just without the file
+  // picker. Accepted extensions include .hfs as an alias for our own
+  // .lightscene format, since that's this app's own initialism.
+  const [dragOverFile, setDragOverFile] = useState(false);
+  const dragDepthRef = useRef(0);
+
+  const isProjectFile = (name: string) => /\.(hfs|lightscene|json)$/i.test(name);
+
+  const loadSceneFile = useCallback((file: File) => {
+    const ui = useUIStore.getState();
+    const reader = new FileReader();
+    reader.onload = () => {
+      try {
+        const sceneFile = SceneExporter.fromJSON(reader.result as string);
+        const error = SceneExporter.importScene(sceneFile);
+        if (error) {
+          ui.showToast(error, 'error');
+          return;
+        }
+        useHistoryStore.getState().clear();
+        if (sceneManagerRef.current) {
+          const cam = sceneFile.scene.camera;
+          sceneManagerRef.current.setCameraState(cam.position, cam.target, cam.fov);
+        }
+        ui.showToast(`Opened "${file.name}"`, 'success');
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : 'Failed to open scene file';
+        ui.showToast(msg, 'error');
+      }
+    };
+    reader.onerror = () => ui.showToast('Failed to read the dropped file', 'error');
+    reader.readAsText(file);
+  }, []);
+
+  const handleDragOver = useCallback((e: React.DragEvent) => {
+    if (!e.dataTransfer.types.includes('Files')) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'copy';
+  }, []);
+
+  const handleDragEnter = useCallback((e: React.DragEvent) => {
+    if (!e.dataTransfer.types.includes('Files')) return;
+    e.preventDefault();
+    dragDepthRef.current += 1;
+    setDragOverFile(true);
+  }, []);
+
+  const handleDragLeave = useCallback((e: React.DragEvent) => {
+    if (!e.dataTransfer.types.includes('Files')) return;
+    e.preventDefault();
+    dragDepthRef.current = Math.max(0, dragDepthRef.current - 1);
+    if (dragDepthRef.current === 0) setDragOverFile(false);
+  }, []);
+
+  const handleDrop = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    dragDepthRef.current = 0;
+    setDragOverFile(false);
+    const file = e.dataTransfer.files?.[0];
+    if (!file) return;
+    if (!isProjectFile(file.name)) {
+      useUIStore.getState().showToast(
+        `"${file.name}" isn't a project file (.hfs / .lightscene / .json)`,
+        'error',
+      );
+      return;
+    }
+    loadSceneFile(file);
+  }, [loadSceneFile]);
+
   return (
     <div
       style={{
@@ -285,8 +372,40 @@ export const AppLayout: React.FC = () => {
         height: '100%',
         background: 'var(--bg-deep)',
         overflow: 'hidden',
+        position: 'relative',
       }}
+      onDragOver={handleDragOver}
+      onDragEnter={handleDragEnter}
+      onDragLeave={handleDragLeave}
+      onDrop={handleDrop}
     >
+      {/* Drag-and-drop project file overlay */}
+      {dragOverFile && (
+        <div
+          style={{
+            position: 'absolute',
+            inset: 0,
+            zIndex: 20000,
+            background: 'rgba(10,10,14,0.82)',
+            border: '2px dashed var(--accent)',
+            borderRadius: 6,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            pointerEvents: 'none',
+          }}
+        >
+          <div style={{ textAlign: 'center' }}>
+            <div style={{ fontSize: 15, fontWeight: 600, color: 'var(--accent)', marginBottom: 4 }}>
+              Drop to open project
+            </div>
+            <div style={{ fontSize: 11, color: 'var(--text-sec)' }}>
+              .hfs / .lightscene / .json
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Top Menu Bar */}
       <TopMenubar sceneManagerRef={sceneManagerRef} onExportImage={handleExportImage} onFinalRender={handleFinalRender} />
 

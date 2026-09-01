@@ -351,7 +351,7 @@ export class SceneExporter {
     return new Promise((resolve) => {
       const input = document.createElement('input');
       input.type = 'file';
-      input.accept = '.lightscene,.json';
+      input.accept = '.lightscene,.json,.hfs';
       input.style.display = 'none';
 
       input.onchange = () => {

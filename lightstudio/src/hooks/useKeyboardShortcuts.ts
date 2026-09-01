@@ -16,6 +16,8 @@ interface KeyboardShortcutCallbacks {
   toggleTurntable?: () => void;
   toggleFullscreen?: () => void;
   setViewMode?: (mode: string) => void;
+  /** Cycle the selected light forward (1) or backward (-1) through the light list. */
+  cycleLight?: (direction: 1 | -1) => void;
 }
 
 export function useKeyboardShortcuts(callbacks: KeyboardShortcutCallbacks): void {
@@ -101,6 +103,19 @@ export function useKeyboardShortcuts(callbacks: KeyboardShortcutCallbacks): void
             e.preventDefault();
             useAnimationStore.getState().jumpToEnd();
           }
+          break;
+
+        // Cycle the selected light up/down the light list - mirrors HDR Light
+        // Studio's arrow-key light navigation. Kept separate from ArrowLeft/
+        // Right (animation frame stepping above) since those two are already
+        // spoken for.
+        case 'ArrowUp':
+          e.preventDefault();
+          callbacks.cycleLight?.(-1);
+          break;
+        case 'ArrowDown':
+          e.preventDefault();
+          callbacks.cycleLight?.(1);
           break;
 
         case 'Delete':
