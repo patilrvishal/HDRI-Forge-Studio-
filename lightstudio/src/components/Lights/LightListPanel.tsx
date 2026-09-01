@@ -628,15 +628,40 @@ export const LightListPanel: React.FC = () => {
               e.stopPropagation();
               if (!addMenuOpen) {
                 const rect = e.currentTarget.getBoundingClientRect();
-                // Open upward from the button, but never let the menu's TOP
-                // go above the viewport - clamp its max height to whatever
-                // room actually exists above the button and let it scroll
-                // internally past that, instead of the whole menu (and
-                // everything before whatever didn't fit) silently vanishing
-                // off the top edge.
-                const available = rect.top - 12;
+                // Anchor against the VISUAL viewport, not window.innerHeight/
+                // y=0 - on mobile the browser's own address-bar overlay sits
+                // on top of the page and covers real pixels our position:
+                // fixed menu doesn't know about. Clamping the menu's top to
+                // plain "8px from the top of the page" put it right behind
+                // that overlay, silently hiding the first item(s) (usually
+                // "Light") with no visual sign anything was cut off.
+                const vv = window.visualViewport;
+                const viewTop = vv ? vv.offsetTop : 0;
+                const viewHeight = vv ? vv.height : window.innerHeight;
+                const SAFE_MARGIN = 12;
+
+                const spaceAbove = rect.top - viewTop - SAFE_MARGIN;
+                const spaceBelow = viewTop + viewHeight - rect.bottom - SAFE_MARGIN;
+                // Prefer opening upward (matches the button sitting at the
+                // panel's bottom edge) but flip downward when there's
+                // genuinely more room that way - e.g. a short mobile
+                // viewport where "above" is mostly eaten by the address bar.
+                const openDown = spaceBelow > spaceAbove;
+                const available = Math.max(openDown ? spaceBelow : spaceAbove, 0);
                 const maxHeight = Math.max(120, Math.min(360, available));
-                setAddMenuAnchor({ left: rect.left, top: Math.max(8, rect.top - maxHeight - 4), maxHeight });
+
+                const top = openDown
+                  ? rect.bottom + 4
+                  : Math.max(viewTop + SAFE_MARGIN, rect.top - maxHeight - 4);
+
+                // Same idea horizontally - a narrow (mobile) panel can leave
+                // less room to the right of the button than the menu's own
+                // min-width, which would otherwise push it off-screen.
+                const MENU_MIN_WIDTH = 170;
+                const viewWidth = vv ? vv.width : window.innerWidth;
+                const left = Math.min(rect.left, viewWidth - MENU_MIN_WIDTH - SAFE_MARGIN);
+
+                setAddMenuAnchor({ left: Math.max(SAFE_MARGIN, left), top, maxHeight });
               }
               setAddMenuOpen((o) => !o);
               setAddMenuSub('root');
