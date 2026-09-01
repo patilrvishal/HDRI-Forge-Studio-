@@ -345,10 +345,17 @@ function evaluateLightRadiance(
     }
 
     // ------ Rect Area Light ------------------------------------------------------------------------------------------------------------------------------------------------------------
-    // Rendered by sampling points across the rectangle surface. Each sample
-    // contributes a soft glow proportional to the pixel's angular proximity.
-    // This creates a visible bright rectangle in the HDRI - matching how
-    // softboxes and panel lights appear in real HDRI captures.
+    // Analytic per-pixel evaluation of the rectangle's angular footprint -
+    // the same gnomonic-projection rectangle test HDRIShapesLayer uses for
+    // HDRI Shapes - instead of the previous 12x12 grid of discrete point
+    // samples averaged into a soft glow. The old approach fundamentally
+    // could not produce a crisp edge: even flooring the per-sample falloff
+    // radius (to fix a star-burst artifact when it shrank too far) still
+    // left every pixel as a blend of up to 144 soft dots, so Edge Softness
+    // at 0 still looked blurry, not sharp. This tests the exact analytic
+    // boundary of the rectangle, so 0 is genuinely a hard cutoff and
+    // increasing Edge Softness smoothly widens the feather inward from
+    // that real edge - matching how an HDRI Shape's own Softness behaves.
     case 'area': {
       const lightNormal = light.normal ?? new THREE.Vector3(0, 0, 1);
       const facingDir = new THREE.Vector3()
@@ -363,87 +370,42 @@ function evaluateLightRadiance(
       const rectW = light.width ?? 2;
       const rectH = light.height ?? 2;
 
-      // Sample a grid across the rectangle
-      const samples = 12;
-      let accR = 0, accG = 0, accB = 0;
+      const toLight = new THREE.Vector3().subVectors(light.position, capturePoint);
+      const dist = Math.max(0.01, toLight.length());
+      const centerDir = toLight.clone().normalize();
 
-      for (let sy = 0; sy < samples; sy++) {
-        for (let sx = 0; sx < samples; sx++) {
-          const su = (sx + 0.5) / samples;
-          const sv = (sy + 0.5) / samples;
+      const cosc = dir.x * centerDir.x + dir.y * centerDir.y + dir.z * centerDir.z;
+      if (cosc <= 0.02) break; // behind the light's own hemisphere
 
-          // Sample point on rectangle surface
-          const px = light.position.x
-            + lightRight.x * (su - 0.5) * rectW
-            + lightUp.x * (sv - 0.5) * rectH;
-          const py = light.position.y
-            + lightRight.y * (su - 0.5) * rectW
-            + lightUp.y * (sv - 0.5) * rectH;
-          const pz = light.position.z
-            + lightRight.z * (su - 0.5) * rectW
-            + lightUp.z * (sv - 0.5) * rectH;
+      // Project the pixel's direction into the rectangle's local tangent
+      // plane (right/up axes), same math as HDRIShapesLayer's paintPatch.
+      const lx = (dir.x * lightRight.x + dir.y * lightRight.y + dir.z * lightRight.z) / cosc;
+      const ly = (dir.x * lightUp.x + dir.y * lightUp.y + dir.z * lightUp.z) / cosc;
 
-          const dx = px - capturePoint.x;
-          const dy = py - capturePoint.y;
-          const dz = pz - capturePoint.z;
-          const dist = Math.max(0.01, Math.sqrt(dx * dx + dy * dy + dz * dz));
+      const halfW = Math.max(0.02, Math.atan2(rectW / 2, dist));
+      const halfH = Math.max(0.02, Math.atan2(rectH / 2, dist));
+      const nx = Math.abs(lx) / Math.tan(Math.min(halfW, 1.55));
+      const ny = Math.abs(ly) / Math.tan(Math.min(halfH, 1.55));
+      if (nx > 1 || ny > 1) break; // outside the rectangle's true footprint
 
-          // Direction to this sample point
-          const invDist = 1 / dist;
-          const tx = dx * invDist;
-          const ty = dy * invDist;
-          const tz = dz * invDist;
+      const feather = Math.max(0, Math.min(1, (light.edgeSoftness ?? 50) / 100));
+      const featherLo = 1 - feather;
+      const edge = Math.max(nx, ny); // Chebyshev distance = box falloff
+      const coverage = feather < 0.01 ? 1 : 1 - smoothstepHDRI((edge - featherLo) / Math.max(0.001, 1 - featherLo));
+      if (coverage <= 0) break;
 
-          // Angular distance from pixel direction to sample direction
-          const cosA = Math.max(-1, Math.min(1, dir.x * tx + dir.y * ty + dir.z * tz));
-          const angle = Math.acos(cosA);
+      // Cosine emission factor (Lambert's law for the area surface)
+      const cosEmit = Math.max(0, -(centerDir.x * lightNormal.x + centerDir.y * lightNormal.y + centerDir.z * lightNormal.z));
 
-          // Each sample covers a small sub-rectangle of the area light
-          const subW = rectW / samples;
-          const subH = rectH / samples;
-          const sampleRadius = Math.atan2(Math.max(subW, subH) * 1.5, dist);
+      // Radiance: intensity * cosEmit / solidAngle * coverage. Area lights
+      // in studio HDRI should be 200-2000 range (Stage 3).
+      const solidAngle = 4 * halfW * halfH;
+      const safeSA = Math.max(1e-6, solidAngle);
+      const radiance = (light.intensity * cosEmit * coverage * 0.5 * EXPORT_EXPOSURE) / safeSA;
 
-          // Soft glow from this sample
-          // Per-light softness. GAUSSIAN_SOFTNESS was a single global constant,
-          // so every light got identical blur - you could not have a crisp strip
-          // light and a diffused softbox in the same rig.
-          //
-          // The rectangle is only approximated by a 12x12 grid of these radial
-          // falloff samples, each covering one small sub-cell (sampleRadius,
-          // already sized with a 1.5x overlap margin above). Softness used to
-          // be allowed to shrink the per-sample falloff radius all the way
-          // down to 0.05x that cell size - well below the spacing between
-          // adjacent samples - so at a low Edge Softness the 144 samples
-          // stopped overlapping and rendered as separate spiky dots instead
-          // of a continuous rectangle, exactly the star-burst pattern this
-          // was reported as. Floating the minimum at 1.0x keeps every sample
-          // covering its own full cell (so the grid always tiles seamlessly),
-          // while Edge Softness still legitimately sharpens the actual edge
-          // shape softFalloff produces within that cell.
-          const softness = ((light.edgeSoftness ?? 50) / 50) * GAUSSIAN_SOFTNESS;
-          const falloff = softFalloff(angle, sampleRadius * Math.max(1.0, softness));
-          if (falloff <= 0) continue;
-
-          // Cosine emission factor (Lambert's law for the area surface)
-          const cosEmit = Math.max(0, -(tx * lightNormal.x + ty * lightNormal.y + tz * lightNormal.z));
-
-          // Radiance: intensity * cosEmit / solidAngle * falloff
-          // Area lights in studio HDRI should be 200-2000 range (Stage 3)
-          const solidAngle = Math.PI * Math.sin(sampleRadius) * Math.sin(sampleRadius);
-          const safeSA = Math.max(1e-6, solidAngle);
-          const radiance = (light.intensity * cosEmit * falloff * 0.5 * EXPORT_EXPOSURE) / safeSA;
-
-          accR += light.color.r * radiance;
-          accG += light.color.g * radiance;
-          accB += light.color.b * radiance;
-        }
-      }
-
-      // Average over all samples
-      const totalSamples = samples * samples;
-      result.r = accR / totalSamples;
-      result.g = accG / totalSamples;
-      result.b = accB / totalSamples;
+      result.r = light.color.r * radiance;
+      result.g = light.color.g * radiance;
+      result.b = light.color.b * radiance;
       break;
     }
 
