@@ -1100,6 +1100,7 @@ interface LightSyncEntry {
   // Area light specific
   areaWidth?: number;
   areaHeight?: number;
+  edgeSoftness?: number;
 }
 
 interface LightObjectEntry {

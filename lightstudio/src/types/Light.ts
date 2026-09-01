@@ -73,6 +73,9 @@ export interface Light {
   // Area light dimensions
   areaWidth: number;     // meters
   areaHeight: number;    // meters
+  /** 0-100. Edge feather for area-type lights (area/overhead) - 0 is a hard
+   *  cutoff, 100 is fully soft, same meaning as an HDRI Shape's softness. */
+  edgeSoftness?: number;
 }
 
 export function createDefaultLight(overrides: Partial<Light> = {}): Light {
@@ -107,6 +110,7 @@ export function createDefaultLight(overrides: Partial<Light> = {}): Light {
     spotPenumbra: 0.5,
     areaWidth: 2,
     areaHeight: 2,
+    edgeSoftness: 50,
     ...overrides,
   };
 }

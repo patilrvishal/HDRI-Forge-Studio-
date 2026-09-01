@@ -641,6 +641,11 @@ function extractLightsFromScene(scene: THREE.Scene): ExtractedLight[] {
         right: right.clone(),
         up: up.clone(),
         normal: normal.clone(),
+        // Set by engine.ts's _updateLight/_createLight from the light's
+        // store field - without reading it back here, the user's Edge
+        // Softness slider had no effect on the HDRI Preview/export at all,
+        // silently falling back to the same default every time.
+        edgeSoftness: typeof child.userData.edgeSoftness === 'number' ? child.userData.edgeSoftness : undefined,
       });
       return;
     }
