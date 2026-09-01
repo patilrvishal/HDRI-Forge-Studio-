@@ -941,9 +941,14 @@ export const Viewport: React.FC<ViewportProps> = ({ sceneManagerRef, onScreensho
       const incident = hit.point.clone().sub(sm.camera.position).normalize();
       const R = incident.clone().sub(N.clone().multiplyScalar(2 * incident.dot(N))).normalize();
 
+      // Same equirect convention as HDRIExporter's pixelToDirection/
+      // sampleEnvTexture and HDRIShapesLayer's directionAt: phi = v*PI
+      // measured from the top/north pole (R.y=+1 -> v=0), theta = (u-0.5)*2PI.
+      // This MUST stay in sync with those - a mismatched sign here is what
+      // made a "wrapped" shape land at the wrong latitude on the map.
       let u = Math.atan2(R.z, R.x) / (2 * Math.PI) + 0.5;
       u = ((u % 1) + 1) % 1;
-      const v = Math.asin(Math.max(-1, Math.min(1, R.y))) / Math.PI + 0.5;
+      const v = Math.acos(Math.max(-1, Math.min(1, R.y))) / Math.PI;
 
       updateHDRIShape(shapeId, { u, v });
       return;

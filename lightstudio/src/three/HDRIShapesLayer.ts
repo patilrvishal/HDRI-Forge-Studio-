@@ -14,89 +14,145 @@ function hexToRgb(hex: string): [number, number, number] {
 }
 
 /**
- * How far a shape's footprint should stretch horizontally at a given row,
- * matching how a real HDRI light patch behaves on an equirectangular map:
- * longitude lines converge at the poles, so a patch of fixed angular size
- * covers proportionally more of the map's width the closer it sits to the
- * top or bottom edge - drag one toward the zenith/nadir and it visibly
- * smears around the band, exactly like moving a real light there would.
- * cy/h is the normalized v (0 = north pole, 1 = south pole); colatitude
- * theta runs 0..PI with sin(theta) = 1 at the equator and -> 0 at the poles.
- * Capped at 4x (rather than a larger/unbounded value) so a single stretched
- * shape's own left/right wrap-around copies (see compositeShapesCanvas)
- * don't overlap themselves and double up their alpha.
+ * Pixel (px,py) -> world direction, using the SAME equirectangular
+ * convention as HDRIExporter's pixelToDirection/sampleEnvTexture (phi = v*PI
+ * measured from the top/north pole, theta = (u-0.5)*2PI). Every direction
+ * used anywhere in the shapes pipeline goes through this one convention so
+ * the flat HDRI Preview render and the shape's own placement always agree.
  */
-function poleSpreadFactor(cy: number, h: number): number {
-  const theta = (cy / h) * Math.PI;
-  const sinTheta = Math.max(Math.sin(theta), 0.14);
-  return Math.min(1 / sinTheta, 4);
+function directionAt(px: number, py: number, w: number, h: number): [number, number, number] {
+  const u = (px + 0.5) / w;
+  const v = (py + 0.5) / h;
+  const phi = v * Math.PI;
+  const theta = (u - 0.5) * 2 * Math.PI;
+  const sinPhi = Math.sin(phi);
+  return [sinPhi * Math.cos(theta), Math.cos(phi), sinPhi * Math.sin(theta)];
 }
 
 /**
- * Paint one shape onto the context using standard alpha "source-over"
- * compositing - this is what makes stacking order actually mean something:
- * a shape painted later overwrites whatever pixels it covers, including a
- * pure-black shape fully occluding (blocking) anything beneath it, exactly
- * like a real HDRI blocker/flag.
+ * Paint every visible shape directly into a raw RGBA buffer using true
+ * spherical geometry, instead of drawing flat 2D primitives onto the
+ * equirect canvas. A shape is defined as a small flat patch tangent to the
+ * sphere at its (u,v) center - exactly like a real HDRI light card - and
+ * every affected pixel is tested by projecting its direction into that
+ * patch's local tangent plane (gnomonic projection). This is what makes a
+ * shape's outline genuinely follow the equirectangular distortion: near the
+ * equator it reads as a normal rectangle/circle, and the closer it sits to
+ * a pole the more its footprint curves and spreads around the band, because
+ * that is what a fixed-size flat patch actually looks like once unwrapped
+ * onto a lat/long map. Wrapping at the u=0/u=1 seam falls out for free since
+ * every test works in 3D direction space, not canvas pixel space.
  */
-function paintShape(ctx: CanvasRenderingContext2D, shape: HDRIShape, w: number, h: number, cx: number): void {
-  const cy = shape.v * h;
-  const sw = Math.max(2, shape.width * w);
-  const sh = Math.max(2, shape.height * h);
+function paintShapeIntoBuffer(data: Uint8ClampedArray, shape: HDRIShape, w: number, h: number): void {
   const [r, g, b] = hexToRgb(shape.color);
-  const alpha = Math.max(0, Math.min(1, shape.opacity / 100));
+  const baseAlpha = Math.max(0, Math.min(1, shape.opacity / 100));
+  if (baseAlpha <= 0) return;
   const feather = Math.max(0, Math.min(1, shape.softness / 100));
-  const poleSpread = poleSpreadFactor(cy, h);
 
-  ctx.save();
-  ctx.translate(cx, cy);
-  // Stretch the whole footprint horizontally BEFORE rotating, so the pole
-  // distortion always acts in true world (longitude) space and a rotated
-  // rectangle doesn't get sheared by a non-uniform scale applied after.
-  ctx.scale(poleSpread, 1);
-  if (shape.type !== 'circle') {
-    ctx.rotate((shape.rotation * Math.PI) / 180);
-  }
+  // Center direction C, from the same u/v -> direction convention as above.
+  const [cx, cy, cz] = directionAt(shape.u * w - 0.5, shape.v * h - 0.5, w, h);
 
-  if (shape.type === 'circle') {
-    const radius = (sw + sh) / 4;
-    const innerStop = Math.max(0, 1 - feather);
-    const grad = ctx.createRadialGradient(0, 0, radius * innerStop, 0, 0, radius);
-    grad.addColorStop(0, `rgba(${r}, ${g}, ${b}, ${alpha})`);
-    grad.addColorStop(1, `rgba(${r}, ${g}, ${b}, 0)`);
-    ctx.fillStyle = grad;
-    ctx.beginPath();
-    ctx.arc(0, 0, radius, 0, Math.PI * 2);
-    ctx.fill();
-  } else if (shape.type === 'gradient-strip') {
-    // A soft horizontal band - full opacity through the center, feathering
-    // out top and bottom. Width runs the strip's length, height its thickness.
-    const grad = ctx.createLinearGradient(0, -sh / 2, 0, sh / 2);
-    grad.addColorStop(0, `rgba(${r}, ${g}, ${b}, 0)`);
-    grad.addColorStop(Math.min(0.49, feather * 0.5 + 0.02), `rgba(${r}, ${g}, ${b}, ${alpha})`);
-    grad.addColorStop(Math.max(0.51, 1 - (feather * 0.5 + 0.02)), `rgba(${r}, ${g}, ${b}, ${alpha})`);
-    grad.addColorStop(1, `rgba(${r}, ${g}, ${b}, 0)`);
-    ctx.fillStyle = grad;
-    ctx.fillRect(-sw / 2, -sh / 2, sw, sh);
+  // Tangent-plane basis at C: right = worldUp x C, up = C x right. Falls
+  // back to a fixed right vector at the poles, where worldUp x C -> 0.
+  let rx = cz, ry = 0, rz = -cx;
+  const rLen = Math.hypot(rx, rz);
+  if (rLen < 1e-6) {
+    rx = 1; ry = 0; rz = 0;
   } else {
-    // Rectangle - a single flat-alpha fill blurred with the canvas's native
-    // filter. Previously this stacked several manually-grown, semi-transparent
-    // rects to fake a soft edge; each was independently alpha-blended onto
-    // the destination, so once pole-spread stretched a shape wide enough
-    // for its own wrap-around ghost copies (see compositeShapesCanvas) to
-    // overlap, those overlapping semi-transparent rings re-blended on top
-    // of each other and produced a repeating wavy/domed silhouette instead
-    // of a clean stretch. A single blurred fill has only one alpha value
-    // per pixel, so overlapping copies now blend the same simple way a
-    // real HDRI light patch does.
-    const featherPx = Math.min(sw, sh) * 0.5 * feather;
-    ctx.filter = featherPx > 0.5 ? `blur(${featherPx}px)` : 'none';
-    ctx.fillStyle = `rgba(${r}, ${g}, ${b}, ${alpha})`;
-    ctx.fillRect(-sw / 2, -sh / 2, sw, sh);
-    ctx.filter = 'none';
+    rx /= rLen; rz /= rLen;
+  }
+  let ux = cy * rz - cz * ry;
+  let uy = cz * rx - cx * rz;
+  let uz = cx * ry - cy * rx;
+
+  // Rotation spins the patch's own local basis around C, so "Rotation"
+  // still means something sensible at any latitude, not just at the equator.
+  if (shape.type !== 'circle' && shape.rotation !== 0) {
+    const a = (shape.rotation * Math.PI) / 180;
+    const cosA = Math.cos(a);
+    const sinA = Math.sin(a);
+    const nrx = rx * cosA + ux * sinA;
+    const nry = ry * cosA + uy * sinA;
+    const nrz = rz * cosA + uz * sinA;
+    const nux = -rx * sinA + ux * cosA;
+    const nuy = -ry * sinA + uy * cosA;
+    const nuz = -rz * sinA + uz * cosA;
+    rx = nrx; ry = nry; rz = nrz;
+    ux = nux; uy = nuy; uz = nuz;
   }
 
-  ctx.restore();
+  // width/height are fractions of the full map (2PI wide, PI tall) - convert
+  // to angular half-extents in radians so the patch has a genuine fixed
+  // angular size on the sphere, the same way a real light's physical size
+  // does, rather than a fixed pixel size that would ignore the projection.
+  const halfW = Math.max(0.005, shape.width) * Math.PI;
+  const halfH = Math.max(0.005, shape.height) * (Math.PI / 2);
+  const isStrip = shape.type === 'gradient-strip';
+  const isCircle = shape.type === 'circle';
+  const circleRadius = (halfW + halfH) / 2;
+
+  const tanHalfW = Math.tan(Math.min(halfW, 1.55));
+  const tanHalfH = Math.tan(Math.min(halfH, 1.55));
+  const tanRadius = Math.tan(Math.min(circleRadius, 1.55));
+
+  // Bound the scan to rows the patch can plausibly reach, then sweep the
+  // full width within those rows - direction-space testing already handles
+  // wraparound and pole spread correctly, this bound just skips rows that
+  // are provably too far from the patch to matter.
+  const centerPhi = Math.acos(Math.max(-1, Math.min(1, cy)));
+  const marginRad = Math.min(Math.PI, Math.max(halfW, halfH) * 1.4 + 0.12);
+  const phiMin = Math.max(0, centerPhi - marginRad);
+  const phiMax = Math.min(Math.PI, centerPhi + marginRad);
+  const rowStart = Math.max(0, Math.floor((phiMin / Math.PI) * h) - 1);
+  const rowEnd = Math.min(h - 1, Math.ceil((phiMax / Math.PI) * h) + 1);
+
+  const featherLo = isCircle || isStrip ? 1 - feather : 1 - feather;
+
+  for (let py = rowStart; py <= rowEnd; py++) {
+    for (let px = 0; px < w; px++) {
+      const [dx, dy, dz] = directionAt(px, py, w, h);
+      const cosc = dx * cx + dy * cy + dz * cz;
+      if (cosc <= 0.02) continue; // behind the patch's own hemisphere
+
+      const lx = (dx * rx + dy * ry + dz * rz) / cosc;
+      const ly = (dx * ux + dy * uy + dz * uz) / cosc;
+
+      let coverage: number;
+      if (isCircle) {
+        const nr = Math.hypot(lx, ly) / tanRadius;
+        if (nr > 1) continue;
+        coverage = feather < 0.01 ? 1 : 1 - smoothstep(featherLo, 1, nr);
+      } else {
+        const nx = Math.abs(lx) / tanHalfW;
+        const ny = Math.abs(ly) / tanHalfH;
+        if (isStrip) {
+          // A strip runs the full band horizontally - only the polar (y)
+          // extent is bounded/feathered, matching its original "horizontal
+          // band" purpose but now correctly curved by the projection.
+          if (ny > 1) continue;
+          coverage = feather < 0.01 ? 1 : 1 - smoothstep(featherLo, 1, ny);
+        } else {
+          if (nx > 1 || ny > 1) continue;
+          const edge = Math.max(nx, ny); // Chebyshev distance = box falloff
+          coverage = feather < 0.01 ? 1 : 1 - smoothstep(featherLo, 1, edge);
+        }
+      }
+
+      const a = baseAlpha * coverage;
+      if (a <= 0) continue;
+      const idx = (py * w + px) * 4;
+      data[idx] = r * a + data[idx] * (1 - a);
+      data[idx + 1] = g * a + data[idx + 1] * (1 - a);
+      data[idx + 2] = b * a + data[idx + 2] * (1 - a);
+      data[idx + 3] = 255 * a + data[idx + 3] * (1 - a);
+    }
+  }
+}
+
+function smoothstep(lo: number, hi: number, x: number): number {
+  if (hi <= lo) return x < lo ? 0 : 1;
+  const t = Math.max(0, Math.min(1, (x - lo) / (hi - lo)));
+  return t * t * (3 - 2 * t);
 }
 
 /**
@@ -124,15 +180,13 @@ export function compositeShapesCanvas(
     ctx.fillRect(0, 0, LAYER_W, LAYER_H);
   }
 
-  for (const shape of shapes) {
-    if (!shape.visible) continue;
-    const cx = shape.u * LAYER_W;
-    // Longitude wraps at the map seam, and pole-spread can stretch a shape
-    // well past the edge - paint left/right ghost copies so it wraps around
-    // instead of clipping at u=0/u=1, matching a real equirect light patch.
-    paintShape(ctx, shape, LAYER_W, LAYER_H, cx - LAYER_W);
-    paintShape(ctx, shape, LAYER_W, LAYER_H, cx);
-    paintShape(ctx, shape, LAYER_W, LAYER_H, cx + LAYER_W);
+  const visible = shapes.filter((s) => s.visible);
+  if (visible.length > 0) {
+    const imageData = ctx.getImageData(0, 0, LAYER_W, LAYER_H);
+    for (const shape of visible) {
+      paintShapeIntoBuffer(imageData.data, shape, LAYER_W, LAYER_H);
+    }
+    ctx.putImageData(imageData, 0, 0);
   }
 
   return canvas;

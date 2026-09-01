@@ -20,7 +20,6 @@ import { useHDRIShapesStore } from '../../store/hdriShapesStore';
 import { useUILayoutStore } from '../../store/uiLayoutStore';
 import { useHistoryStore } from '../../store/historyStore';
 import { useKeyboardShortcuts } from '../../hooks/useKeyboardShortcuts';
-import { TimelinePanel } from '../Timeline/TimelinePanel';
 import { CameraPanel } from '../Viewport/CameraPanel';
 import { useSceneHierarchyStore } from '../../store/sceneHierarchyStore';
 
@@ -134,7 +133,7 @@ export const AppLayout: React.FC = () => {
   const viewportDesignVisible = panelVisibility.viewportDesign;
 
   // Bottom panel: side-by-side tabs (mutually exclusive)
-  const [bottomTab, setBottomTab] = useState<'hdri' | 'timeline' | 'presets'>('hdri');
+  const [bottomTab, setBottomTab] = useState<'hdri' | 'presets' | 'customHdri'>('hdri');
 
   // History state for status bar
   const undoCount = useHistoryStore((s) => s.undoStack.length);
@@ -504,20 +503,19 @@ export const AppLayout: React.FC = () => {
                     HDRI Preview
                   </div>
                   <div
-                    className={`tab-item ${bottomTab === 'timeline' ? 'active' : ''}`}
-                    onClick={() => setBottomTab('timeline')}
-                  >
-                    Timeline
-                  </div>
-                  <div
                     className={`tab-item ${bottomTab === 'presets' ? 'active' : ''}`}
                     onClick={() => setBottomTab('presets')}
                   >
                     Presets
                   </div>
+                  <div
+                    className={`tab-item ${bottomTab === 'customHdri' ? 'active' : ''}`}
+                    onClick={() => setBottomTab('customHdri')}
+                  >
+                    Custom HDRI
+                  </div>
                 </div>
                 <div style={{ display: 'flex', gap: 2, padding: '0 6px 0 0', flexShrink: 0 }}>
-                  <PanelCloseButton panel="timelineSection" />
                   <PanelCloseButton panel="presetsSection" />
                 </div>
               </div>
@@ -525,8 +523,8 @@ export const AppLayout: React.FC = () => {
               {/* Tab content - mutually exclusive, full width */}
               <div style={{ flex: 1, overflow: 'hidden' }}>
                 {bottomTab === 'hdri' && <HDRIPreviewPanel />}
-                {bottomTab === 'timeline' && <TimelinePanel />}
                 {bottomTab === 'presets' && <PresetBrowser onGenerateThumbnail={handleGenerateThumbnail} />}
+                {bottomTab === 'customHdri' && <EnvironmentAssetsPanel />}
               </div>
             </div>
           </div>
