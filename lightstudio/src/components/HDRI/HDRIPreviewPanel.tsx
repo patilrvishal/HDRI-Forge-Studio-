@@ -266,21 +266,38 @@ export const HDRIPreviewPanel: React.FC = () => {
     return { u, v };
   };
 
-  /** Place the selected light at the equirect direction under (u,v) - same
-   *  Position X (Lng) / Position Y (Lat) fields the inline Transform panel
-   *  edits, so a canvas drag and those sliders always agree. Lng runs the
-   *  full 0-360deg azimuth across u; Lat runs +90 (top/up) to -90
-   *  (bottom/down) across v, matching every other top-of-map=up convention
-   *  used throughout the shapes/HDRI pipeline. */
+  /** Place the selected light at the true equirect direction under (u,v).
+   *
+   *  This app's spherical.lat is an ELEVATION angle used only to rescale the
+   *  horizontal x/z radius - sphericalToCartesian sets Y straight from
+   *  `height`, completely independent of lat. Setting lat alone (as an
+   *  earlier version of this did) therefore only ever changed horizontal
+   *  position - dragging up/down on the canvas never actually moved the
+   *  light vertically, which is exactly the "only horizontal moves" bug.
+   *
+   *  Fixed by computing a real 3D direction from (u,v) - the same
+   *  phi=v*PI / theta=(u-0.5)*2PI convention as HDRIShapesLayer's
+   *  directionAt and HDRIExporter's pixelToDirection - and placing the
+   *  light along that direction at its current distance from the origin,
+   *  then re-deriving lat/lng/height from the resulting x/y/z via
+   *  cartesianToSpherical so the light lands exactly on the clicked point,
+   *  vertically and horizontally, not just in azimuth. */
   const placeLightFromUV = (uv: { u: number; v: number }) => {
     if (!selectedLight) return;
-    const lng = uv.u * 360;
-    const lat = (0.5 - uv.v) * 180;
     const s = selectedLight.transform.spherical;
-    const next = { ...s, lat, lng };
+    const p = selectedLight.transform.position;
+    const dist = Math.max(0.5, Math.hypot(p.x, p.y, p.z)) || Math.max(0.5, s.radius);
+
+    const phi = uv.v * Math.PI;
+    const theta = (uv.u - 0.5) * 2 * Math.PI;
+    const sinPhi = Math.sin(phi);
+    const dir = { x: sinPhi * Math.cos(theta), y: Math.cos(phi), z: sinPhi * Math.sin(theta) };
+
+    const position = { x: dir.x * dist, y: dir.y * dist, z: dir.z * dist };
+    const sph = cartesianToSpherical(position.x, position.y, position.z);
     updateLightTransform(selectedLight.id, {
-      spherical: next,
-      position: sphericalToCartesian(next.lat, next.lng, next.radius, next.height),
+      spherical: { lat: sph.lat, lng: sph.lng, radius: sph.radius, height: sph.height },
+      position,
     });
   };
 
