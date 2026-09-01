@@ -16,6 +16,7 @@ import { ErrorBoundary } from '../UI/ErrorBoundary';
 import { useUIStore, type PanelKey } from '../../store/uiStore';
 import { useSceneStore } from '../../store/sceneStore';
 import { useLightsStore } from '../../store/lightsStore';
+import { useHDRIShapesStore } from '../../store/hdriShapesStore';
 import { useUILayoutStore } from '../../store/uiLayoutStore';
 import { useHistoryStore } from '../../store/historyStore';
 import { useKeyboardShortcuts } from '../../hooks/useKeyboardShortcuts';
@@ -329,21 +330,34 @@ export const AppLayout: React.FC = () => {
                 <svg width="10" height="10" viewBox="0 0 10 10" fill="currentColor" style={{ opacity: 0.6 }}>
                   <circle cx="5" cy="5" r="3" />
                 </svg>
-                {leftTab === 'lights' ? 'Light List' : leftTab === 'environment' ? 'Environment' : 'Scene Hierarchy'}
+                {leftTab === 'lights' ? 'Lights & Shapes' : leftTab === 'environment' ? 'Environment' : 'Scene Hierarchy'}
               </h3>
               <div style={{ display: 'flex', gap: 2, alignItems: 'center' }}>
                 {leftTab === 'lights' && (
-                  <button
-                    className="btn-icon"
-                    style={{ width: 20, height: 20 }}
-                    onClick={() => useLightsStore.getState().addLight()}
-                    title="Add Light"
-                    aria-label="Add Light"
-                  >
-                    <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5">
-                      <path d="M6 1v10M1 6h10" />
-                    </svg>
-                  </button>
+                  <>
+                    <button
+                      className="btn-icon"
+                      style={{ width: 20, height: 20 }}
+                      onClick={() => useLightsStore.getState().addLight()}
+                      title="Add Light"
+                      aria-label="Add Light"
+                    >
+                      <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5">
+                        <path d="M6 1v10M1 6h10" />
+                      </svg>
+                    </button>
+                    <button
+                      className="btn-icon"
+                      style={{ width: 20, height: 20 }}
+                      onClick={() => useHDRIShapesStore.getState().addShape('rectangle')}
+                      title="Add HDRI Shape"
+                      aria-label="Add HDRI Shape"
+                    >
+                      <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5">
+                        <rect x="1.5" y="2.5" width="9" height="7" rx="1" />
+                      </svg>
+                    </button>
+                  </>
                 )}
                 <PanelCloseButton panel="leftPanel" />
               </div>

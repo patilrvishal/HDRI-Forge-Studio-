@@ -2,8 +2,10 @@ import React, { useEffect, useMemo, useState, type MutableRefObject } from 'reac
 import * as THREE from 'three';
 import { useSceneHierarchyStore } from '../../store/sceneHierarchyStore';
 import { useLightsStore } from '../../store/lightsStore';
+import { useHDRIShapesStore } from '../../store/hdriShapesStore';
 import { useUIStore } from '../../store/uiStore';
 import { LightProperties } from '../Lights/LightProperties';
+import { HDRIShapeProperties } from '../Lights/HDRIShapeProperties';
 
 /* ═══════════════════════════════════════════════════════════════════
    Utility: find a Three.js object by UUID in the scene
@@ -571,6 +573,7 @@ interface DynamicPropertiesPanelProps {
 export const DynamicPropertiesPanel: React.FC<DynamicPropertiesPanelProps> = ({ sceneRef }) => {
   const selectedId = useSceneHierarchyStore((s) => s.selectedId);
   const selectedLightId = useLightsStore((s) => s.selectedLightId);
+  const selectedShapeId = useHDRIShapesStore((s) => s.selectedShapeId);
   const selectLight = useLightsStore((s) => s.selectLight);
   const setRightPanelTab = useUIStore((s) => s.setRightPanelTab);
   const showPanel = useUIStore((s) => s.showPanel);
@@ -652,6 +655,17 @@ export const DynamicPropertiesPanel: React.FC<DynamicPropertiesPanelProps> = ({ 
     return (
       <div style={{ flex: 1, overflowY: 'auto' }}>
         <LightProperties />
+      </div>
+    );
+  }
+
+  // Priority 3: No hierarchy/light selection, but an HDRI Shape is selected
+  // via the Light List panel - shapes have no Object3D in the scene graph,
+  // so they never reach Priority 1's hierarchy branch.
+  if (selectedShapeId) {
+    return (
+      <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+        <HDRIShapeProperties />
       </div>
     );
   }

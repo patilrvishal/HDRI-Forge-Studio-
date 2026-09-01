@@ -1,7 +1,33 @@
 import React, { useState, useCallback, useRef, useMemo } from 'react';
 import { useLightsStore } from '../../store/lightsStore';
+import { useHDRIShapesStore } from '../../store/hdriShapesStore';
 import { LIGHT_TEMPLATES, type Light, type LightType } from '../../types/Light';
+import type { HDRIShapeType } from '../../types/HDRIShape';
 import { Dropdown } from '../UI/Dropdown';
+
+const SHAPE_TYPE_OPTIONS: Array<{ value: string; label: string }> = [
+  { value: 'rectangle', label: 'Rectangle' },
+  { value: 'circle', label: 'Circle' },
+  { value: 'gradient-strip', label: 'Gradient Strip' },
+];
+
+const SHAPE_TYPE_ICONS: Record<HDRIShapeType, React.ReactNode> = {
+  rectangle: (
+    <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.2">
+      <rect x="1.5" y="2.5" width="9" height="7" rx="1" />
+    </svg>
+  ),
+  circle: (
+    <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.2">
+      <circle cx="6" cy="6" r="4" />
+    </svg>
+  ),
+  'gradient-strip': (
+    <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.2">
+      <rect x="1" y="4.5" width="10" height="3" rx="1.5" />
+    </svg>
+  ),
+};
 
 const LIGHT_TYPE_OPTIONS: Array<{ value: string; label: string }> = [
   { value: 'point', label: 'Point Light' },
@@ -80,12 +106,42 @@ export const LightListPanel: React.FC = () => {
   const addLight = useLightsStore((s) => s.addLight);
   const removeLight = useLightsStore((s) => s.removeLight);
   const duplicateLight = useLightsStore((s) => s.duplicateLight);
-  const selectLight = useLightsStore((s) => s.selectLight);
+  const selectLightRaw = useLightsStore((s) => s.selectLight);
   const toggleLightVisibility = useLightsStore((s) => s.toggleLightVisibility);
   const toggleLightSolo = useLightsStore((s) => s.toggleLightSolo);
   const updateLight = useLightsStore((s) => s.updateLight);
   const reorderLights = useLightsStore((s) => s.reorderLights);
   const setCollectionFilter = useLightsStore((s) => s.setCollectionFilter);
+
+  // HDRI Shapes - lives in the same list as lights, since a shape is just
+  // another kind of light source painted onto the HDRI instead of placed
+  // in 3D space. Selection between the two is kept mutually exclusive so
+  // the right-side Properties panel always shows exactly one inspector.
+  const shapes = useHDRIShapesStore((s) => s.shapes);
+  const selectedShapeId = useHDRIShapesStore((s) => s.selectedShapeId);
+  const addShape = useHDRIShapesStore((s) => s.addShape);
+  const removeShape = useHDRIShapesStore((s) => s.removeShape);
+  const duplicateShape = useHDRIShapesStore((s) => s.duplicateShape);
+  const selectShapeRaw = useHDRIShapesStore((s) => s.selectShape);
+  const updateShape = useHDRIShapesStore((s) => s.updateShape);
+  const reorderShape = useHDRIShapesStore((s) => s.reorderShape);
+
+  const selectLight = useCallback(
+    (id: string | null) => {
+      selectLightRaw(id);
+      if (id) selectShapeRaw(null);
+    },
+    [selectLightRaw, selectShapeRaw],
+  );
+  const selectShape = useCallback(
+    (id: string | null) => {
+      selectShapeRaw(id);
+      if (id) selectLightRaw(null);
+    },
+    [selectShapeRaw, selectLightRaw],
+  );
+
+  const [shapeContextMenu, setShapeContextMenu] = useState<{ x: number; y: number; shapeId: string } | null>(null);
 
   const [contextMenu, setContextMenu] = useState<{
     x: number;
@@ -331,6 +387,197 @@ export const LightListPanel: React.FC = () => {
                 </div>
               );
             })}
+          </div>
+        )}
+      </div>
+
+      {/* HDRI Shapes - composite lights/blockers painted onto the HDRI. Same
+          list mechanics as lights above (select, reorder, visibility,
+          delete) since a shape is conceptually just another light source. */}
+      <div
+        style={{
+          borderTop: '1px solid var(--border)',
+          flexShrink: 0,
+          maxHeight: '40%',
+          display: 'flex',
+          flexDirection: 'column',
+        }}
+      >
+        <div
+          style={{
+            padding: '4px 8px',
+            fontSize: 10,
+            fontWeight: 600,
+            letterSpacing: 0.4,
+            color: 'var(--text-dim)',
+            textTransform: 'uppercase',
+            flexShrink: 0,
+          }}
+        >
+          HDRI Shapes
+        </div>
+        <div
+          className="panel-body"
+          style={{ flex: 1, padding: 0, overflowY: 'auto', minHeight: 0 }}
+          onClick={() => setShapeContextMenu(null)}
+        >
+          {shapes.length === 0 ? (
+            <div className="placeholder-panel" style={{ minHeight: 50 }}>
+              <span style={{ fontSize: 10, color: 'var(--text-dim)' }}>
+                No shapes yet. Add one below or via Create.
+              </span>
+            </div>
+          ) : (
+            <div className="light-list">
+              {shapes.map((shape, index) => {
+                const isSelected = shape.id === selectedShapeId;
+                return (
+                  <div
+                    key={shape.id}
+                    className={`light-list-item ${isSelected ? 'selected' : ''} ${!shape.visible ? 'dimmed' : ''}`}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      selectShape(shape.id);
+                    }}
+                    onContextMenu={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      setShapeContextMenu({ x: e.clientX, y: e.clientY, shapeId: shape.id });
+                    }}
+                  >
+                    <div className="light-drag-handle" title="Reorder in Properties panel">
+                      <svg width="8" height="12" viewBox="0 0 8 12" fill="currentColor" opacity="0.35">
+                        <circle cx="2" cy="2" r="1" />
+                        <circle cx="6" cy="2" r="1" />
+                        <circle cx="2" cy="6" r="1" />
+                        <circle cx="6" cy="6" r="1" />
+                        <circle cx="2" cy="10" r="1" />
+                        <circle cx="6" cy="10" r="1" />
+                      </svg>
+                    </div>
+
+                    <div className="light-type-icon" style={{ color: shape.color }}>
+                      {SHAPE_TYPE_ICONS[shape.type]}
+                    </div>
+
+                    <div className="light-item-name">
+                      <span className="light-name-text">{shape.name}</span>
+                      <span className="light-type-label">{shape.type}</span>
+                    </div>
+
+                    <div className="light-item-actions">
+                      <button
+                        className={`btn-icon ${shape.visible ? '' : 'dimmed'}`}
+                        style={{ width: 20, height: 20 }}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          updateShape(shape.id, { visible: !shape.visible });
+                        }}
+                        title={shape.visible ? 'Hide shape' : 'Show shape'}
+                        aria-label={shape.visible ? 'Hide shape' : 'Show shape'}
+                      >
+                        {shape.visible ? (
+                          <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.2">
+                            <path d="M1 6s2-4 5-4 5 4 5 4-2 4-5 4-5-4-5-4z" />
+                            <circle cx="6" cy="6" r="1.5" />
+                          </svg>
+                        ) : (
+                          <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.2">
+                            <path d="M1 6s2-4 5-4 5 4 5 4-2 4-5 4-5-4-5-4z" />
+                            <line x1="2" y1="10" x2="10" y2="2" />
+                          </svg>
+                        )}
+                      </button>
+                      <button
+                        className="btn-icon"
+                        style={{ width: 20, height: 20, fontSize: 9 }}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          reorderShape(shape.id, 'up');
+                        }}
+                        disabled={index === shapes.length - 1}
+                        title="Move up (paints later / on top)"
+                      >
+                        {'↑'}
+                      </button>
+                      <button
+                        className="btn-icon"
+                        style={{ width: 20, height: 20, fontSize: 9 }}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          reorderShape(shape.id, 'down');
+                        }}
+                        disabled={index === 0}
+                        title="Move down"
+                      >
+                        {'↓'}
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+
+        {/* Add shape toolbar - mirrors the lights toolbar below it */}
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 4,
+            padding: '4px 6px',
+            borderTop: '1px solid var(--border)',
+            flexShrink: 0,
+          }}
+        >
+          <button
+            className="btn-sm"
+            onClick={() => addShape('rectangle')}
+            title="Add default rectangle shape"
+          >
+            <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.5">
+              <path d="M5 1v8M1 5h8" />
+            </svg>
+            Add
+          </button>
+          <Dropdown
+            value=""
+            options={SHAPE_TYPE_OPTIONS}
+            onChange={(v) => addShape(v as HDRIShapeType)}
+          />
+        </div>
+
+        {/* Shape context menu */}
+        {shapeContextMenu && (
+          <div className="context-menu" style={{ left: shapeContextMenu.x, top: shapeContextMenu.y }}>
+            <div
+              className="context-menu-item"
+              onClick={() => {
+                duplicateShape(shapeContextMenu.shapeId);
+                setShapeContextMenu(null);
+              }}
+            >
+              <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round">
+                <rect x="4" y="4" width="7" height="7" rx="1" />
+                <path d="M8 4V2a1 1 0 00-1-1H2a1 1 0 00-1 1v5a1 1 0 001 1h2" />
+              </svg>
+              Duplicate
+            </div>
+            <div className="context-menu-sep" />
+            <div
+              className="context-menu-item"
+              style={{ color: 'var(--danger)' }}
+              onClick={() => {
+                removeShape(shapeContextMenu.shapeId);
+                setShapeContextMenu(null);
+              }}
+            >
+              <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round">
+                <path d="M2 3h8M4.5 3V2a.5.5 0 01.5-.5h2a.5.5 0 01.5.5v1M9 3l-.5 7a1 1 0 01-1 .9H4.5a1 1 0 01-1-.9L3 3" />
+              </svg>
+              Delete
+            </div>
           </div>
         )}
       </div>

@@ -20,17 +20,37 @@ function hexToRgb(hex: string): [number, number, number] {
  * pure-black shape fully occluding (blocking) anything beneath it, exactly
  * like a real HDRI blocker/flag.
  */
-function paintShape(ctx: CanvasRenderingContext2D, shape: HDRIShape, w: number, h: number): void {
-  const cx = shape.u * w;
+/**
+ * How far a shape's footprint should stretch horizontally at a given row,
+ * matching how a real HDRI light patch behaves on an equirectangular map:
+ * longitude lines converge at the poles, so a patch of fixed angular size
+ * covers proportionally more of the map's width the closer it sits to the
+ * top or bottom edge - drag one toward the zenith/nadir and it visibly
+ * smears around the band, exactly like moving a real light there would.
+ * cy/h is the normalized v (0 = north pole, 1 = south pole); colatitude
+ * theta runs 0..PI with sin(theta) = 1 at the equator and -> 0 at the poles.
+ */
+function poleSpreadFactor(cy: number, h: number): number {
+  const theta = (cy / h) * Math.PI;
+  const sinTheta = Math.max(Math.sin(theta), 0.12);
+  return Math.min(1 / sinTheta, 6);
+}
+
+function paintShape(ctx: CanvasRenderingContext2D, shape: HDRIShape, w: number, h: number, cx: number): void {
   const cy = shape.v * h;
   const sw = Math.max(2, shape.width * w);
   const sh = Math.max(2, shape.height * h);
   const [r, g, b] = hexToRgb(shape.color);
   const alpha = Math.max(0, Math.min(1, shape.opacity / 100));
   const feather = Math.max(0, Math.min(1, shape.softness / 100));
+  const poleSpread = poleSpreadFactor(cy, h);
 
   ctx.save();
   ctx.translate(cx, cy);
+  // Stretch the whole footprint horizontally BEFORE rotating, so the pole
+  // distortion always acts in true world (longitude) space and a rotated
+  // rectangle doesn't get sheared by a non-uniform scale applied after.
+  ctx.scale(poleSpread, 1);
   if (shape.type !== 'circle') {
     ctx.rotate((shape.rotation * Math.PI) / 180);
   }
@@ -112,7 +132,13 @@ export function compositeShapesCanvas(
 
   for (const shape of shapes) {
     if (!shape.visible) continue;
-    paintShape(ctx, shape, LAYER_W, LAYER_H);
+    const cx = shape.u * LAYER_W;
+    // Longitude wraps at the map seam, and pole-spread can stretch a shape
+    // well past the edge - paint left/right ghost copies so it wraps around
+    // instead of clipping at u=0/u=1, matching a real equirect light patch.
+    paintShape(ctx, shape, LAYER_W, LAYER_H, cx - LAYER_W);
+    paintShape(ctx, shape, LAYER_W, LAYER_H, cx);
+    paintShape(ctx, shape, LAYER_W, LAYER_H, cx + LAYER_W);
   }
 
   return canvas;

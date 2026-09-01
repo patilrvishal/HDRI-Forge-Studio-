@@ -3,6 +3,7 @@ import { useUIStore } from '../../store/uiStore';
 import type { PanelKey, PanelVisibilityState } from '../../store/uiStore';
 import { useSceneStore } from '../../store/sceneStore';
 import { useLightsStore } from '../../store/lightsStore';
+import { useHDRIShapesStore } from '../../store/hdriShapesStore';
 import { useCameraStore } from '../../store/cameraStore';
 import { useHistoryStore } from '../../store/historyStore';
 import { SceneExporter } from '../../three/SceneExporter';
@@ -200,6 +201,14 @@ const MENU_DEFINITIONS = (
         underlight: { label: 'Under Light', action: () => useLightsStore.getState().addLight('underlight') },
         rimLight: { label: 'Rim Light', action: () => useLightsStore.getState().addLight('rim') },
         fillLight: { label: 'Fill Light', action: () => useLightsStore.getState().addLight('fill') },
+      },
+    },
+    hdriShapes: {
+      label: 'HDRI Shapes',
+      submenu: {
+        rectangle: { label: 'Rectangle', action: () => useHDRIShapesStore.getState().addShape('rectangle') },
+        circle: { label: 'Circle', action: () => useHDRIShapesStore.getState().addShape('circle') },
+        gradientStrip: { label: 'Gradient Strip', action: () => useHDRIShapesStore.getState().addShape('gradient-strip') },
       },
     },
     camera: {
