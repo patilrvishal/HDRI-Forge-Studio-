@@ -429,11 +429,16 @@ export const Viewport: React.FC<ViewportProps> = ({ sceneManagerRef, onScreensho
         // No real HDRI active - fall back to baking the gradient itself as
         // the lighting source, so PBR/metal materials (lit almost entirely
         // by IBL reflections) aren't left with zero environment lighting.
+        //
+        // createGradientBackground() already sets EquirectangularReflection-
+        // Mapping on this texture (so it displays as a proper spherical sky
+        // dome behind the subject, matching HDRI Preview's equirect render
+        // instead of a flat screen-aligned backdrop) - that mapping must be
+        // left in place afterward, not reset to UVMapping, or the dome
+        // collapses back to a flat image the instant this effect re-runs.
         if (el && sm.scene.background && 'mapping' in sm.scene.background) {
           const gradTex = sm.scene.background as THREE.Texture;
-          gradTex.mapping = THREE.EquirectangularReflectionMapping;
           const envMap = sm.pmremGenerator.fromEquirectangular(gradTex).texture;
-          gradTex.mapping = THREE.UVMapping;
           el.setEnvironmentTexture(sm.scene, envMap, environment.intensity);
         }
       }

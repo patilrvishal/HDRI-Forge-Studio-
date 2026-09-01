@@ -12,6 +12,7 @@ import { SSAOPass } from 'three/addons/postprocessing/SSAOPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { FXAAShader } from 'three/addons/shaders/FXAAShader.js';
 import type { GroundSettings } from '../types/Scene';
+import { paintGradientOntoContext } from './HDRIExporter';
 
 let _rectAreaLibInitialized = false;
 function ensureRectAreaLib(): void {
@@ -1793,51 +1794,31 @@ export interface GradientBackgroundConfig {
   stops: GradientStop[];
 }
 
-/** Parse a #rrggbb hex string directly to a CSS rgba() string - no color-space conversion. */
-function hexToRgbaString(hex: string, opacity: number): string {
-  const clean = hex.replace('#', '');
-  const num = parseInt(clean, 16);
-  const r = (num >> 16) & 255;
-  const g = (num >> 8) & 255;
-  const b = num & 255;
-  return `rgba(${r}, ${g}, ${b}, ${opacity})`;
-}
-
 export function createGradientBackground(config: GradientBackgroundConfig): THREE.Texture {
+  // Painted onto a 2:1 canvas via the exact same paintGradientOntoContext()
+  // the HDRI Preview panel and HDRI export use (gradientToEnvLayer in
+  // HDRIExporter.ts), then wrapped with EquirectangularReflectionMapping so
+  // the viewport shows a true spherical sky dome - the same curved "hills"
+  // shape the flat gradient produces once sampled equirectangularly.
+  //
+  // The previous version painted onto a plain SQUARE canvas with no mapping
+  // set, which THREE.js renders as a flat, screen-aligned backdrop image
+  // (no spherical wrap, doesn't turn with the camera) - visually nothing
+  // like what HDRI Preview/export actually produce from the same gradient
+  // config, which is why toggling it on/off never looked like the same
+  // environment in both places.
   const w = 1024;
-  const h = 1024;
+  const h = 512;
   const canvas = document.createElement('canvas');
   canvas.width = w;
   canvas.height = h;
   const ctx = canvas.getContext('2d');
   if (!ctx) return new THREE.Texture();
 
-  let gradient: CanvasGradient;
-
-  if (config.type === 'radial') {
-    gradient = ctx.createRadialGradient(w / 2, h / 2, 0, w / 2, h / 2, w * 0.7);
-  } else {
-    const rad = (config.angle * Math.PI) / 180;
-    const x1 = w / 2 - (Math.cos(rad) * w) / 2;
-    const y1 = h / 2 - (Math.sin(rad) * h) / 2;
-    const x2 = w / 2 + (Math.cos(rad) * w) / 2;
-    const y2 = h / 2 + (Math.sin(rad) * h) / 2;
-    gradient = ctx.createLinearGradient(x1, y1, x2, y2);
-  }
-
-  // Use the authored hex directly as a CSS color - canvas 2D operates in
-  // sRGB display space, so routing it through THREE.Color first would
-  // silently decode it to linear light (THREE.ColorManagement) and darken
-  // every stop when Math.round(rgb.r * 255) re-treats it as 0-255 sRGB.
-  const sorted = [...config.stops].sort((a, b) => a.position - b.position);
-  for (const stop of sorted) {
-    gradient.addColorStop(stop.position, hexToRgbaString(stop.color, stop.opacity));
-  }
-
-  ctx.fillStyle = gradient;
-  ctx.fillRect(0, 0, w, h);
+  paintGradientOntoContext(ctx, w, h, config);
 
   const tex = new THREE.CanvasTexture(canvas);
+  tex.mapping = THREE.EquirectangularReflectionMapping;
   tex.colorSpace = THREE.SRGBColorSpace;
   tex.needsUpdate = true;
   return tex;
