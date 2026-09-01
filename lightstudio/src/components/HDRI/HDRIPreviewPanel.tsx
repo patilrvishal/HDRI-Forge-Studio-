@@ -146,10 +146,28 @@ export const HDRIPreviewPanel: React.FC = () => {
   const [stats, setStats] = useState<{ max: number; clipped: number; total: number } | null>(null);
   const [zoom, setZoom] = useState(1);
   const zoomClamp = (z: number) => Math.max(0.5, Math.min(4, z));
+  const previewContainerRef = useRef<HTMLDivElement>(null);
+  const panRef = useRef<{ active: boolean; lastX: number; lastY: number }>({ active: false, lastX: 0, lastY: 0 });
 
   const timerRef = useRef<number | null>(null);
   const layersRef = useRef<EnvLayer[]>([]);
   const pixelsRef = useRef<Float32Array | null>(null);
+
+  /** Scroll-to-zoom, scoped to just the preview container. Attached as a
+   *  native listener (not React's onWheel) because React/the browser treats
+   *  wheel listeners as passive by default, which silently rejects
+   *  preventDefault() and lets the scroll leak out to the rest of the page
+   *  instead of staying contained here. */
+  useEffect(() => {
+    const container = previewContainerRef.current;
+    if (!container) return;
+    const handleWheel = (e: WheelEvent) => {
+      e.preventDefault();
+      setZoom((z) => zoomClamp(z + (e.deltaY > 0 ? -0.15 : 0.15)));
+    };
+    container.addEventListener('wheel', handleWheel, { passive: false });
+    return () => container.removeEventListener('wheel', handleWheel);
+  }, []);
 
   /** Render the preview buffer, then paint it. */
   const renderPreview = useCallback(async () => {
@@ -302,6 +320,9 @@ export const HDRIPreviewPanel: React.FC = () => {
   };
 
   const handleCanvasPointerDown = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    // Right button is reserved for panning (handled on the container) - only
+    // the left button places a light/shape.
+    if (e.button !== 0) return;
     if (selectedLight) {
       const uv = uvFromEvent(e);
       if (!uv) return;
@@ -341,10 +362,47 @@ export const HDRIPreviewPanel: React.FC = () => {
     }
   };
 
+  /** Right-click-hold-drag pans the preview by scrolling its container -
+   *  only meaningful once zoomed in past the point the canvas overflows the
+   *  frame, but harmless (no-op) otherwise. */
+  const handleContainerPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (e.button !== 2) return;
+    e.preventDefault();
+    panRef.current = { active: true, lastX: e.clientX, lastY: e.clientY };
+    try {
+      (e.currentTarget as HTMLDivElement).setPointerCapture(e.pointerId);
+    } catch {
+      // ignore - can happen for a pointer the browser never registered as active
+    }
+  };
+
+  const handleContainerPointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (!panRef.current.active) return;
+    const container = previewContainerRef.current;
+    if (!container) return;
+    const dx = e.clientX - panRef.current.lastX;
+    const dy = e.clientY - panRef.current.lastY;
+    panRef.current.lastX = e.clientX;
+    panRef.current.lastY = e.clientY;
+    container.scrollLeft -= dx;
+    container.scrollTop -= dy;
+  };
+
+  const handleContainerPointerUp = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (!panRef.current.active) return;
+    panRef.current.active = false;
+    try {
+      (e.currentTarget as HTMLDivElement).releasePointerCapture(e.pointerId);
+    } catch {
+      // ignore - capture may already be released
+    }
+  };
+
   return (
     <div style={{ display: 'flex', height: '100%', gap: 12, padding: 10, overflow: 'auto' }}>
       {/* Preview canvas */}
       <div
+        ref={previewContainerRef}
         style={{
           flex: 1,
           display: 'flex',
@@ -357,11 +415,11 @@ export const HDRIPreviewPanel: React.FC = () => {
           minWidth: 0,
           overflow: 'auto',
         }}
-        onWheel={(e) => {
-          if (!e.ctrlKey && !e.metaKey) return;
-          e.preventDefault();
-          setZoom((z) => zoomClamp(z + (e.deltaY > 0 ? -0.15 : 0.15)));
-        }}
+        onPointerDown={handleContainerPointerDown}
+        onPointerMove={handleContainerPointerMove}
+        onPointerUp={handleContainerPointerUp}
+        onPointerLeave={handleContainerPointerUp}
+        onContextMenu={(e) => e.preventDefault()}
       >
         <canvas
           ref={canvasRef}
