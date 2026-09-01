@@ -18,6 +18,10 @@ interface LightsState {
   toggleLightVisibility: (id: string) => void;
   toggleLightSolo: (id: string) => void;
   reorderLights: (startIndex: number, endIndex: number) => void;
+  /** Reorder the whole lights array to match the given id sequence - used to
+   *  keep the unified cross-type Layers panel and this store's own array
+   *  order in sync after a drag that mixes lights and shapes together. */
+  setLightsOrder: (ids: string[]) => void;
   setCollectionFilter: (collectionId: string | null) => void;
   addCollection: (name: string) => void;
   removeCollection: (id: string) => void;
@@ -127,6 +131,21 @@ export const useLightsStore = create<LightsState>((set, get) => ({
       const [removed] = newLights.splice(startIndex, 1);
       newLights.splice(endIndex, 0, removed);
       return { lights: newLights };
+    });
+  },
+
+  setLightsOrder: (ids) => {
+    set((state) => {
+      const byId = new Map(state.lights.map((l) => [l.id, l]));
+      const ordered: Light[] = [];
+      for (const id of ids) {
+        const l = byId.get(id);
+        if (l) { ordered.push(l); byId.delete(id); }
+      }
+      for (const l of state.lights) {
+        if (byId.has(l.id)) ordered.push(l);
+      }
+      return { lights: ordered };
     });
   },
 

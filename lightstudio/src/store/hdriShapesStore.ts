@@ -17,6 +17,12 @@ interface HDRIShapesStore {
   updateShape: (id: string, updates: Partial<Omit<HDRIShape, 'id'>>) => void;
   /** Move a shape's paint order up (later/top) or down (earlier/bottom) by one. */
   reorderShape: (id: string, direction: 'up' | 'down') => void;
+  /** Reorder the whole shapes array to match the given id sequence - used to
+   *  keep the unified cross-type layer list (Layers panel) and each store's
+   *  own array order in sync after a drag that mixes shapes and lights.
+   *  Ids that aren't shapes are ignored; any shape missing from `ids` keeps
+   *  its relative position appended at the end. */
+  setShapesOrder: (ids: string[]) => void;
   duplicateShape: (id: string) => void;
   clearShapes: () => void;
   setLivePreview: (on: boolean) => void;
@@ -57,6 +63,23 @@ export const useHDRIShapesStore = create<HDRIShapesStore>((set, get) => ({
       const next = [...s.shapes];
       [next[idx], next[targetIdx]] = [next[targetIdx], next[idx]];
       return { shapes: next };
+    });
+  },
+
+  setShapesOrder: (ids) => {
+    set((s) => {
+      const byId = new Map(s.shapes.map((sh) => [sh.id, sh]));
+      const ordered: HDRIShape[] = [];
+      for (const id of ids) {
+        const sh = byId.get(id);
+        if (sh) { ordered.push(sh); byId.delete(id); }
+      }
+      // Anything not mentioned (shouldn't normally happen) keeps its old
+      // relative order, appended after the explicitly-ordered ones.
+      for (const sh of s.shapes) {
+        if (byId.has(sh.id)) ordered.push(sh);
+      }
+      return { shapes: ordered };
     });
   },
 

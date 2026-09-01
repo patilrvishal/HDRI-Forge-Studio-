@@ -169,6 +169,7 @@ export const LightListPanel: React.FC = () => {
   const toggleLightSolo = useLightsStore((s) => s.toggleLightSolo);
   const updateLight = useLightsStore((s) => s.updateLight);
   const reorderLights = useLightsStore((s) => s.reorderLights);
+  const setLightsOrder = useLightsStore((s) => s.setLightsOrder);
   const setCollectionFilter = useLightsStore((s) => s.setCollectionFilter);
 
   // HDRI Shapes and Custom HDRI assets live in the SAME unified layer list as
@@ -184,7 +185,7 @@ export const LightListPanel: React.FC = () => {
   const duplicateShape = useHDRIShapesStore((s) => s.duplicateShape);
   const selectShapeRaw = useHDRIShapesStore((s) => s.selectShape);
   const updateShape = useHDRIShapesStore((s) => s.updateShape);
-  const reorderShape = useHDRIShapesStore((s) => s.reorderShape);
+  const setShapesOrder = useHDRIShapesStore((s) => s.setShapesOrder);
 
   const hdriAssets = useHDRIAssetStore((s) => s.assets);
   const selectedHDRIAssetId = useHDRIAssetStore((s) => s.selectedAssetId);
@@ -192,6 +193,11 @@ export const LightListPanel: React.FC = () => {
   const removeHDRIAsset = useHDRIAssetStore((s) => s.removeAsset);
   const updateHDRIAsset = useHDRIAssetStore((s) => s.updateAsset);
   const setEnvironment = useSceneStore((s) => s.setEnvironment);
+
+  const filteredLights = useMemo(() => {
+    if (!collectionFilter) return lights;
+    return lights.filter((l) => l.collectionId === collectionFilter);
+  }, [lights, collectionFilter]);
 
   const selectLight = useCallback(
     (id: string | null) => {
@@ -227,10 +233,70 @@ export const LightListPanel: React.FC = () => {
   const [renameValue, setRenameValue] = useState('');
   const renameInputRef = useRef<HTMLInputElement>(null);
 
+  // Unified cross-type layer order - lights and shapes are stored in
+  // separate stores, each with their own independent array order, so
+  // reordering only ever moved an item relative to others of the SAME
+  // type. This is the single combined order the panel actually renders and
+  // drags against; on every drop it's split back into a per-type id
+  // sequence and pushed into each store via setLightsOrder/setShapesOrder,
+  // so a shape's real paint order stays correct even when lights are
+  // interleaved between shapes in the list.
+  const [layerOrder, setLayerOrder] = useState<string[]>([]);
+  useEffect(() => {
+    setLayerOrder((prev) => {
+      const known = new Set(prev);
+      const live = new Set([...shapes.map((s) => s.id), ...filteredLights.map((l) => l.id)]);
+      // Drop ids for deleted items, keep the rest in their existing order.
+      const kept = prev.filter((id) => live.has(id));
+      // New items land at the top of the list (index 0), matching
+      // Photoshop's "new layer appears above the current selection".
+      const added = [...shapes, ...filteredLights].map((x) => x.id).filter((id) => !known.has(id));
+      if (added.length === 0 && kept.length === prev.length) return prev;
+      return [...added, ...kept];
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [shapes, filteredLights]);
+
+  const combinedLayers = useMemo(() => {
+    const shapeById = new Map(shapes.map((s) => [s.id, s]));
+    const lightById = new Map(filteredLights.map((l) => [l.id, l]));
+    return layerOrder
+      .map((id) => {
+        const shape = shapeById.get(id);
+        if (shape) return { kind: 'shape' as const, shape };
+        const light = lightById.get(id);
+        if (light) return { kind: 'light' as const, light };
+        return null;
+      })
+      .filter((x): x is NonNullable<typeof x> => x !== null);
+  }, [layerOrder, shapes, filteredLights]);
+
+  const commitLayerOrder = useCallback(
+    (next: string[]) => {
+      setLayerOrder(next);
+      const shapeIds = new Set(shapes.map((s) => s.id));
+      const lightIds = new Set(filteredLights.map((l) => l.id));
+      // `next` is top-of-list-first (display order). Shapes' own store array
+      // is bottom-of-stack-first (paint order, index 0 painted first/lowest),
+      // the exact opposite - reverse before committing so "drag to the top
+      // of the panel" really does mean "paints last / sits on top".
+      setShapesOrder(next.filter((id) => shapeIds.has(id)).reverse());
+      setLightsOrder(next.filter((id) => lightIds.has(id)));
+    },
+    [shapes, filteredLights, setShapesOrder, setLightsOrder],
+  );
+
   // "+ New Layer" popup - a single entry point matching Photoshop's "create
   // new layer" button, expanding into what KIND of layer to create.
   const [addMenuOpen, setAddMenuOpen] = useState(false);
   const [addMenuSub, setAddMenuSub] = useState<'root' | 'light' | 'shape'>('root');
+  // Viewport-space anchor for the popup, in the same left/bottom-from-edge
+  // coordinate space `.context-menu`'s `position: fixed` expects - computed
+  // from the button's own rect rather than a CSS-relative offset, so the
+  // menu is never clipped by this panel's own overflow/height (which is
+  // what silently cut the light-type submenu down to only its last few
+  // entries before).
+  const [addMenuAnchor, setAddMenuAnchor] = useState<{ left: number; top: number; maxHeight: number } | null>(null);
   const addMenuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -244,11 +310,6 @@ export const LightListPanel: React.FC = () => {
     document.addEventListener('mousedown', onDocClick);
     return () => document.removeEventListener('mousedown', onDocClick);
   }, [addMenuOpen]);
-
-  const filteredLights = useMemo(() => {
-    if (!collectionFilter) return lights;
-    return lights.filter((l) => l.collectionId === collectionFilter);
-  }, [lights, collectionFilter]);
 
   const handleAddLight = useCallback(
     (templateKey?: string) => {
@@ -315,6 +376,10 @@ export const LightListPanel: React.FC = () => {
     [handleFinishRename],
   );
 
+  // Generic drag-reorder across the WHOLE combined layer list (lights and
+  // shapes freely interleaved), not just within one type - indices here are
+  // positions in `combinedLayers`/`layerOrder`, not into either underlying
+  // store's own array.
   const handleDragStart = useCallback((index: number) => setDragState({ dragIndex: index, overIndex: index }), []);
   const handleDragOver = useCallback(
     (e: React.DragEvent, index: number) => {
@@ -327,10 +392,15 @@ export const LightListPanel: React.FC = () => {
   );
   const handleDrop = useCallback(
     (index: number) => {
-      if (dragState && dragState.dragIndex !== index) reorderLights(dragState.dragIndex, index);
+      if (dragState && dragState.dragIndex !== index) {
+        const next = [...layerOrder];
+        const [moved] = next.splice(dragState.dragIndex, 1);
+        next.splice(index, 0, moved);
+        commitLayerOrder(next);
+      }
       setDragState(null);
     },
-    [dragState, reorderLights],
+    [dragState, layerOrder, commitLayerOrder],
   );
   const handleDragEnd = useCallback(() => setDragState(null), []);
 
@@ -424,81 +494,70 @@ export const LightListPanel: React.FC = () => {
           </>
         )}
 
-        {/* --- Shape layers (top of list = top of paint stack, Photoshop convention) --- */}
-        {shapes.length > 0 && (
+        {/* --- Shapes + Lights, freely interleaved in ONE draggable list.
+              Top of list = top of shape paint stack (Photoshop convention);
+              a light's position here is purely presentational (a light
+              always adds its radiance regardless of list position) but
+              still drags freely to anywhere, exactly like any other layer. --- */}
+        {combinedLayers.length > 0 && (
           <>
-            <SectionLabel count={shapes.length}>Shapes</SectionLabel>
+            <SectionLabel count={combinedLayers.length}>Shapes &amp; Lights</SectionLabel>
             <div className="light-list" onClick={() => setShapeContextMenu(null)}>
-              {[...shapes].reverse().map((shape) => {
-                const index = shapes.indexOf(shape);
-                const isSelected = shape.id === selectedShapeId;
-                return (
-                  <div
-                    key={shape.id}
-                    className={`light-list-item ${isSelected ? 'selected' : ''} ${!shape.visible ? 'dimmed' : ''}`}
-                    onClick={(e) => { e.stopPropagation(); selectShape(shape.id); }}
-                    onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); setShapeContextMenu({ x: e.clientX, y: e.clientY, shapeId: shape.id }); }}
-                  >
-                    <div className="light-drag-handle" title="Reorder">
-                      <svg width="8" height="12" viewBox="0 0 8 12" fill="currentColor" opacity="0.35">
-                        <circle cx="2" cy="2" r="1" /><circle cx="6" cy="2" r="1" />
-                        <circle cx="2" cy="6" r="1" /><circle cx="6" cy="6" r="1" />
-                        <circle cx="2" cy="10" r="1" /><circle cx="6" cy="10" r="1" />
-                      </svg>
-                    </div>
-                    <div className="light-type-icon" style={{ color: shape.color }}>{SHAPE_TYPE_ICONS[shape.type]}</div>
-                    <div className="light-item-name">
-                      <span className="light-name-text">{shape.name}</span>
-                      <span className="light-type-label">{shape.type}</span>
-                    </div>
-                    <div className="light-item-actions">
-                      <button
-                        className="btn-icon"
-                        style={{ width: 18, height: 18, opacity: shape.locked ? 1 : 0.3 }}
-                        onClick={(e) => { e.stopPropagation(); updateShape(shape.id, { locked: !shape.locked }); }}
-                        title={shape.locked ? 'Unlock position' : 'Lock position'}
-                      >
-                        <LockIcon locked={shape.locked} />
-                      </button>
-                      <button
-                        className={`btn-icon ${shape.visible ? '' : 'dimmed'}`}
-                        style={{ width: 18, height: 18 }}
-                        onClick={(e) => { e.stopPropagation(); updateShape(shape.id, { visible: !shape.visible }); }}
-                        title={shape.visible ? 'Hide shape' : 'Show shape'}
-                      >
-                        <EyeIcon visible={shape.visible} />
-                      </button>
-                      <button
-                        className="btn-icon"
-                        style={{ width: 18, height: 18, fontSize: 9 }}
-                        onClick={(e) => { e.stopPropagation(); reorderShape(shape.id, 'up'); }}
-                        disabled={index === shapes.length - 1}
-                        title="Move up (paints later / on top)"
-                      >{'↑'}</button>
-                      <button
-                        className="btn-icon"
-                        style={{ width: 18, height: 18, fontSize: 9 }}
-                        onClick={(e) => { e.stopPropagation(); reorderShape(shape.id, 'down'); }}
-                        disabled={index === 0}
-                        title="Move down"
-                      >{'↓'}</button>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </>
-        )}
-
-        {/* --- Light layers --- */}
-        {filteredLights.length > 0 && (
-          <>
-            <SectionLabel count={filteredLights.length}>Lights</SectionLabel>
-            <div className="light-list">
-              {filteredLights.map((light, index) => {
-                const isSelected = light.id === selectedLightId;
+              {combinedLayers.map((item, index) => {
                 const isDragging = dragState !== null && dragState.dragIndex === index;
                 const isDragOver = dragState !== null && dragState.overIndex === index && dragState.dragIndex !== index;
+
+                if (item.kind === 'shape') {
+                  const shape = item.shape;
+                  const isSelected = shape.id === selectedShapeId;
+                  return (
+                    <div
+                      key={shape.id}
+                      className={`light-list-item ${isSelected ? 'selected' : ''} ${isDragging ? 'dragging' : ''} ${isDragOver ? 'drag-over' : ''} ${!shape.visible ? 'dimmed' : ''}`}
+                      draggable
+                      onClick={(e) => { e.stopPropagation(); selectShape(shape.id); }}
+                      onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); setShapeContextMenu({ x: e.clientX, y: e.clientY, shapeId: shape.id }); }}
+                      onDragStart={() => handleDragStart(index)}
+                      onDragOver={(e) => handleDragOver(e, index)}
+                      onDrop={() => handleDrop(index)}
+                      onDragEnd={handleDragEnd}
+                    >
+                      <div className="light-drag-handle" title="Drag to reorder">
+                        <svg width="8" height="12" viewBox="0 0 8 12" fill="currentColor" opacity="0.35">
+                          <circle cx="2" cy="2" r="1" /><circle cx="6" cy="2" r="1" />
+                          <circle cx="2" cy="6" r="1" /><circle cx="6" cy="6" r="1" />
+                          <circle cx="2" cy="10" r="1" /><circle cx="6" cy="10" r="1" />
+                        </svg>
+                      </div>
+                      <div className="light-type-icon" style={{ color: shape.color }}>{SHAPE_TYPE_ICONS[shape.type]}</div>
+                      <div className="light-item-name">
+                        <span className="light-name-text">{shape.name}</span>
+                        <span className="light-type-label">{shape.type}</span>
+                      </div>
+                      <div className="light-item-actions">
+                        <button
+                          className="btn-icon"
+                          style={{ width: 18, height: 18, opacity: shape.locked ? 1 : 0.3 }}
+                          onClick={(e) => { e.stopPropagation(); updateShape(shape.id, { locked: !shape.locked }); }}
+                          title={shape.locked ? 'Unlock position' : 'Lock position'}
+                        >
+                          <LockIcon locked={shape.locked} />
+                        </button>
+                        <button
+                          className={`btn-icon ${shape.visible ? '' : 'dimmed'}`}
+                          style={{ width: 18, height: 18 }}
+                          onClick={(e) => { e.stopPropagation(); updateShape(shape.id, { visible: !shape.visible }); }}
+                          title={shape.visible ? 'Hide shape' : 'Show shape'}
+                        >
+                          <EyeIcon visible={shape.visible} />
+                        </button>
+                      </div>
+                    </div>
+                  );
+                }
+
+                const light = item.light;
+                const isSelected = light.id === selectedLightId;
                 return (
                   <div
                     key={light.id}
@@ -565,7 +624,23 @@ export const LightListPanel: React.FC = () => {
           <button
             className="btn-sm"
             style={{ flex: 1, justifyContent: 'center', display: 'flex', alignItems: 'center', gap: 4 }}
-            onClick={(e) => { e.stopPropagation(); setAddMenuOpen((o) => !o); setAddMenuSub('root'); }}
+            onClick={(e) => {
+              e.stopPropagation();
+              if (!addMenuOpen) {
+                const rect = e.currentTarget.getBoundingClientRect();
+                // Open upward from the button, but never let the menu's TOP
+                // go above the viewport - clamp its max height to whatever
+                // room actually exists above the button and let it scroll
+                // internally past that, instead of the whole menu (and
+                // everything before whatever didn't fit) silently vanishing
+                // off the top edge.
+                const available = rect.top - 12;
+                const maxHeight = Math.max(120, Math.min(360, available));
+                setAddMenuAnchor({ left: rect.left, top: Math.max(8, rect.top - maxHeight - 4), maxHeight });
+              }
+              setAddMenuOpen((o) => !o);
+              setAddMenuSub('root');
+            }}
           >
             <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.5">
               <path d="M5 1v8M1 5h8" />
@@ -574,10 +649,10 @@ export const LightListPanel: React.FC = () => {
           </button>
         </div>
 
-        {addMenuOpen && (
+        {addMenuOpen && addMenuAnchor && (
           <div
             className="context-menu"
-            style={{ position: 'absolute', left: 6, bottom: '100%', marginBottom: 4, minWidth: 170 }}
+            style={{ left: addMenuAnchor.left, top: addMenuAnchor.top, minWidth: 170, maxHeight: addMenuAnchor.maxHeight, overflowY: 'auto' }}
             onClick={(e) => e.stopPropagation()}
           >
             {addMenuSub === 'root' && (
