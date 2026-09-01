@@ -562,18 +562,32 @@ export const Viewport: React.FC<ViewportProps> = ({ sceneManagerRef, onScreensho
     sm.scene.backgroundIntensity = environment.intensity * gammaCorrectedExposure;
   }, [environment.intensity, renderSettings.exposure, sceneManagerRef]);
 
-  // Sync HDRI Shapes onto the live 3D viewport when Live Preview is on.
-  // Runs AFTER the other environment effects above so it wins the last write
-  // to scene.background/environment - shapes are meant to override whatever
-  // preset/HDRI/gradient is active underneath, exactly like the HDRI Preview
-  // panel's own compositing. Turning Live Preview off leaves the viewport
-  // exactly as the other effects already set it (no extra cleanup needed,
-  // since they run again independently whenever their own deps change).
+  // Sync HDRI Shapes onto the live 3D viewport when Live Preview is on -
+  // but ONLY when there's no real HDRI/preset actually loaded.
+  //
+  // compositeShapesCanvas() paints shapes onto a flat gradient-or-near-black
+  // base - it has no way to include a real loaded HDRI's own pixels (those
+  // are a separate float/HDR texture, not something a 2D canvas can draw),
+  // so using it as the WHOLE new environment/background here was silently
+  // discarding whatever custom HDRI or preset was active the moment any
+  // shape existed with Live Preview on - the car (and everything else)
+  // would go dark/matte and the backdrop would collapse to just the shape
+  // on a near-black field, which read as the scene getting "isolated" down
+  // to only that one shape instead of shapes layering on top of it.
+  //
+  // Shapes still work correctly as an overlay in the HDRI Preview panel and
+  // the exported file (HDRIExporter/HDRIPreviewPanel push them as an
+  // ADDITIONAL EnvLayer alongside the real HDRI's own layer, not a
+  // replacement) - this effect now only takes over the live 3D viewport
+  // when building a synthetic environment from scratch (no real HDRI to
+  // preserve), matching how Gradient Background already behaves.
   useEffect(() => {
     const sm = sceneManagerRef.current;
     const el = envLoaderRef.current;
     if (!sm || !el) return;
     if (!hdriLivePreview || hdriShapes.length === 0) return;
+    const hasRealEnvironment = environment.presetId !== 'none' && environment.presetId !== 'none ';
+    if (hasRealEnvironment) return;
 
     const gb = environment.gradientBackground?.enabled ? environment.gradientBackground : null;
     const canvas = compositeShapesCanvas(hdriShapes, gb);
@@ -586,7 +600,7 @@ export const Viewport: React.FC<ViewportProps> = ({ sceneManagerRef, onScreensho
     sm.scene.background = canvasTex;
     sm.scene.backgroundRotation = new THREE.Euler(0, 0, 0);
     sm.scene.environmentRotation = new THREE.Euler(0, 0, 0);
-  }, [hdriShapes, hdriLivePreview, environment.gradientBackground, environment.intensity, sceneManagerRef, envLoaderRef]);
+  }, [hdriShapes, hdriLivePreview, environment.gradientBackground, environment.intensity, environment.presetId, sceneManagerRef, envLoaderRef]);
 
   // Restore model from scene file (triggered when _pendingModelDataBase64 is set)
   useEffect(() => {
