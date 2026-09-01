@@ -6,9 +6,14 @@ interface GizmoToolbarProps {
   onModeChange: (mode: GizmoMode) => void;
   /** Scale is meaningless for point/spot lights - greyed out when false. */
   scaleAllowed: boolean;
-  /** Nothing selected: the whole bar is inert. */
+  /** Nothing at all selected (no light, no HDRI shape): the whole bar is inert. */
   disabled: boolean;
-  /** LightPaint: drag on the model to place the light by reflection. */
+  /** Move/Rotate/Scale need a real 3D transform - HDRI shapes don't have one,
+   *  they only have equirect u/v, so these three stay light-only even when
+   *  a shape is selected and the bar itself is otherwise active. */
+  transformDisabled: boolean;
+  /** LightPaint: drag on the model to aim a light's reflection, or wrap an
+   *  HDRI shape onto the model the same way - works for either selection. */
   paintActive: boolean;
   onPaintToggle: () => void;
 }
@@ -24,6 +29,7 @@ export const GizmoToolbar: React.FC<GizmoToolbarProps> = ({
   onModeChange,
   scaleAllowed,
   disabled,
+  transformDisabled,
   paintActive,
   onPaintToggle,
 }) => {
@@ -49,7 +55,7 @@ export const GizmoToolbar: React.FC<GizmoToolbarProps> = ({
     >
       {TOOLS.map((tool) => {
         const isActive = mode === tool.mode;
-        const isDisabled = tool.mode === 'scale' && !scaleAllowed;
+        const isDisabled = transformDisabled || (tool.mode === 'scale' && !scaleAllowed);
 
         return (
           <button

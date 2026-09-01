@@ -58,6 +58,8 @@ export const Viewport: React.FC<ViewportProps> = ({ sceneManagerRef, onScreensho
   const environment = useSceneStore((s) => s.environment);
   const hdriShapes = useHDRIShapesStore((s) => s.shapes);
   const hdriLivePreview = useHDRIShapesStore((s) => s.livePreview);
+  const hdriSelectedShapeId = useHDRIShapesStore((s) => s.selectedShapeId);
+  const updateHDRIShape = useHDRIShapesStore((s) => s.updateShape);
   const renderSettings = useSceneStore((s) => s.renderSettings);
   const setModel = useSceneStore((s) => s.setModel);
   const setExposure = useSceneStore((s) => s.setExposure);
@@ -899,7 +901,8 @@ export const Viewport: React.FC<ViewportProps> = ({ sceneManagerRef, onScreensho
     const container = containerRef.current;
     const sm = sceneManagerRef.current;
     const lightId = useLightsStore.getState().selectedLightId;
-    if (!container || !sm || !lightId) return;
+    const shapeId = useHDRIShapesStore.getState().selectedShapeId;
+    if (!container || !sm || (!lightId && !shapeId)) return;
 
     const rect = container.getBoundingClientRect();
     const mouse = new THREE.Vector2(
@@ -923,6 +926,28 @@ export const Viewport: React.FC<ViewportProps> = ({ sceneManagerRef, onScreensho
     });
 
     const hits = raycaster.intersectObjects(meshes, false);
+
+    // An HDRI shape has no 3D position - it only lives on the equirect map -
+    // so instead of solving for where a light must sit, mirror the camera's
+    // view ray off the clicked surface and place the shape at the reflected
+    // direction on the sphere. That's the exact same reverse-reflection math
+    // real-time renderers use to look up an environment map for a mirror
+    // surface, so a shape "wrapped" this way lands its reflection precisely
+    // where you clicked, the same way LightPaint does for a real light.
+    if (!lightId && shapeId) {
+      const hit = hits[0];
+      if (!hit) return;
+      const N = smoothNormalAt(hit);
+      const incident = hit.point.clone().sub(sm.camera.position).normalize();
+      const R = incident.clone().sub(N.clone().multiplyScalar(2 * incident.dot(N))).normalize();
+
+      let u = Math.atan2(R.z, R.x) / (2 * Math.PI) + 0.5;
+      u = ((u % 1) + 1) % 1;
+      const v = Math.asin(Math.max(-1, Math.min(1, R.y))) / Math.PI + 0.5;
+
+      updateHDRIShape(shapeId, { u, v });
+      return;
+    }
 
     // Rim ignores the model entirely - it rides the camera ray out past the scene.
     if (paintMode !== 'rim' && hits.length === 0) return;
@@ -980,7 +1005,7 @@ export const Viewport: React.FC<ViewportProps> = ({ sceneManagerRef, onScreensho
       aimTarget: { x: P.x, y: P.y, z: P.z },
       rotation: { ...l.transform.rotation, enabled: false },
     } as never);
-  }, [paintMode, distanceScale, containerRef, sceneManagerRef]);
+  }, [paintMode, distanceScale, containerRef, sceneManagerRef, updateHDRIShape]);
 
   // Pointer handling lives on the container so no JSX surgery is needed.
   useEffect(() => {
@@ -1180,7 +1205,8 @@ export const Viewport: React.FC<ViewportProps> = ({ sceneManagerRef, onScreensho
         mode={gizmoMode}
         onModeChange={setGizmoMode}
         scaleAllowed={scaleAllowed}
-        disabled={!selectedLightId}
+        disabled={!selectedLightId && !hdriSelectedShapeId}
+        transformDisabled={!selectedLightId}
         paintActive={paintActive}
         onPaintToggle={() => { setPaintActive((p) => !p); setGizmoMode(null); }}
       />
