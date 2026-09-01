@@ -14,6 +14,7 @@ import {
   type EnvLayer,
 } from '../../three/HDRIExporter';
 import { compositeShapesCanvas, shapesCanvasToEnvLayer } from '../../three/HDRIShapesLayer';
+import { promptForCustomHDRI } from '../../utils/loadCustomHDRI';
 
 /** Preview is always rendered small so it stays interactive. */
 const PREVIEW_W = 512;
@@ -301,6 +302,21 @@ export const HDRIPreviewPanel: React.FC = () => {
       {/* Controls */}
       <div style={{ width: 190, display: 'flex', flexDirection: 'column', gap: 10, flexShrink: 0, overflowY: 'auto', overflowX: 'hidden', maxHeight: '100%', paddingRight: 4 }}>
         <div className="section-header">HDRI Preview</div>
+
+        {/* Custom HDRI - loads a .hdr/.hdri/.exr and activates it as the
+            scene's environment. Same flow as the Environment panel's
+            "+ Add HDRI" and the Create menu's "Custom HDRI..." entry. */}
+        <button
+          className="btn-sm"
+          onClick={() => promptForCustomHDRI()}
+          style={{ width: '100%', fontSize: 10, justifyContent: 'center', display: 'flex', alignItems: 'center', gap: 4 }}
+        >
+          <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.2">
+            <circle cx="5" cy="5" r="4" />
+            <path d="M5 1v8M1 5h8" opacity="0.5" />
+          </svg>
+          Custom HDRI
+        </button>
 
         {/* Live preview toggle — off by default to keep the app responsive */}
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '2px 0' }}>

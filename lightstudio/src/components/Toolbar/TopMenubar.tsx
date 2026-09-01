@@ -9,6 +9,7 @@ import { useHistoryStore } from '../../store/historyStore';
 import { SceneExporter } from '../../three/SceneExporter';
 import { exportSceneAsHDR, exportSceneAsEXR } from '../../three/HDRIExporter';
 import type { SceneManager } from '../../three/engine';
+import { promptForCustomHDRI } from '../../utils/loadCustomHDRI';
 
 interface MenuItem {
   label: string;
@@ -210,6 +211,10 @@ const MENU_DEFINITIONS = (
         circle: { label: 'Circle', action: () => useHDRIShapesStore.getState().addShape('circle') },
         gradientStrip: { label: 'Gradient Strip', action: () => useHDRIShapesStore.getState().addShape('gradient-strip') },
       },
+    },
+    customHDRI: {
+      label: 'Custom HDRI...',
+      action: () => promptForCustomHDRI(),
     },
     camera: {
       label: 'Camera',

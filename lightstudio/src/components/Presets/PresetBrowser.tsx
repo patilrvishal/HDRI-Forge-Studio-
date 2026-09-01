@@ -5,10 +5,6 @@ import { presetToLights } from '../../types/Preset';
 import type { Preset } from '../../types/Preset';
 import { renderPresetThumbnail } from '../../three/PresetThumbnailRenderer';
 import { useHDRIAssetStore } from '../../store/hdriAssetStore';
-import { useSceneStore } from '../../store/sceneStore';
-import { setRawHDRIData } from '../../store/hdriDataStore';
-
-const HDRI_EXTENSIONS = /\.(hdr|hdri|exr)$/i;
 
 interface PresetBrowserProps {
   /** Optional ref to a MaterialPreview's renderThumbnail function for generating thumbnails */
@@ -51,16 +47,13 @@ export const PresetBrowser: React.FC<PresetBrowserProps> = ({ onGenerateThumbnai
   const setLightsFromPreset = useLightsStore((s) => s.setLightsFromPreset);
   const selectLight = useLightsStore((s) => s.selectLight);
 
-  // Custom HDRI environment imports (Custom tab only)
-  const hdriAssets = useHDRIAssetStore((s) => s.assets);
+  // Custom HDRI assets are still persisted from here on Save (see
+  // handleSavePreset below), even though loading/browsing them moved to
+  // src/utils/loadCustomHDRI.ts (Create menu + HDRI Preview panel) and
+  // EnvironmentAssetsPanel (Env tab).
   const hdriDbLoaded = useHDRIAssetStore((s) => s.dbLoaded);
-  const hdriSelectedId = useHDRIAssetStore((s) => s.selectedAssetId);
   const loadHDRIsFromDB = useHDRIAssetStore((s) => s.loadFromDB);
   const saveHDRIsToDB = useHDRIAssetStore((s) => s.saveAllToDB);
-  const selectHDRIAsset = useHDRIAssetStore((s) => s.selectAsset);
-  const removeHDRIAsset = useHDRIAssetStore((s) => s.removeAsset);
-  const setEnvironment = useSceneStore((s) => s.setEnvironment);
-  const [importingHDRI, setImportingHDRI] = useState(false);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [toast, setToast] = useState<string | null>(null);
@@ -229,31 +222,13 @@ export const PresetBrowser: React.FC<PresetBrowserProps> = ({ onGenerateThumbnai
     [presets, deletePresetFromDB, showToast],
   );
 
-  // Import presets (JSON) or, on the Custom tab, custom HDRI environment
-  // files (.hdr/.hdri/.exr) — imported HDRIs are staged in memory and
-  // become active immediately; click Save to persist them.
+  // Import presets (JSON). Custom HDRI loading moved to the Create menu's
+  // "Custom HDRI..." entry and the HDRI Preview panel's "Custom HDRI"
+  // button (both use src/utils/loadCustomHDRI.ts), so this only handles
+  // preset JSON now.
   const handleImport = useCallback(async () => {
     const file = fileInputRef.current?.files?.[0];
     if (!file) return;
-
-    if (HDRI_EXTENSIONS.test(file.name)) {
-      setImportingHDRI(true);
-      try {
-        const arrayBuffer = await file.arrayBuffer();
-        const asset = useHDRIAssetStore.getState().addAsset(file, arrayBuffer);
-        if (asset.blobUrl) {
-          setEnvironment({ hdri: asset.blobUrl, presetId: '__custom__', showBackground: true });
-        }
-        setRawHDRIData(arrayBuffer, file.name);
-        showToast(`"${asset.name}" imported — click Save to keep it`);
-      } catch {
-        showToast('Invalid HDRI file');
-      } finally {
-        setImportingHDRI(false);
-        if (fileInputRef.current) fileInputRef.current.value = '';
-      }
-      return;
-    }
 
     try {
       const count = await importPresetsFromFile(file);
@@ -262,7 +237,7 @@ export const PresetBrowser: React.FC<PresetBrowserProps> = ({ onGenerateThumbnai
       showToast('Invalid preset file');
     }
     if (fileInputRef.current) fileInputRef.current.value = '';
-  }, [importPresetsFromFile, showToast, setEnvironment]);
+  }, [importPresetsFromFile, showToast]);
 
   // Click handling with double-click detection
   const clickTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -344,74 +319,10 @@ export const PresetBrowser: React.FC<PresetBrowserProps> = ({ onGenerateThumbnai
         className="panel-body"
         style={{ flex: 1, padding: '0 6px', overflowY: 'auto' }}
       >
-        {/* Custom HDRI environment imports — Custom tab only. Imported via
-            the Import button above; not persisted until Save is clicked. */}
-        {activeCategory === 'custom' && hdriAssets.length > 0 && (
-          <>
-            <div className="section-header" style={{ margin: '4px 0 2px' }}>
-              Custom HDRIs ({hdriAssets.length})
-            </div>
-            <div className="preset-grid" style={{ '--preset-thumb-size': `${thumbSize}px`, marginBottom: 8 } as React.CSSProperties}>
-              {hdriAssets.map((asset) => (
-                <div
-                  key={asset.id}
-                  className={`preset-card ${asset.id === hdriSelectedId ? 'previewing' : ''}`}
-                  onClick={() => {
-                    selectHDRIAsset(asset.id);
-                    if (asset.blobUrl) {
-                      setEnvironment({ hdri: asset.blobUrl, presetId: '__custom__', showBackground: true });
-                    }
-                  }}
-                  title={asset.fileName}
-                  style={{ position: 'relative' }}
-                >
-                  <div className="pc-inner" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                    <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1" opacity="0.55">
-                      <circle cx="12" cy="12" r="10" />
-                      <circle cx="12" cy="12" r="4" opacity="0.3" />
-                      <path d="M12 2v20M2 12h20" opacity="0.3" />
-                    </svg>
-                    {asset.active && (
-                      <span
-                        style={{
-                          position: 'absolute', top: 4, left: 4, fontSize: 7, padding: '1px 4px',
-                          borderRadius: 3, background: 'var(--accent)', color: '#fff', fontWeight: 600, letterSpacing: '0.3px',
-                        }}
-                      >
-                        ACTIVE
-                      </span>
-                    )}
-                    <button
-                      className="pc-del"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        removeHDRIAsset(asset.id);
-                        showToast(`Removed "${asset.name}"`);
-                      }}
-                      title="Remove HDRI"
-                      aria-label={`Remove ${asset.name}`}
-                    >
-                      <svg width="8" height="8" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="2">
-                        <path d="M1 1l10 10M11 1L1 11" />
-                      </svg>
-                    </button>
-                  </div>
-                  <div className="pc-name">{asset.name}</div>
-                  <div style={{ fontSize: 8, color: 'var(--text-dim)', padding: '0 4px 3px', textAlign: 'center' }}>
-                    HDRI Environment
-                  </div>
-                </div>
-              ))}
-            </div>
-          </>
-        )}
-
         {filteredPresets.length === 0 ? (
-          (activeCategory !== 'custom' || hdriAssets.length === 0) && (
-            <div className="preset-empty">
-              {searchQuery ? 'No matching presets' : 'No presets in this category'}
-            </div>
-          )
+          <div className="preset-empty">
+            {searchQuery ? 'No matching presets' : 'No presets in this category'}
+          </div>
         ) : (
           <div className="preset-grid" style={{ '--preset-thumb-size': `${thumbSize}px` } as React.CSSProperties}>
             {filteredPresets.map((preset) => (
@@ -503,19 +414,18 @@ export const PresetBrowser: React.FC<PresetBrowserProps> = ({ onGenerateThumbnai
         <button
           className="btn-sm btn-glow"
           onClick={() => fileInputRef.current?.click()}
-          disabled={importingHDRI}
-          title={activeCategory === 'custom' ? 'Import a preset (.json) or a custom HDRI (.hdr/.exr)' : 'Import presets from JSON'}
+          title="Import presets from JSON"
         >
           <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.5">
             <path d="M5 9V3M2 6l3-3 3 3" />
             <path d="M1 2h8" />
           </svg>
-          {importingHDRI ? 'Loading...' : 'Import'}
+          Import
         </button>
         <input
           ref={fileInputRef}
           type="file"
-          accept={activeCategory === 'custom' ? '.json,.hdr,.hdri,.exr' : '.json'}
+          accept=".json"
           style={{ display: 'none' }}
           onChange={handleImport}
         />
