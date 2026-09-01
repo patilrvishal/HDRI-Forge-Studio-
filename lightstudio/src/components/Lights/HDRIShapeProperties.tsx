@@ -111,7 +111,7 @@ export const HDRIShapeProperties: React.FC = () => {
       <CollapsibleSection title="Transform">
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8, padding: '4px 0' }}>
           <Slider
-            label="U (Horizontal)"
+            label="Position X (U)"
             value={shape.u}
             min={0}
             max={1}
@@ -119,7 +119,7 @@ export const HDRIShapeProperties: React.FC = () => {
             onChange={(v) => updateShape(shape.id, { u: v })}
           />
           <Slider
-            label="V (Vertical)"
+            label="Position Y (V)"
             value={shape.v}
             min={0}
             max={1}
@@ -127,7 +127,7 @@ export const HDRIShapeProperties: React.FC = () => {
             onChange={(v) => updateShape(shape.id, { v: v })}
           />
           <Slider
-            label="Width"
+            label="Scale X (Width)"
             value={shape.width}
             min={0.02}
             max={1}
@@ -135,7 +135,7 @@ export const HDRIShapeProperties: React.FC = () => {
             onChange={(v) => updateShape(shape.id, { width: v })}
           />
           <Slider
-            label="Height"
+            label="Scale Y (Height)"
             value={shape.height}
             min={0.02}
             max={1}
@@ -153,6 +153,56 @@ export const HDRIShapeProperties: React.FC = () => {
               onChange={(v) => updateShape(shape.id, { rotation: v })}
             />
           )}
+        </div>
+      </CollapsibleSection>
+
+      <CollapsibleSection
+        title="Drop Shadow"
+        defaultOpen={false}
+        headerRight={
+          <Toggle
+            checked={shape.dropShadow.enabled}
+            onChange={(v) => updateShape(shape.id, { dropShadow: { ...shape.dropShadow, enabled: v } })}
+          />
+        }
+      >
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, padding: '4px 0', opacity: shape.dropShadow.enabled ? 1 : 0.4 }}>
+          <Slider
+            label="Angle"
+            value={shape.dropShadow.angle}
+            min={0}
+            max={360}
+            step={1}
+            unit="°"
+            onChange={(v) => updateShape(shape.id, { dropShadow: { ...shape.dropShadow, angle: v } })}
+          />
+          <Slider
+            label="Distance"
+            value={shape.dropShadow.distance}
+            min={0}
+            max={200}
+            step={1}
+            unit="%"
+            onChange={(v) => updateShape(shape.id, { dropShadow: { ...shape.dropShadow, distance: v } })}
+          />
+          <Slider
+            label="Intensity"
+            value={shape.dropShadow.intensity}
+            min={0}
+            max={100}
+            step={1}
+            unit="%"
+            onChange={(v) => updateShape(shape.id, { dropShadow: { ...shape.dropShadow, intensity: v } })}
+          />
+          <Slider
+            label="Softness"
+            value={shape.dropShadow.softness}
+            min={0}
+            max={100}
+            step={1}
+            unit="%"
+            onChange={(v) => updateShape(shape.id, { dropShadow: { ...shape.dropShadow, softness: v } })}
+          />
         </div>
       </CollapsibleSection>
 

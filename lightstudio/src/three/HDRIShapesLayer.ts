@@ -1,7 +1,21 @@
 import * as THREE from 'three';
-import type { HDRIShape } from '../types/HDRIShape';
+import type { HDRIShape, HDRIShapeType } from '../types/HDRIShape';
 import type { EnvLayer, GradientBackgroundConfig } from './HDRIExporter';
 import { paintGradientOntoContext } from './HDRIExporter';
+
+/** The subset of HDRIShape fields the low-level rasterizer actually needs -
+ *  used for both a real shape and its synthesized drop-shadow patch. */
+interface Patch {
+  type: HDRIShapeType;
+  color: string;
+  opacity: number;
+  u: number;
+  v: number;
+  width: number;
+  height: number;
+  rotation: number;
+  softness: number;
+}
 
 const LAYER_W = 1024;
 const LAYER_H = 512;
@@ -43,7 +57,7 @@ function directionAt(px: number, py: number, w: number, h: number): [number, num
  * onto a lat/long map. Wrapping at the u=0/u=1 seam falls out for free since
  * every test works in 3D direction space, not canvas pixel space.
  */
-function paintShapeIntoBuffer(data: Uint8ClampedArray, shape: HDRIShape, w: number, h: number): void {
+function paintPatch(data: Uint8ClampedArray, shape: Patch, w: number, h: number): void {
   const [r, g, b] = hexToRgb(shape.color);
   const baseAlpha = Math.max(0, Math.min(1, shape.opacity / 100));
   if (baseAlpha <= 0) return;
@@ -147,6 +161,48 @@ function paintShapeIntoBuffer(data: Uint8ClampedArray, shape: HDRIShape, w: numb
       data[idx + 3] = 255 * a + data[idx + 3] * (1 - a);
     }
   }
+}
+
+/**
+ * Paint a shape, plus - if enabled - a Photoshop-style drop shadow just
+ * beneath it: a darker copy of the same patch, offset by angle/distance and
+ * with its own opacity/softness, painted first so the shape sits on top and
+ * the shadow peeks out on the offset side. The offset is computed directly
+ * in u/v space (not re-derived via the tangent-plane basis) since it's a
+ * small, secondary displacement - the shadow patch itself still gets the
+ * full gnomonic treatment via paintPatch, so it curves/spreads correctly
+ * wherever it lands.
+ */
+function paintShapeIntoBuffer(data: Uint8ClampedArray, shape: HDRIShape, w: number, h: number): void {
+  const shadow = shape.dropShadow;
+  if (shadow?.enabled && shadow.intensity > 0) {
+    const a = (shadow.angle * Math.PI) / 180;
+    const dist = shadow.distance / 100;
+    const du = Math.cos(a) * dist * shape.width;
+    const dv = Math.sin(a) * dist * shape.height;
+    let su = shape.u + du;
+    su = ((su % 1) + 1) % 1;
+    const sv = Math.max(0, Math.min(1, shape.v + dv));
+
+    paintPatch(
+      data,
+      {
+        type: shape.type,
+        color: '#000000',
+        opacity: shadow.intensity,
+        u: su,
+        v: sv,
+        width: shape.width,
+        height: shape.height,
+        rotation: shape.rotation,
+        softness: shadow.softness,
+      },
+      w,
+      h,
+    );
+  }
+
+  paintPatch(data, shape, w, h);
 }
 
 function smoothstep(lo: number, hi: number, x: number): number {

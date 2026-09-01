@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import * as THREE from 'three';
 import { useLightsStore } from '../../store/lightsStore';
+import { cartesianToSpherical, sphericalToCartesian } from '../../utils/math';
 import { useSceneStore } from '../../store/sceneStore';
 import { useHDRIAssetStore } from '../../store/hdriAssetStore';
 import { useHDRIShapesStore } from '../../store/hdriShapesStore';
@@ -81,6 +82,35 @@ function analyzePixels(pixels: Float32Array): { max: number; clipped: number; to
   return { max, clipped, total };
 }
 
+/** Compact slider for the inline Transform mini-panel. */
+const MiniSlider: React.FC<{
+  label: string;
+  value: number;
+  min: number;
+  max: number;
+  step: number;
+  unit?: string;
+  onChange: (v: number) => void;
+}> = ({ label, value, min, max, step, unit = '', onChange }) => (
+  <div style={{ marginBottom: 6 }}>
+    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 10, marginBottom: 2 }}>
+      <span style={{ color: 'var(--text-sec)' }}>{label}</span>
+      <span style={{ color: 'var(--text-dim)', fontFamily: 'var(--font-mono)' }}>
+        {Number.isInteger(step) ? Math.round(value) : value.toFixed(3)}{unit}
+      </span>
+    </div>
+    <input
+      type="range"
+      min={min}
+      max={max}
+      step={step}
+      value={value}
+      onChange={(e) => onChange(parseFloat(e.target.value))}
+      style={{ width: '100%' }}
+    />
+  </div>
+);
+
 export const HDRIPreviewPanel: React.FC = () => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   // Pulled off window instead of context: this panel lives in the bottom dock,
@@ -89,12 +119,17 @@ export const HDRIPreviewPanel: React.FC = () => {
     ((window as unknown as { __lightforgeScene?: { scene: THREE.Scene } }).__lightforgeScene) ?? null;
 
   const lights = useLightsStore((s) => s.lights);
+  const selectedLightId = useLightsStore((s) => s.selectedLightId);
+  const updateLightTransform = useLightsStore((s) => s.updateLightTransform);
+  const updateLight = useLightsStore((s) => s.updateLight);
+  const selectedLight = lights.find((l) => l.id === selectedLightId) ?? null;
   const environment = useSceneStore((s) => s.environment);
   const hdriAssets = useHDRIAssetStore((s) => s.assets);
 
   const shapes = useHDRIShapesStore((s) => s.shapes);
   const selectedShapeId = useHDRIShapesStore((s) => s.selectedShapeId);
   const updateShape = useHDRIShapesStore((s) => s.updateShape);
+  const selectedShapeData = shapes.find((s) => s.id === selectedShapeId) ?? null;
 
   const livePreview = useHDRIShapesStore((s) => s.livePreview);
   const setLivePreview = useHDRIShapesStore((s) => s.setLivePreview);
@@ -109,6 +144,8 @@ export const HDRIPreviewPanel: React.FC = () => {
   const [rendering, setRendering] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [stats, setStats] = useState<{ max: number; clipped: number; total: number } | null>(null);
+  const [zoom, setZoom] = useState(1);
+  const zoomClamp = (z: number) => Math.max(0.5, Math.min(4, z));
 
   const timerRef = useRef<number | null>(null);
   const layersRef = useRef<EnvLayer[]>([]);
@@ -261,13 +298,19 @@ export const HDRIPreviewPanel: React.FC = () => {
         style={{
           flex: 1,
           display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
+          alignItems: zoom <= 1 ? 'center' : 'flex-start',
+          justifyContent: zoom <= 1 ? 'center' : 'flex-start',
           background: '#0a0a0c',
           border: '1px solid var(--border)',
           borderRadius: 4,
           position: 'relative',
           minWidth: 0,
+          overflow: 'auto',
+        }}
+        onWheel={(e) => {
+          if (!e.ctrlKey && !e.metaKey) return;
+          e.preventDefault();
+          setZoom((z) => zoomClamp(z + (e.deltaY > 0 ? -0.15 : 0.15)));
         }}
       >
         <canvas
@@ -276,13 +319,67 @@ export const HDRIPreviewPanel: React.FC = () => {
           onPointerMove={handleCanvasPointerMove}
           onPointerUp={handleCanvasPointerUp}
           style={{
-            maxWidth: '100%',
-            maxHeight: '100%',
-            objectFit: 'contain',
+            width: PREVIEW_W * zoom,
+            height: PREVIEW_H * zoom,
+            maxWidth: zoom <= 1 ? '100%' : 'none',
+            maxHeight: zoom <= 1 ? '100%' : 'none',
+            flexShrink: 0,
             imageRendering: 'auto',
             cursor: selectedShapeId ? 'crosshair' : 'default',
           }}
         />
+
+        {/* Zoom controls */}
+        <div
+          style={{
+            position: 'absolute',
+            bottom: 6,
+            right: 8,
+            display: 'flex',
+            alignItems: 'center',
+            gap: 2,
+            background: 'rgba(20,20,26,0.85)',
+            border: '1px solid var(--border)',
+            borderRadius: 4,
+            padding: 2,
+          }}
+        >
+          <button
+            className="btn-icon"
+            style={{ width: 20, height: 20 }}
+            onClick={() => setZoom((z) => zoomClamp(z - 0.25))}
+            title="Zoom out"
+          >
+            <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.4">
+              <line x1="1" y1="5" x2="9" y2="5" />
+            </svg>
+          </button>
+          <span style={{ fontSize: 9, color: 'var(--text-dim)', fontFamily: 'var(--font-mono)', minWidth: 32, textAlign: 'center' }}>
+            {Math.round(zoom * 100)}%
+          </span>
+          <button
+            className="btn-icon"
+            style={{ width: 20, height: 20 }}
+            onClick={() => setZoom((z) => zoomClamp(z + 0.25))}
+            title="Zoom in"
+          >
+            <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.4">
+              <line x1="1" y1="5" x2="9" y2="5" />
+              <line x1="5" y1="1" x2="5" y2="9" />
+            </svg>
+          </button>
+          <button
+            className="btn-icon"
+            style={{ width: 20, height: 20 }}
+            onClick={() => setZoom(1)}
+            title="Reset zoom"
+          >
+            <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.4">
+              <rect x="1.5" y="1.5" width="7" height="7" rx="1" />
+            </svg>
+          </button>
+        </div>
+
         {rendering && (
           <div
             style={{
@@ -340,6 +437,60 @@ export const HDRIPreviewPanel: React.FC = () => {
           <div style={{ fontSize: 9, color: 'var(--text-dim)', lineHeight: 1.4, borderTop: '1px solid var(--border)', paddingTop: 8, marginTop: 2 }}>
             {shapes.length} HDRI {shapes.length === 1 ? 'shape' : 'shapes'} active — manage them in the
             Light List panel. {selectedShapeId ? 'Drag directly on the preview to reposition the selected one.' : 'Select one there to drag it here.'}
+          </div>
+        )}
+
+        {/* Inline Transform - lets you push a light or shape's position/
+            rotation/scale straight from the preview, without switching to
+            the Properties panel. Calls the exact same store actions that
+            panel uses, so edits here sync to the live 3D viewport the same
+            way (real-time, for lights already; shapes bake into the same
+            env layer this preview renders from). */}
+        {!selectedLight && selectedShapeId && selectedShapeData && (
+          <div style={{ borderTop: '1px solid var(--border)', paddingTop: 8, marginTop: 2 }}>
+            <div className="section-header" style={{ marginBottom: 6 }}>Transform — {selectedShapeData.name}</div>
+            <MiniSlider label="Position X" value={selectedShapeData.u} min={0} max={1} step={0.001}
+              onChange={(v) => updateShape(selectedShapeData.id, { u: v })} />
+            <MiniSlider label="Position Y" value={selectedShapeData.v} min={0} max={1} step={0.001}
+              onChange={(v) => updateShape(selectedShapeData.id, { v })} />
+            {selectedShapeData.type !== 'circle' && (
+              <MiniSlider label="Rotation" value={selectedShapeData.rotation} min={0} max={360} step={1} unit="°"
+                onChange={(v) => updateShape(selectedShapeData.id, { rotation: v })} />
+            )}
+            <MiniSlider label="Scale X" value={selectedShapeData.width} min={0.02} max={1} step={0.01}
+              onChange={(v) => updateShape(selectedShapeData.id, { width: v })} />
+            <MiniSlider label="Scale Y" value={selectedShapeData.height} min={0.02} max={1} step={0.01}
+              onChange={(v) => updateShape(selectedShapeData.id, { height: v })} />
+          </div>
+        )}
+
+        {selectedLight && (
+          <div style={{ borderTop: '1px solid var(--border)', paddingTop: 8, marginTop: 2 }}>
+            <div className="section-header" style={{ marginBottom: 6 }}>Transform — {selectedLight.name}</div>
+            <MiniSlider label="Position X (Lng)" value={selectedLight.transform.spherical.lng} min={0} max={360} step={1} unit="°"
+              onChange={(v) => {
+                const s = selectedLight.transform.spherical;
+                const next = { ...s, lng: v };
+                updateLightTransform(selectedLight.id, { spherical: next, position: sphericalToCartesian(next.lat, next.lng, next.radius, next.height) });
+              }} />
+            <MiniSlider label="Position Y (Lat)" value={selectedLight.transform.spherical.lat} min={-90} max={90} step={1} unit="°"
+              onChange={(v) => {
+                const s = selectedLight.transform.spherical;
+                const next = { ...s, lat: v };
+                updateLightTransform(selectedLight.id, { spherical: next, position: sphericalToCartesian(next.lat, next.lng, next.radius, next.height) });
+              }} />
+            <MiniSlider label="Rotation X" value={selectedLight.transform.rotation.x} min={-180} max={180} step={1} unit="°"
+              onChange={(v) => updateLightTransform(selectedLight.id, { rotation: { ...selectedLight.transform.rotation, x: v, enabled: true } })} />
+            <MiniSlider label="Rotation Y" value={selectedLight.transform.rotation.y} min={-180} max={180} step={1} unit="°"
+              onChange={(v) => updateLightTransform(selectedLight.id, { rotation: { ...selectedLight.transform.rotation, y: v, enabled: true } })} />
+            {(selectedLight.type === 'area' || selectedLight.type === 'overhead') && (
+              <>
+                <MiniSlider label="Scale X (Width)" value={selectedLight.areaWidth} min={0.1} max={20} step={0.1}
+                  onChange={(v) => updateLight(selectedLight.id, { areaWidth: v })} />
+                <MiniSlider label="Scale Y (Height)" value={selectedLight.areaHeight} min={0.1} max={20} step={0.1}
+                  onChange={(v) => updateLight(selectedLight.id, { areaHeight: v })} />
+              </>
+            )}
           </div>
         )}
 

@@ -1101,6 +1101,7 @@ interface LightSyncEntry {
   areaWidth?: number;
   areaHeight?: number;
   edgeSoftness?: number;
+  dropShadow?: { enabled: boolean; angle: number; distance: number; intensity: number; softness: number };
 }
 
 interface LightObjectEntry {
@@ -1174,6 +1175,7 @@ export class LightManager {
     // light without reaching into LightManager internals.
     lightObj.userData.lightId = ld.id;
     lightObj.userData.edgeSoftness = ld.edgeSoftness ?? 50;
+    lightObj.userData.dropShadow = ld.dropShadow;
 
     const helper = this._createHelper(ld.type, lightObj as THREE.Light, ld);
     if (helper) {
@@ -1203,6 +1205,7 @@ export class LightManager {
     const pz = s.radius * Math.sin(lngRad);
 
     lightObj.userData.edgeSoftness = ld.edgeSoftness ?? 50;
+    lightObj.userData.dropShadow = ld.dropShadow;
     lightObj.position.set(px, py, pz);
     lightObj.visible = shouldShow;
 

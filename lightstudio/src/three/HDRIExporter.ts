@@ -51,6 +51,7 @@ interface ExtractedLight {
   width?: number;
   height?: number;
   edgeSoftness?: number;
+  dropShadow?: { enabled: boolean; angle: number; distance: number; intensity: number; softness: number };
   right?: THREE.Vector3;
   up?: THREE.Vector3;
   normal?: THREE.Vector3;
@@ -450,6 +451,69 @@ function evaluateLightRadiance(
   return new THREE.Color(result.r, result.g, result.b);
 }
 
+function smoothstepHDRI(t: number): number {
+  const c = Math.max(0, Math.min(1, t));
+  return c * c * (3 - 2 * c);
+}
+
+interface ShadowPatch {
+  dir: THREE.Vector3;
+  radius: number;
+  featherLo: number;
+  intensity: number;
+}
+
+/**
+ * Build one darkening patch per area-type light with an enabled drop shadow.
+ * The patch is offset from the light's own apparent direction by rotating it
+ * along a great circle (Rodrigues' formula) toward a tangent-plane axis
+ * picked by "angle", walking "distance" percent of the light's own angular
+ * size - the equivalent of a Photoshop drop shadow's angle/distance, just
+ * expressed on a sphere instead of a flat canvas.
+ */
+function buildLightShadowPatches(lights: ExtractedLight[], capturePoint: THREE.Vector3): ShadowPatch[] {
+  const patches: ShadowPatch[] = [];
+
+  for (const light of lights) {
+    if (light.type !== 'area') continue;
+    const shadow = light.dropShadow;
+    if (!shadow?.enabled || shadow.intensity <= 0) continue;
+
+    const toLight = new THREE.Vector3().subVectors(light.position, capturePoint);
+    const dist = Math.max(0.01, toLight.length());
+    const baseDir = toLight.clone().normalize();
+
+    const halfSize = Math.max(0.1, ((light.width ?? 1) + (light.height ?? 1)) / 4);
+    const angularRadius = Math.max(0.02, Math.atan2(halfSize, dist));
+
+    // Tangent basis at baseDir.
+    const worldUp = new THREE.Vector3(0, 1, 0);
+    let right = new THREE.Vector3().crossVectors(worldUp, baseDir);
+    if (right.lengthSq() < 1e-8) right.set(1, 0, 0);
+    right.normalize();
+    const up = new THREE.Vector3().crossVectors(baseDir, right).normalize();
+
+    const angleRad = (shadow.angle * Math.PI) / 180;
+    const axis = right.clone().multiplyScalar(Math.cos(angleRad)).addScaledVector(up, Math.sin(angleRad));
+
+    const angularDist = angularRadius * (shadow.distance / 100);
+    const shadowDir = baseDir
+      .clone()
+      .multiplyScalar(Math.cos(angularDist))
+      .addScaledVector(axis, Math.sin(angularDist))
+      .normalize();
+
+    patches.push({
+      dir: shadowDir,
+      radius: angularRadius * 1.3,
+      featherLo: Math.max(0, 1 - shadow.softness / 100),
+      intensity: Math.max(0, Math.min(1, shadow.intensity / 100)),
+    });
+  }
+
+  return patches;
+}
+
 // --------- FUNCTION 3: generateAnalyticalHDRI ------------------------------------------------------------------------------------------------------------------
 
 /**
@@ -486,6 +550,12 @@ export async function generateAnalyticalHDRI(
 lights.forEach((l, i) => {
     console.log(`[LightForge] Light ${i}: type=${l.type} R=${l.color.r.toFixed(3)} G=${l.color.g.toFixed(3)} B=${l.color.b.toFixed(3)} intensity=${l.intensity}`);
   });
+
+  // Photoshop-style drop shadows for area-type lights - a darkening patch
+  // offset from the light's own apparent direction, applied as a post-process
+  // multiply on the final summed radiance (so it darkens whatever's actually
+  // there - env, other lights - the same way a real drop shadow layer would).
+  const shadowPatches = buildLightShadowPatches(lights, capturePoint);
   // For each pixel, calculate analytical radiance
   for (let y = 0; y < height; y++) {
     // Pre-compute solid angle for this row
@@ -511,6 +581,22 @@ lights.forEach((l, i) => {
         r += e.r;
         g += e.g;
         b += e.b;
+      }
+
+      // Drop shadows darken the already-summed result, same as a Photoshop
+      // multiply layer - applied last so it affects env + every light, not
+      // just the light that owns the shadow.
+      for (let i = 0; i < shadowPatches.length; i++) {
+        const sp = shadowPatches[i];
+        const cosAngle = Math.max(-1, Math.min(1, dir.dot(sp.dir)));
+        const angle = Math.acos(cosAngle);
+        if (angle >= sp.radius) continue;
+        const t = angle / sp.radius;
+        const coverage = t <= sp.featherLo ? 1 : 1 - smoothstepHDRI((t - sp.featherLo) / Math.max(0.001, 1 - sp.featherLo));
+        const darken = 1 - sp.intensity * coverage;
+        r *= darken;
+        g *= darken;
+        b *= darken;
       }
 
       const idx = (y * width + x) * 4;
@@ -646,6 +732,7 @@ function extractLightsFromScene(scene: THREE.Scene): ExtractedLight[] {
         // Softness slider had no effect on the HDRI Preview/export at all,
         // silently falling back to the same default every time.
         edgeSoftness: typeof child.userData.edgeSoftness === 'number' ? child.userData.edgeSoftness : undefined,
+        dropShadow: child.userData.dropShadow,
       });
       return;
     }

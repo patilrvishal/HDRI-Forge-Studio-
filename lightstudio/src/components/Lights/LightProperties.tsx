@@ -1,6 +1,7 @@
 import React, { useCallback, useMemo, useState, useRef, useEffect } from 'react';
 import { useLightsStore } from '../../store/lightsStore';
 import type { Light, LightType, ColorProfile, FalloffType } from '../../types/Light';
+import { createDefaultDropShadow } from '../../types/Light';
 import { Slider } from '../UI/Slider';
 import { Toggle } from '../UI/Toggle';
 import { NumericInput } from '../UI/NumericInput';
@@ -53,6 +54,8 @@ const CollapsibleSection: React.FC<{
     </div>
   );
 };
+
+const DEFAULT_DROP_SHADOW = createDefaultDropShadow();
 
 const LIGHT_TYPE_OPTIONS: Array<{ value: string; label: string }> = [
   { value: 'point', label: 'Point' },
@@ -446,6 +449,72 @@ export const LightProperties: React.FC = () => {
             onChange={handleAreaScale}
             unit="x"
           />
+        </CollapsibleSection>
+      )}
+
+      {/* Drop shadow - same control set as an HDRI Shape's, baked into the
+          HDRI Preview/export as a darkening patch offset from the light. */}
+      {isAreaLike && (
+        <CollapsibleSection
+          title="Drop Shadow"
+          defaultOpen={false}
+          headerRight={
+            <Toggle
+              checked={light.dropShadow?.enabled ?? false}
+              onChange={(v) =>
+                handleUpdate({
+                  dropShadow: { ...(light.dropShadow ?? DEFAULT_DROP_SHADOW), enabled: v },
+                })
+              }
+            />
+          }
+        >
+          <div style={{ opacity: light.dropShadow?.enabled ? 1 : 0.4 }}>
+            <Slider
+              label="Angle"
+              value={light.dropShadow?.angle ?? DEFAULT_DROP_SHADOW.angle}
+              min={0}
+              max={360}
+              step={1}
+              unit="°"
+              onChange={(v) =>
+                handleUpdate({ dropShadow: { ...(light.dropShadow ?? DEFAULT_DROP_SHADOW), angle: v } })
+              }
+            />
+            <Slider
+              label="Distance"
+              value={light.dropShadow?.distance ?? DEFAULT_DROP_SHADOW.distance}
+              min={0}
+              max={200}
+              step={1}
+              unit="%"
+              onChange={(v) =>
+                handleUpdate({ dropShadow: { ...(light.dropShadow ?? DEFAULT_DROP_SHADOW), distance: v } })
+              }
+            />
+            <Slider
+              label="Intensity"
+              value={light.dropShadow?.intensity ?? DEFAULT_DROP_SHADOW.intensity}
+              min={0}
+              max={100}
+              step={1}
+              unit="%"
+              onChange={(v) =>
+                handleUpdate({ dropShadow: { ...(light.dropShadow ?? DEFAULT_DROP_SHADOW), intensity: v } })
+              }
+            />
+            <Slider
+              label="Softness"
+              value={light.dropShadow?.softness ?? DEFAULT_DROP_SHADOW.softness}
+              min={0}
+              max={100}
+              step={1}
+              unit="%"
+              onChange={(v) =>
+                handleUpdate({ dropShadow: { ...(light.dropShadow ?? DEFAULT_DROP_SHADOW), softness: v } })
+              }
+            />
+          </div>
         </CollapsibleSection>
       )}
 

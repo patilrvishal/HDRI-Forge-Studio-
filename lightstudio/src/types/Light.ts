@@ -76,6 +76,27 @@ export interface Light {
   /** 0-100. Edge feather for area-type lights (area/overhead) - 0 is a hard
    *  cutoff, 100 is fully soft, same meaning as an HDRI Shape's softness. */
   edgeSoftness?: number;
+  /** Photoshop-style drop shadow, baked into the HDRI Preview/export for
+   *  area-type lights (area/overhead) - same control set as an HDRI Shape's
+   *  drop shadow, applied as a darkening patch offset from the light. */
+  dropShadow?: LightDropShadow;
+}
+
+export interface LightDropShadow {
+  enabled: boolean;
+  /** Degrees, 0-360. Direction the shadow is cast in. */
+  angle: number;
+  /** 0-200. How far the shadow is offset from the light, as a fraction of
+   *  the light's own angular size. */
+  distance: number;
+  /** 0-100. Shadow darkness. */
+  intensity: number;
+  /** 0-100. Edge feather. */
+  softness: number;
+}
+
+export function createDefaultDropShadow(): LightDropShadow {
+  return { enabled: false, angle: 135, distance: 40, intensity: 60, softness: 50 };
 }
 
 export function createDefaultLight(overrides: Partial<Light> = {}): Light {
@@ -111,6 +132,7 @@ export function createDefaultLight(overrides: Partial<Light> = {}): Light {
     areaWidth: 2,
     areaHeight: 2,
     edgeSoftness: 50,
+    dropShadow: createDefaultDropShadow(),
     ...overrides,
   };
 }

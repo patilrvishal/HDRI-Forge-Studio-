@@ -870,6 +870,7 @@ export const Viewport: React.FC<ViewportProps> = ({ sceneManagerRef, onScreensho
         areaWidth: l.areaWidth,
         areaHeight: l.areaHeight,
         edgeSoftness: l.edgeSoftness,
+        dropShadow: l.dropShadow,
       })),
       smForLights.scene
     );

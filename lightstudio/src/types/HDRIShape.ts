@@ -35,6 +35,27 @@ export interface HDRIShape {
   rotation: number;
   /** 0-100. Edge feather - 0 is a hard cutout, 100 is fully soft. */
   softness: number;
+  /** Photoshop-style drop shadow - a darker offset copy of this shape
+   *  painted onto the map just before the shape itself, so it peeks out
+   *  from behind it in the offset direction. */
+  dropShadow: HDRIShapeDropShadow;
+}
+
+export interface HDRIShapeDropShadow {
+  enabled: boolean;
+  /** Degrees, 0-360. Direction the shadow is cast in (0 = toward +U/east). */
+  angle: number;
+  /** 0-100. How far the shadow is offset from the shape, as a fraction of
+   *  the shape's own size. */
+  distance: number;
+  /** 0-100. Shadow darkness/opacity. */
+  intensity: number;
+  /** 0-100. Edge feather, same meaning as the shape's own softness. */
+  softness: number;
+}
+
+export function createDefaultDropShadow(): HDRIShapeDropShadow {
+  return { enabled: false, angle: 135, distance: 40, intensity: 60, softness: 50 };
 }
 
 export function createDefaultHDRIShape(type: HDRIShapeType, index: number): HDRIShape {
@@ -57,6 +78,7 @@ export function createDefaultHDRIShape(type: HDRIShapeType, index: number): HDRI
     height: type === 'gradient-strip' ? 0.06 : 0.18,
     rotation: 0,
     softness: 35,
+    dropShadow: createDefaultDropShadow(),
   };
   return base;
 }
