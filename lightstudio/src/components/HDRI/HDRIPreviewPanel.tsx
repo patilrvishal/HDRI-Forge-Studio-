@@ -266,7 +266,33 @@ export const HDRIPreviewPanel: React.FC = () => {
     return { u, v };
   };
 
+  /** Place the selected light at the equirect direction under (u,v) - same
+   *  Position X (Lng) / Position Y (Lat) fields the inline Transform panel
+   *  edits, so a canvas drag and those sliders always agree. Lng runs the
+   *  full 0-360deg azimuth across u; Lat runs +90 (top/up) to -90
+   *  (bottom/down) across v, matching every other top-of-map=up convention
+   *  used throughout the shapes/HDRI pipeline. */
+  const placeLightFromUV = (uv: { u: number; v: number }) => {
+    if (!selectedLight) return;
+    const lng = uv.u * 360;
+    const lat = (0.5 - uv.v) * 180;
+    const s = selectedLight.transform.spherical;
+    const next = { ...s, lat, lng };
+    updateLightTransform(selectedLight.id, {
+      spherical: next,
+      position: sphericalToCartesian(next.lat, next.lng, next.radius, next.height),
+    });
+  };
+
   const handleCanvasPointerDown = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    if (selectedLight) {
+      const uv = uvFromEvent(e);
+      if (!uv) return;
+      draggingRef.current = true;
+      (e.target as HTMLCanvasElement).setPointerCapture(e.pointerId);
+      placeLightFromUV(uv);
+      return;
+    }
     if (!selectedShapeId || selectedShapeData?.locked) return;
     const uv = uvFromEvent(e);
     if (!uv) return;
@@ -276,7 +302,14 @@ export const HDRIPreviewPanel: React.FC = () => {
   };
 
   const handleCanvasPointerMove = (e: React.PointerEvent<HTMLCanvasElement>) => {
-    if (!draggingRef.current || !selectedShapeId || selectedShapeData?.locked) return;
+    if (!draggingRef.current) return;
+    if (selectedLight) {
+      const uv = uvFromEvent(e);
+      if (!uv) return;
+      placeLightFromUV(uv);
+      return;
+    }
+    if (!selectedShapeId || selectedShapeData?.locked) return;
     const uv = uvFromEvent(e);
     if (!uv) return;
     updateShape(selectedShapeId, uv);
@@ -325,7 +358,7 @@ export const HDRIPreviewPanel: React.FC = () => {
             maxHeight: zoom <= 1 ? '100%' : 'none',
             flexShrink: 0,
             imageRendering: 'auto',
-            cursor: selectedShapeId && !selectedShapeData?.locked ? 'crosshair' : 'default',
+            cursor: selectedLight || (selectedShapeId && !selectedShapeData?.locked) ? 'crosshair' : 'default',
           }}
         />
 
