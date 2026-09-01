@@ -75,10 +75,10 @@ export interface EnvLayer {
 
 /** Options for the main downloadHDRI() entry point. */
 export interface HDRIExportOptions {
-  /** Equirectangular width: 512 | 1024 | 2048 | 4096 */
-  width: 512 | 1024 | 2048 | 4096;
-  /** Equirectangular height: 256 | 512 | 1024 | 2048 */
-  height: 256 | 512 | 1024 | 2048;
+  /** Equirectangular width: 512 | 1024 | 2048 | 4096 | 8192 */
+  width: 512 | 1024 | 2048 | 4096 | 8192;
+  /** Equirectangular height: 256 | 512 | 1024 | 2048 | 4096 */
+  height: 256 | 512 | 1024 | 2048 | 4096;
   /** Output format */
   format: 'hdr' | 'exr';
   /**

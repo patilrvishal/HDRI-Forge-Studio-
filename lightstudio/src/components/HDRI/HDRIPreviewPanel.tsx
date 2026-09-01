@@ -17,18 +17,23 @@ import {
 import { compositeShapesCanvas, shapesCanvasToEnvLayer } from '../../three/HDRIShapesLayer';
 import { promptForCustomHDRI } from '../../utils/loadCustomHDRI';
 
-/** Preview is always rendered small so it stays interactive. */
-const PREVIEW_W = 512;
-const PREVIEW_H = 256;
+/** Preview always DISPLAYS at this CSS size (scaled by zoom) regardless of
+ *  which resolution is selected - the canvas's actual pixel buffer is set
+ *  to the selected resolution, so the browser downscales/upscales it for
+ *  display exactly like any other image, and zooming in past 100% reveals
+ *  the real extra detail a higher resolution actually renders. */
+const DISPLAY_BASE_W = 512;
+const DISPLAY_BASE_H = 256;
 
 /** Debounce window - re-render only after the user stops dragging. */
 const DEBOUNCE_MS = 300;
 
-const RESOLUTIONS: Array<{ label: string; w: 512 | 1024 | 2048 | 4096; h: 256 | 512 | 1024 | 2048 }> = [
+const RESOLUTIONS: Array<{ label: string; w: 512 | 1024 | 2048 | 4096 | 8192; h: 256 | 512 | 1024 | 2048 | 4096 }> = [
   { label: '512', w: 512, h: 256 },
   { label: '1K', w: 1024, h: 512 },
   { label: '2K', w: 2048, h: 1024 },
   { label: '4K', w: 4096, h: 2048 },
+  { label: '8K', w: 8192, h: 4096 },
 ];
 
 /**
@@ -152,6 +157,7 @@ export const HDRIPreviewPanel: React.FC = () => {
   const timerRef = useRef<number | null>(null);
   const layersRef = useRef<EnvLayer[]>([]);
   const pixelsRef = useRef<Float32Array | null>(null);
+  const renderedResRef = useRef<{ w: number; h: number } | null>(null);
 
   /** Scroll-to-zoom, scoped to just the preview container. Attached as a
    *  native listener (not React's onWheel) because React/the browser treats
@@ -170,7 +176,7 @@ export const HDRIPreviewPanel: React.FC = () => {
   }, []);
 
   /** Render the preview buffer, then paint it. */
-  const renderPreview = useCallback(async () => {
+  const renderPreview = useCallback(async (resIndexOverride?: number) => {
     const sm = getScene();
     const canvas = canvasRef.current;
     if (!sm || !canvas) return;
@@ -197,22 +203,37 @@ export const HDRIPreviewPanel: React.FC = () => {
 
       layersRef.current = layers;
 
+      // Render at the SELECTED export resolution, not a fixed preview size,
+      // so the resolution buttons actually change what you see, not just
+      // what gets exported. The canvas still DISPLAYS at a fixed CSS size
+      // (see DISPLAY_BASE_W/H below) - only the underlying pixel buffer
+      // grows, exactly like zooming into a higher-res image reveals more
+      // real detail instead of just stretching the same pixels.
+      //
+      // resIndexOverride lets a click handler pass the NEW index directly -
+      // setResIndex() only schedules a state update, so reading `resIndex`
+      // from this closure right after calling it would still see the OLD
+      // value (React batches the update; it hasn't applied by the time this
+      // async function actually runs), silently re-rendering at whatever
+      // resolution was already selected instead of the one just clicked.
+      const res = RESOLUTIONS[resIndexOverride ?? resIndex];
       const pixels = await generateAnalyticalHDRI(
         sm.scene,
-        PREVIEW_W,
-        PREVIEW_H,
+        res.w,
+        res.h,
         new THREE.Vector3(0, 0, 0),
         layers,
       );
       pixelsRef.current = pixels;
+      renderedResRef.current = { w: res.w, h: res.h };
 
       setStats(analyzePixels(pixels));
 
       const ctx = canvas.getContext('2d');
       if (ctx) {
-        canvas.width = PREVIEW_W;
-        canvas.height = PREVIEW_H;
-        ctx.putImageData(tonemapToImageData(pixels, PREVIEW_W, PREVIEW_H, exposure), 0, 0);
+        canvas.width = res.w;
+        canvas.height = res.h;
+        ctx.putImageData(tonemapToImageData(pixels, res.w, res.h, exposure), 0, 0);
       }
     } catch (e) {
       console.error('[LightForge] HDRI preview failed:', e);
@@ -220,9 +241,12 @@ export const HDRIPreviewPanel: React.FC = () => {
       setRendering(false);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [environment.intensity]);
+  }, [environment.intensity, resIndex]);
 
-  /** Re-render whenever lights or the environment change (debounced). */
+  /** Re-render whenever lights, the environment, or the selected preview
+   *  resolution change (debounced). Resolution is included so picking 4K/8K
+   *  actually re-renders at that size instead of silently reusing whatever
+   *  was last on screen. */
   useEffect(() => {
     // Auto-render is opt-in. The pixel loop runs on the CPU, so firing it on
     // every light tweak makes the whole app feel sluggish. Off by default.
@@ -236,17 +260,18 @@ export const HDRIPreviewPanel: React.FC = () => {
     return () => {
       if (timerRef.current) window.clearTimeout(timerRef.current);
     };
-  }, [livePreview, lights, environment, hdriAssets, shapes, renderPreview]);
+  }, [livePreview, lights, environment, hdriAssets, shapes, resIndex, renderPreview]);
 
   /** Exposure only re-paints - no need to re-run the expensive pixel loop. */
   useEffect(() => {
     const canvas = canvasRef.current;
     const pixels = pixelsRef.current;
-    if (!canvas || !pixels) return;
+    const res = renderedResRef.current;
+    if (!canvas || !pixels || !res) return;
 
     const ctx = canvas.getContext('2d');
     if (ctx) {
-      ctx.putImageData(tonemapToImageData(pixels, PREVIEW_W, PREVIEW_H, exposure), 0, 0);
+      ctx.putImageData(tonemapToImageData(pixels, res.w, res.h, exposure), 0, 0);
     }
   }, [exposure]);
 
@@ -427,8 +452,8 @@ export const HDRIPreviewPanel: React.FC = () => {
           onPointerMove={handleCanvasPointerMove}
           onPointerUp={handleCanvasPointerUp}
           style={{
-            width: PREVIEW_W * zoom,
-            height: PREVIEW_H * zoom,
+            width: DISPLAY_BASE_W * zoom,
+            height: DISPLAY_BASE_H * zoom,
             maxWidth: zoom <= 1 ? '100%' : 'none',
             maxHeight: zoom <= 1 ? '100%' : 'none',
             flexShrink: 0,
@@ -660,16 +685,21 @@ export const HDRIPreviewPanel: React.FC = () => {
           </div>
         )}
 
-        {/* Export resolution */}
+        {/* Preview / Export resolution - drives both: the preview canvas
+            re-renders its actual pixel buffer at whichever size is picked
+            here, not just the exported file. */}
         <div>
           <div style={{ fontSize: 11, color: 'var(--text-sec)', marginBottom: 4 }}>
-            Export Resolution
+            Preview / Export Resolution
           </div>
           <div style={{ display: 'flex', gap: 3, flexWrap: 'wrap' }}>
             {RESOLUTIONS.map((r, i) => (
               <button
                 key={r.label}
-                onClick={() => setResIndex(i)}
+                onClick={() => {
+                  setResIndex(i);
+                  void renderPreview(i);
+                }}
                 style={{
                   flex: '1 0 40px',
                   fontSize: 10,
@@ -685,6 +715,12 @@ export const HDRIPreviewPanel: React.FC = () => {
               </button>
             ))}
           </div>
+          {RESOLUTIONS[resIndex].w >= 4096 && (
+            <div style={{ fontSize: 9, color: 'var(--text-dim)', lineHeight: 1.4, marginTop: 4 }}>
+              {RESOLUTIONS[resIndex].label} renders every pixel analytically on the CPU - expect it to
+              take noticeably longer, especially with Live Preview on.
+            </div>
+          )}
         </div>
 
         {/* Format */}
