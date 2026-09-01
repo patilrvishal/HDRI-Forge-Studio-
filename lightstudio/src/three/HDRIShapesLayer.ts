@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import type { HDRIShape, HDRIShapeType } from '../types/HDRIShape';
+import type { HDRIShape, HDRIShapeBlendMode, HDRIShapeType } from '../types/HDRIShape';
 import type { EnvLayer, GradientBackgroundConfig } from './HDRIExporter';
 import { paintGradientOntoContext } from './HDRIExporter';
 
@@ -8,6 +8,7 @@ import { paintGradientOntoContext } from './HDRIExporter';
 interface Patch {
   type: HDRIShapeType;
   color: string;
+  blendMode?: HDRIShapeBlendMode;
   opacity: number;
   u: number;
   v: number;
@@ -15,6 +16,38 @@ interface Patch {
   height: number;
   rotation: number;
   softness: number;
+}
+
+/**
+ * Photoshop blend mode formulas, applied per-channel on 0-1 normalized
+ * src (this shape's color) and dst (whatever's already painted beneath it).
+ * The result still gets mixed with dst by the pixel's own coverage alpha
+ * afterward, same as any blend mode in Photoshop respects layer opacity.
+ */
+function blendChannel(mode: HDRIShapeBlendMode, src: number, dst: number): number {
+  const EPS = 1e-4;
+  switch (mode) {
+    case 'darken': return Math.min(src, dst);
+    case 'multiply': return src * dst;
+    case 'color-burn': return src <= EPS ? 0 : 1 - Math.min(1, (1 - dst) / src);
+    case 'lighten': return Math.max(src, dst);
+    case 'screen': return 1 - (1 - src) * (1 - dst);
+    case 'color-dodge': return src >= 1 - EPS ? 1 : Math.min(1, dst / (1 - src));
+    case 'linear-dodge': return Math.min(1, src + dst);
+    case 'overlay': return dst <= 0.5 ? 2 * src * dst : 1 - 2 * (1 - src) * (1 - dst);
+    case 'hard-light': return src <= 0.5 ? 2 * src * dst : 1 - 2 * (1 - src) * (1 - dst);
+    case 'soft-light': {
+      if (src <= 0.5) return dst - (1 - 2 * src) * dst * (1 - dst);
+      const d = dst <= 0.25 ? ((16 * dst - 12) * dst + 4) * dst : Math.sqrt(dst);
+      return dst + (2 * src - 1) * (d - dst);
+    }
+    case 'difference': return Math.abs(src - dst);
+    case 'exclusion': return src + dst - 2 * src * dst;
+    case 'subtract': return Math.max(0, dst - src);
+    case 'normal':
+    default:
+      return src;
+  }
 }
 
 const LAYER_W = 1024;
@@ -155,9 +188,19 @@ function paintPatch(data: Uint8ClampedArray, shape: Patch, w: number, h: number)
       const a = baseAlpha * coverage;
       if (a <= 0) continue;
       const idx = (py * w + px) * 4;
-      data[idx] = r * a + data[idx] * (1 - a);
-      data[idx + 1] = g * a + data[idx + 1] * (1 - a);
-      data[idx + 2] = b * a + data[idx + 2] * (1 - a);
+      const mode = shape.blendMode ?? 'normal';
+      if (mode === 'normal') {
+        data[idx] = r * a + data[idx] * (1 - a);
+        data[idx + 1] = g * a + data[idx + 1] * (1 - a);
+        data[idx + 2] = b * a + data[idx + 2] * (1 - a);
+      } else {
+        const blendedR = blendChannel(mode, r / 255, data[idx] / 255) * 255;
+        const blendedG = blendChannel(mode, g / 255, data[idx + 1] / 255) * 255;
+        const blendedB = blendChannel(mode, b / 255, data[idx + 2] / 255) * 255;
+        data[idx] = blendedR * a + data[idx] * (1 - a);
+        data[idx + 1] = blendedG * a + data[idx + 1] * (1 - a);
+        data[idx + 2] = blendedB * a + data[idx + 2] * (1 - a);
+      }
       data[idx + 3] = 255 * a + data[idx + 3] * (1 - a);
     }
   }
@@ -172,8 +215,13 @@ function paintPatch(data: Uint8ClampedArray, shape: Patch, w: number, h: number)
  * small, secondary displacement - the shadow patch itself still gets the
  * full gnomonic treatment via paintPatch, so it curves/spreads correctly
  * wherever it lands.
+ *
+ * Opacity vs Fill, same distinction Photoshop makes: Opacity scales the
+ * WHOLE layer including its drop shadow effect; Fill scales only the
+ * shape's own paint, leaving the shadow's own Intensity untouched by it.
  */
 function paintShapeIntoBuffer(data: Uint8ClampedArray, shape: HDRIShape, w: number, h: number): void {
+  const layerOpacity = Math.max(0, Math.min(100, shape.opacity));
   const shadow = shape.dropShadow;
   if (shadow?.enabled && shadow.intensity > 0) {
     const a = (shadow.angle * Math.PI) / 180;
@@ -189,7 +237,7 @@ function paintShapeIntoBuffer(data: Uint8ClampedArray, shape: HDRIShape, w: numb
       {
         type: shape.type,
         color: '#000000',
-        opacity: shadow.intensity,
+        opacity: shadow.intensity * (layerOpacity / 100),
         u: su,
         v: sv,
         width: shape.width,
@@ -202,7 +250,24 @@ function paintShapeIntoBuffer(data: Uint8ClampedArray, shape: HDRIShape, w: numb
     );
   }
 
-  paintPatch(data, shape, w, h);
+  const fill = Math.max(0, Math.min(100, shape.fill ?? 100));
+  paintPatch(
+    data,
+    {
+      type: shape.type,
+      color: shape.color,
+      blendMode: shape.blendMode,
+      opacity: layerOpacity * (fill / 100),
+      u: shape.u,
+      v: shape.v,
+      width: shape.width,
+      height: shape.height,
+      rotation: shape.rotation,
+      softness: shape.softness,
+    },
+    w,
+    h,
+  );
 }
 
 function smoothstep(lo: number, hi: number, x: number): number {

@@ -1,8 +1,36 @@
 import React, { useMemo, useState } from 'react';
 import { useHDRIShapesStore } from '../../store/hdriShapesStore';
+import type { HDRIShapeBlendMode } from '../../types/HDRIShape';
 import { Slider } from '../UI/Slider';
 import { Toggle } from '../UI/Toggle';
 import { ColorPicker } from '../UI/ColorPicker';
+import { Dropdown } from '../UI/Dropdown';
+
+const BLEND_MODE_GROUPS: Array<Array<{ value: HDRIShapeBlendMode; label: string }>> = [
+  [{ value: 'normal', label: 'Normal' }],
+  [
+    { value: 'darken', label: 'Darken' },
+    { value: 'multiply', label: 'Multiply' },
+    { value: 'color-burn', label: 'Color Burn' },
+  ],
+  [
+    { value: 'lighten', label: 'Lighten' },
+    { value: 'screen', label: 'Screen' },
+    { value: 'color-dodge', label: 'Color Dodge' },
+    { value: 'linear-dodge', label: 'Linear Dodge (Add)' },
+  ],
+  [
+    { value: 'overlay', label: 'Overlay' },
+    { value: 'soft-light', label: 'Soft Light' },
+    { value: 'hard-light', label: 'Hard Light' },
+  ],
+  [
+    { value: 'difference', label: 'Difference' },
+    { value: 'exclusion', label: 'Exclusion' },
+    { value: 'subtract', label: 'Subtract' },
+  ],
+];
+const BLEND_MODE_OPTIONS = BLEND_MODE_GROUPS.flat();
 
 /** Matches LightProperties' CollapsibleSection so both panels read as one system. */
 const CollapsibleSection: React.FC<{
@@ -68,7 +96,28 @@ export const HDRIShapeProperties: React.FC = () => {
       <CollapsibleSection
         title={`${TYPE_LABELS[shape.type] ?? shape.type} · HDRI Shape`}
         headerRight={
-          <Toggle checked={shape.visible} onChange={(v) => updateShape(shape.id, { visible: v })} />
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <button
+              className="btn-icon"
+              style={{ width: 18, height: 18, opacity: shape.locked ? 1 : 0.4 }}
+              onClick={() => updateShape(shape.id, { locked: !shape.locked })}
+              title={shape.locked ? 'Unlock position' : 'Lock position'}
+              aria-label={shape.locked ? 'Unlock position' : 'Lock position'}
+            >
+              {shape.locked ? (
+                <svg width="11" height="11" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.2">
+                  <rect x="2.5" y="5.5" width="7" height="5" rx="1" />
+                  <path d="M4 5.5V3.5a2 2 0 014 0v2" />
+                </svg>
+              ) : (
+                <svg width="11" height="11" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.2">
+                  <rect x="2.5" y="5.5" width="7" height="5" rx="1" />
+                  <path d="M4 5.5V3.5a2 2 0 013.9-.6" />
+                </svg>
+              )}
+            </button>
+            <Toggle checked={shape.visible} onChange={(v) => updateShape(shape.id, { visible: v })} />
+          </div>
         }
       >
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8, padding: '4px 0' }}>
@@ -87,6 +136,16 @@ export const HDRIShapeProperties: React.FC = () => {
             <ColorPicker color={shape.color} onChange={(c) => updateShape(shape.id, { color: c })} />
           </div>
 
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <span style={{ fontSize: 11, color: 'var(--text-sec)' }}>Blend Mode</span>
+            <Dropdown
+              value={shape.blendMode}
+              options={BLEND_MODE_OPTIONS}
+              onChange={(v) => updateShape(shape.id, { blendMode: v as HDRIShapeBlendMode })}
+              width="140px"
+            />
+          </div>
+
           <Slider
             label="Opacity"
             value={shape.opacity}
@@ -95,6 +154,15 @@ export const HDRIShapeProperties: React.FC = () => {
             step={1}
             unit="%"
             onChange={(v) => updateShape(shape.id, { opacity: v })}
+          />
+          <Slider
+            label="Fill"
+            value={shape.fill}
+            min={0}
+            max={100}
+            step={1}
+            unit="%"
+            onChange={(v) => updateShape(shape.id, { fill: v })}
           />
           <Slider
             label="Softness"
@@ -110,22 +178,29 @@ export const HDRIShapeProperties: React.FC = () => {
 
       <CollapsibleSection title="Transform">
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8, padding: '4px 0' }}>
-          <Slider
-            label="Position X (U)"
-            value={shape.u}
-            min={0}
-            max={1}
-            step={0.001}
-            onChange={(v) => updateShape(shape.id, { u: v })}
-          />
-          <Slider
-            label="Position Y (V)"
-            value={shape.v}
-            min={0}
-            max={1}
-            step={0.001}
-            onChange={(v) => updateShape(shape.id, { v: v })}
-          />
+          {shape.locked && (
+            <div style={{ fontSize: 9, color: 'var(--text-dim)', marginTop: -2 }}>
+              Position is locked - unlock in the header above to move this shape.
+            </div>
+          )}
+          <div style={{ opacity: shape.locked ? 0.4 : 1, pointerEvents: shape.locked ? 'none' : 'auto' }}>
+            <Slider
+              label="Position X (U)"
+              value={shape.u}
+              min={0}
+              max={1}
+              step={0.001}
+              onChange={(v) => updateShape(shape.id, { u: v })}
+            />
+            <Slider
+              label="Position Y (V)"
+              value={shape.v}
+              min={0}
+              max={1}
+              step={0.001}
+              onChange={(v) => updateShape(shape.id, { v: v })}
+            />
+          </div>
           <Slider
             label="Scale X (Width)"
             value={shape.width}

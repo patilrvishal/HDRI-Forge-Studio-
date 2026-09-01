@@ -936,6 +936,8 @@ export const Viewport: React.FC<ViewportProps> = ({ sceneManagerRef, onScreensho
     // surface, so a shape "wrapped" this way lands its reflection precisely
     // where you clicked, the same way LightPaint does for a real light.
     if (!lightId && shapeId) {
+      const targetShape = useHDRIShapesStore.getState().shapes.find((s) => s.id === shapeId);
+      if (targetShape?.locked) return;
       const hit = hits[0];
       if (!hit) return;
       const N = smoothNormalAt(hit);

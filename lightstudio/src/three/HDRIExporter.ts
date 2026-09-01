@@ -458,7 +458,13 @@ function smoothstepHDRI(t: number): number {
 
 interface ShadowPatch {
   dir: THREE.Vector3;
-  radius: number;
+  /** RectAreaLight's own right/up axes, carried into the shadow unrotated -
+   *  so the shadow is a rectangle in the SAME orientation as the light that
+   *  cast it, not a generic circular blob. */
+  right: THREE.Vector3;
+  up: THREE.Vector3;
+  halfW: number;
+  halfH: number;
   featherLo: number;
   intensity: number;
 }
@@ -469,7 +475,10 @@ interface ShadowPatch {
  * along a great circle (Rodrigues' formula) toward a tangent-plane axis
  * picked by "angle", walking "distance" percent of the light's own angular
  * size - the equivalent of a Photoshop drop shadow's angle/distance, just
- * expressed on a sphere instead of a flat canvas.
+ * expressed on a sphere instead of a flat canvas. The shadow keeps the
+ * light's actual rectangular footprint (via its right/up axes and
+ * width/height), rather than approximating it as a circle - so a wide,
+ * flat area light casts a wide, flat shadow, not a round one.
  */
 function buildLightShadowPatches(lights: ExtractedLight[], capturePoint: THREE.Vector3): ShadowPatch[] {
   const patches: ShadowPatch[] = [];
@@ -483,10 +492,12 @@ function buildLightShadowPatches(lights: ExtractedLight[], capturePoint: THREE.V
     const dist = Math.max(0.01, toLight.length());
     const baseDir = toLight.clone().normalize();
 
-    const halfSize = Math.max(0.1, ((light.width ?? 1) + (light.height ?? 1)) / 4);
-    const angularRadius = Math.max(0.02, Math.atan2(halfSize, dist));
+    const halfW = Math.max(0.02, Math.atan2((light.width ?? 1) / 2, dist));
+    const halfH = Math.max(0.02, Math.atan2((light.height ?? 1) / 2, dist));
+    const angularRadius = (halfW + halfH) / 2;
 
-    // Tangent basis at baseDir.
+    // Tangent basis at baseDir, used only to pick the offset direction - the
+    // shadow's own orientation still comes from the light's right/up below.
     const worldUp = new THREE.Vector3(0, 1, 0);
     let right = new THREE.Vector3().crossVectors(worldUp, baseDir);
     if (right.lengthSq() < 1e-8) right.set(1, 0, 0);
@@ -503,9 +514,18 @@ function buildLightShadowPatches(lights: ExtractedLight[], capturePoint: THREE.V
       .addScaledVector(axis, Math.sin(angularDist))
       .normalize();
 
+    // The light's OWN right/up (from RectAreaLight's world quaternion) define
+    // the shadow rectangle's orientation, so a rotated light casts a shadow
+    // rotated the same way - not always axis-aligned to the tangent plane.
+    const lightRight = (light.right ?? right).clone().normalize();
+    const lightUp = (light.up ?? up).clone().normalize();
+
     patches.push({
       dir: shadowDir,
-      radius: angularRadius * 1.3,
+      right: lightRight,
+      up: lightUp,
+      halfW,
+      halfH,
       featherLo: Math.max(0, 1 - shadow.softness / 100),
       intensity: Math.max(0, Math.min(1, shadow.intensity / 100)),
     });
@@ -588,11 +608,20 @@ lights.forEach((l, i) => {
       // just the light that owns the shadow.
       for (let i = 0; i < shadowPatches.length; i++) {
         const sp = shadowPatches[i];
-        const cosAngle = Math.max(-1, Math.min(1, dir.dot(sp.dir)));
-        const angle = Math.acos(cosAngle);
-        if (angle >= sp.radius) continue;
-        const t = angle / sp.radius;
-        const coverage = t <= sp.featherLo ? 1 : 1 - smoothstepHDRI((t - sp.featherLo) / Math.max(0.001, 1 - sp.featherLo));
+        const cosc = dir.dot(sp.dir);
+        if (cosc <= 0.02) continue; // behind the shadow's own hemisphere
+
+        // Same gnomonic rectangle test HDRIShapesLayer uses for shapes, so a
+        // rectangular light casts a rectangular shadow in its own actual
+        // orientation - not a circular approximation.
+        const lx = (dir.x * sp.right.x + dir.y * sp.right.y + dir.z * sp.right.z) / cosc;
+        const ly = (dir.x * sp.up.x + dir.y * sp.up.y + dir.z * sp.up.z) / cosc;
+        const nx = Math.abs(lx) / Math.tan(Math.min(sp.halfW, 1.55));
+        const ny = Math.abs(ly) / Math.tan(Math.min(sp.halfH, 1.55));
+        if (nx > 1 || ny > 1) continue;
+
+        const edge = Math.max(nx, ny);
+        const coverage = edge <= sp.featherLo ? 1 : 1 - smoothstepHDRI((edge - sp.featherLo) / Math.max(0.001, 1 - sp.featherLo));
         const darken = 1 - sp.intensity * coverage;
         r *= darken;
         g *= darken;

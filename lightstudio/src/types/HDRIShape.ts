@@ -11,17 +11,46 @@
  */
 export type HDRIShapeType = 'rectangle' | 'circle' | 'gradient-strip';
 
+/** Photoshop blend modes, implemented for real in HDRIShapesLayer's
+ *  per-pixel compositor - not just labels. */
+export type HDRIShapeBlendMode =
+  | 'normal'
+  | 'darken'
+  | 'multiply'
+  | 'color-burn'
+  | 'lighten'
+  | 'screen'
+  | 'color-dodge'
+  | 'linear-dodge'
+  | 'overlay'
+  | 'soft-light'
+  | 'hard-light'
+  | 'difference'
+  | 'exclusion'
+  | 'subtract';
+
 export interface HDRIShape {
   id: string;
   name: string;
   type: HDRIShapeType;
   visible: boolean;
+  /** Prevents the shape's u/v from being changed by drag or LightPaint -
+   *  same idea as Photoshop's "Lock Position". */
+  locked: boolean;
   /** Hex color. Pure black (#000000) at full opacity acts as a blocker -
    *  it paints solid black, contributing zero light and occluding whatever
    *  was drawn under it in the stack. */
   color: string;
-  /** 0-100. How strongly this shape's paint replaces what's beneath it. */
+  /** Photoshop-style blend mode - how this shape's color combines with
+   *  whatever is already painted beneath it. */
+  blendMode: HDRIShapeBlendMode;
+  /** 0-100. Overall layer opacity - scales the shape's paint AND its drop
+   *  shadow, matching Photoshop's Opacity. */
   opacity: number;
+  /** 0-100. Fill opacity - scales only the shape's own color, leaving its
+   *  drop shadow at full strength, matching Photoshop's Fill vs Opacity
+   *  distinction (Fill skips layer effects, Opacity doesn't). */
+  fill: number;
   /** 0-1, normalized horizontal position on the equirect map (longitude). */
   u: number;
   /** 0-1, normalized vertical position on the equirect map (latitude). */
@@ -70,8 +99,11 @@ export function createDefaultHDRIShape(type: HDRIShapeType, index: number): HDRI
     name: `${labels[type]} ${index + 1}`,
     type,
     visible: true,
+    locked: false,
     color: '#ffffff',
+    blendMode: 'normal',
     opacity: 100,
+    fill: 100,
     u: 0.5,
     v: 0.35,
     width: type === 'gradient-strip' ? 0.6 : 0.18,

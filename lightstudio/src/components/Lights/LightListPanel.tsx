@@ -467,6 +467,28 @@ export const LightListPanel: React.FC = () => {
 
                     <div className="light-item-actions">
                       <button
+                        className="btn-icon"
+                        style={{ width: 20, height: 20, opacity: shape.locked ? 1 : 0.3 }}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          updateShape(shape.id, { locked: !shape.locked });
+                        }}
+                        title={shape.locked ? 'Unlock position' : 'Lock position'}
+                        aria-label={shape.locked ? 'Unlock position' : 'Lock position'}
+                      >
+                        {shape.locked ? (
+                          <svg width="11" height="11" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.2">
+                            <rect x="2.5" y="5.5" width="7" height="5" rx="1" />
+                            <path d="M4 5.5V3.5a2 2 0 014 0v2" />
+                          </svg>
+                        ) : (
+                          <svg width="11" height="11" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.2">
+                            <rect x="2.5" y="5.5" width="7" height="5" rx="1" />
+                            <path d="M4 5.5V3.5a2 2 0 013.9-.6" />
+                          </svg>
+                        )}
+                      </button>
+                      <button
                         className={`btn-icon ${shape.visible ? '' : 'dimmed'}`}
                         style={{ width: 20, height: 20 }}
                         onClick={(e) => {

@@ -267,7 +267,7 @@ export const HDRIPreviewPanel: React.FC = () => {
   };
 
   const handleCanvasPointerDown = (e: React.PointerEvent<HTMLCanvasElement>) => {
-    if (!selectedShapeId) return;
+    if (!selectedShapeId || selectedShapeData?.locked) return;
     const uv = uvFromEvent(e);
     if (!uv) return;
     draggingRef.current = true;
@@ -276,7 +276,7 @@ export const HDRIPreviewPanel: React.FC = () => {
   };
 
   const handleCanvasPointerMove = (e: React.PointerEvent<HTMLCanvasElement>) => {
-    if (!draggingRef.current || !selectedShapeId) return;
+    if (!draggingRef.current || !selectedShapeId || selectedShapeData?.locked) return;
     const uv = uvFromEvent(e);
     if (!uv) return;
     updateShape(selectedShapeId, uv);
@@ -325,7 +325,7 @@ export const HDRIPreviewPanel: React.FC = () => {
             maxHeight: zoom <= 1 ? '100%' : 'none',
             flexShrink: 0,
             imageRendering: 'auto',
-            cursor: selectedShapeId ? 'crosshair' : 'default',
+            cursor: selectedShapeId && !selectedShapeData?.locked ? 'crosshair' : 'default',
           }}
         />
 
