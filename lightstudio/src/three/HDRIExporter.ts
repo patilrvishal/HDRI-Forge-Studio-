@@ -407,8 +407,21 @@ function evaluateLightRadiance(
           // Per-light softness. GAUSSIAN_SOFTNESS was a single global constant,
           // so every light got identical blur - you could not have a crisp strip
           // light and a diffused softbox in the same rig.
+          //
+          // The rectangle is only approximated by a 12x12 grid of these radial
+          // falloff samples, each covering one small sub-cell (sampleRadius,
+          // already sized with a 1.5x overlap margin above). Softness used to
+          // be allowed to shrink the per-sample falloff radius all the way
+          // down to 0.05x that cell size - well below the spacing between
+          // adjacent samples - so at a low Edge Softness the 144 samples
+          // stopped overlapping and rendered as separate spiky dots instead
+          // of a continuous rectangle, exactly the star-burst pattern this
+          // was reported as. Floating the minimum at 1.0x keeps every sample
+          // covering its own full cell (so the grid always tiles seamlessly),
+          // while Edge Softness still legitimately sharpens the actual edge
+          // shape softFalloff produces within that cell.
           const softness = ((light.edgeSoftness ?? 50) / 50) * GAUSSIAN_SOFTNESS;
-          const falloff = softFalloff(angle, sampleRadius * Math.max(0.05, softness));
+          const falloff = softFalloff(angle, sampleRadius * Math.max(1.0, softness));
           if (falloff <= 0) continue;
 
           // Cosine emission factor (Lambert's law for the area surface)
