@@ -1292,33 +1292,56 @@ export class LightManager {
       this._configureShadows(lightObj, ld.type);
     }
 
-    // Update target to look at origin for spot/directional
+    // Aim the target: an explicit aimTarget (LightPaint) wins, otherwise derive
+    // it from the rotation Euler applied above (forward = local -Z) so the
+    // Rotation controls actually steer spot/directional lights instead of being
+    // a no-op, and default to the origin when neither is set.
     if (entry.target) {
-      entry.target.position.set(0, 0, 0);
+      if (aimTarget) {
+        entry.target.position.set(aimTarget.x, aimTarget.y, aimTarget.z);
+      } else if (ld.transform.rotation.enabled) {
+        const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(lightObj.quaternion);
+        entry.target.position.copy(lightObj.position).add(forward);
+      } else {
+        entry.target.position.set(0, 0, 0);
+      }
     }
 
-    // Update helper
+    // Update helper (a compact wireframe gizmo, shaped per light type)
     const helper = this._helpers.get(ld.id);
     if (helper) {
       helper.visible = shouldShow && ld.gearVisible;
       helper.position.copy(lightObj.position);
-      helper.rotation.copy(lightObj.rotation);
-      if (helper instanceof THREE.Mesh && lightObj instanceof THREE.Light) {
-        (helper.material as THREE.MeshBasicMaterial).color.copy(lightObj.color);
+      helper.quaternion.copy(lightObj.quaternion);
 
-        // Rebuild the plane when the area dimensions change. BufferGeometry is
-        // immutable, so mutating PlaneGeometry.parameters does nothing - the old
-        // geometry must be disposed and replaced.
+      if (lightObj instanceof THREE.Light) {
+        const mat = helper.userData.gizmoMaterial as THREE.LineBasicMaterial | undefined;
+        mat?.color.copy(lightObj.color);
+
+        // Rebuild the rectangle when the area dimensions change. BufferGeometry
+        // is immutable, so the old geometry must be disposed and replaced.
         const isAreaType = ld.type === 'area' || ld.type === 'overhead';
         if (isAreaType) {
           const w = Math.max(0.01, ld.areaWidth ?? 2);
           const h = Math.max(0.01, ld.areaHeight ?? 2);
           const prev = helper.userData as { hw?: number; hh?: number };
           if (prev.hw !== w || prev.hh !== h) {
-            helper.geometry.dispose();
-            helper.geometry = new THREE.PlaneGeometry(w, h);
+            const line = helper.children[0] as THREE.LineLoop;
+            line.geometry.dispose();
+            line.geometry = this._areaRectGeometry(w, h);
             prev.hw = w;
             prev.hh = h;
+          }
+        }
+
+        // Rebuild the spot cone when its angle changes.
+        if (lightObj instanceof THREE.SpotLight) {
+          const line = helper.children[0] as THREE.LineSegments;
+          if (line && Math.abs((line.userData.lastAngle ?? 0) - lightObj.angle) > 0.001) {
+            const pts = this._spotConePoints(lightObj.angle);
+            line.geometry.dispose();
+            line.geometry = new THREE.BufferGeometry().setFromPoints(pts);
+            line.userData.lastAngle = lightObj.angle;
           }
         }
       }
@@ -1415,27 +1438,124 @@ export class LightManager {
 
   private _createHelper(type: string, light: THREE.Light, ld?: { areaWidth?: number; areaHeight?: number }): THREE.Object3D | null {
     const isArea = type === 'area' || type === 'overhead';
-    let geo: THREE.BufferGeometry;
-    if (isArea) {
-      const w = Math.max(0.01, ld?.areaWidth ?? 2);
-      const h = Math.max(0.01, ld?.areaHeight ?? 2);
-      geo = new THREE.PlaneGeometry(w, h);
-    } else if (type === 'directional') {
-      // Use a slightly larger sphere for directional
-      geo = new THREE.SphereGeometry(0.1, 12, 12);
-    } else {
-      geo = new THREE.SphereGeometry(0.06, 10, 10);
-    }
-    const mat = new THREE.MeshBasicMaterial({
+    const isSpot = type === 'spot' || type === 'rim';
+
+    const mat = new THREE.LineBasicMaterial({
       color: light.color,
       transparent: true,
       opacity: 0.7,
       depthTest: false,
     });
-    const mesh = new THREE.Mesh(geo, mat);
-    mesh.userData.isHelper = true;
-    mesh.renderOrder = 999;
-    return mesh;
+
+    let group: THREE.Group;
+    if (isArea) {
+      const w = Math.max(0.01, ld?.areaWidth ?? 2);
+      const h = Math.max(0.01, ld?.areaHeight ?? 2);
+      group = this._buildAreaHelper(w, h, mat);
+    } else if (isSpot) {
+      group = this._buildSpotHelper(light as THREE.SpotLight, mat);
+    } else if (type === 'directional') {
+      group = this._buildDirectionalHelper(mat);
+    } else {
+      group = this._buildPointHelper(mat);
+    }
+
+    group.userData.isHelper = true;
+    group.userData.gizmoMaterial = mat;
+    return group;
+  }
+
+  private _areaRectGeometry(w: number, h: number): THREE.BufferGeometry {
+    const hw = w / 2, hh = h / 2;
+    return new THREE.BufferGeometry().setFromPoints([
+      new THREE.Vector3(-hw, -hh, 0),
+      new THREE.Vector3(hw, -hh, 0),
+      new THREE.Vector3(hw, hh, 0),
+      new THREE.Vector3(-hw, hh, 0),
+    ]);
+  }
+
+  private _buildAreaHelper(w: number, h: number, mat: THREE.LineBasicMaterial): THREE.Group {
+    const group = new THREE.Group();
+    const line = new THREE.LineLoop(this._areaRectGeometry(w, h), mat);
+    line.renderOrder = 999;
+    group.add(line);
+    group.userData.hw = w;
+    group.userData.hh = h;
+    return group;
+  }
+
+  private _buildPointHelper(mat: THREE.LineBasicMaterial): THREE.Group {
+    const group = new THREE.Group();
+    const r = 0.12;
+    const segs = 32;
+    for (let axis = 0; axis < 3; axis++) {
+      const pts: THREE.Vector3[] = [];
+      for (let i = 0; i <= segs; i++) {
+        const a = (i / segs) * Math.PI * 2;
+        const c = Math.cos(a) * r, s = Math.sin(a) * r;
+        pts.push(axis === 0 ? new THREE.Vector3(0, c, s) :
+                  axis === 1 ? new THREE.Vector3(c, 0, s) :
+                               new THREE.Vector3(c, s, 0));
+      }
+      const line = new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), mat);
+      line.renderOrder = 999;
+      group.add(line);
+    }
+    return group;
+  }
+
+  private _spotConePoints(halfAngle: number): THREE.Vector3[] {
+    const length = 1.4;
+    const r = Math.tan(halfAngle) * length;
+    const pts: THREE.Vector3[] = [];
+    const segs = 24;
+    for (let i = 0; i < segs; i++) {
+      const a1 = (i / segs) * Math.PI * 2;
+      const a2 = ((i + 1) / segs) * Math.PI * 2;
+      pts.push(new THREE.Vector3(Math.cos(a1) * r, Math.sin(a1) * r, -length));
+      pts.push(new THREE.Vector3(Math.cos(a2) * r, Math.sin(a2) * r, -length));
+    }
+    for (let i = 0; i < 8; i++) {
+      const a = (i / 8) * Math.PI * 2;
+      pts.push(new THREE.Vector3(0, 0, 0));
+      pts.push(new THREE.Vector3(Math.cos(a) * r, Math.sin(a) * r, -length));
+    }
+    return pts;
+  }
+
+  private _buildSpotHelper(light: THREE.SpotLight, mat: THREE.LineBasicMaterial): THREE.Group {
+    const group = new THREE.Group();
+    const halfAngle = light.angle ?? Math.PI / 8;
+    const line = new THREE.LineSegments(new THREE.BufferGeometry().setFromPoints(this._spotConePoints(halfAngle)), mat);
+    line.userData.lastAngle = halfAngle;
+    line.renderOrder = 999;
+    group.add(line);
+    return group;
+  }
+
+  private _buildDirectionalHelper(mat: THREE.LineBasicMaterial): THREE.Group {
+    const group = new THREE.Group();
+    const r = 0.3, segs = 24;
+    const circlePts: THREE.Vector3[] = [];
+    for (let i = 0; i <= segs; i++) {
+      const a = (i / segs) * Math.PI * 2;
+      circlePts.push(new THREE.Vector3(Math.cos(a) * r, Math.sin(a) * r, 0));
+    }
+    const circle = new THREE.Line(new THREE.BufferGeometry().setFromPoints(circlePts), mat);
+    circle.renderOrder = 999;
+    group.add(circle);
+    for (let i = 0; i < 8; i++) {
+      const a = (i / 8) * Math.PI * 2;
+      const rayPts = [
+        new THREE.Vector3(Math.cos(a) * r, Math.sin(a) * r, 0),
+        new THREE.Vector3(Math.cos(a) * r, Math.sin(a) * r, -1.0),
+      ];
+      const ray = new THREE.Line(new THREE.BufferGeometry().setFromPoints(rayPts), mat);
+      ray.renderOrder = 999;
+      group.add(ray);
+    }
+    return group;
   }
 
   private _removeLight(id: string): void {
@@ -1469,10 +1589,14 @@ export class LightManager {
 
   private _disposeObject(obj: THREE.Object3D): void {
     obj.traverse((child) => {
-      if (child instanceof THREE.Mesh) {
+      // Line/LineSegments/LineLoop (used by the wireframe light gizmos) also
+      // carry their own geometry/material, same shape as Mesh.
+      if (child instanceof THREE.Mesh || child instanceof THREE.Line) {
         child.geometry.dispose();
         if (child.material instanceof THREE.Material) {
           child.material.dispose();
+        } else if (Array.isArray(child.material)) {
+          child.material.forEach((m) => m.dispose());
         }
       }
     });
@@ -1684,7 +1808,12 @@ export class ModelLoader {
   /**
    * Load a model from an ArrayBuffer (e.g., restored from a scene file).
    */
-  async loadFromBuffer(arrayBuffer: ArrayBuffer, fileName: string): Promise<void> {
+  async loadFromBuffer(
+    arrayBuffer: ArrayBuffer,
+    fileName: string,
+    options?: { skipCenterAndScale?: boolean }
+  ): Promise<void> {
+    const skipCenterAndScale = options?.skipCenterAndScale ?? false;
     if (this._loading) return;
     this._loading = true;
     this._progress = 0;
@@ -1723,19 +1852,22 @@ export class ModelLoader {
         }
       });
 
-      // Center and scale
-      const box = new THREE.Box3().setFromObject(gltf.scene);
-      const center = box.getCenter(new THREE.Vector3());
-      const size = box.getSize(new THREE.Vector3());
-      const maxDim = Math.max(size.x, size.y, size.z);
-      if (maxDim > 0) {
-        const scale = 4 / maxDim;
-        gltf.scene.scale.multiplyScalar(scale);
+      // Center and scale (skipped when the caller wants the model's original
+      // transform preserved, e.g. positions pushed live from Blender)
+      if (!skipCenterAndScale) {
+        const box = new THREE.Box3().setFromObject(gltf.scene);
+        const center = box.getCenter(new THREE.Vector3());
+        const size = box.getSize(new THREE.Vector3());
+        const maxDim = Math.max(size.x, size.y, size.z);
+        if (maxDim > 0) {
+          const scale = 4 / maxDim;
+          gltf.scene.scale.multiplyScalar(scale);
+        }
+        const box2 = new THREE.Box3().setFromObject(gltf.scene);
+        const center2 = box2.getCenter(new THREE.Vector3());
+        gltf.scene.position.sub(center2);
+        gltf.scene.position.y += box2.getSize(new THREE.Vector3()).y / 2;
       }
-      const box2 = new THREE.Box3().setFromObject(gltf.scene);
-      const center2 = box2.getCenter(new THREE.Vector3());
-      gltf.scene.position.sub(center2);
-      gltf.scene.position.y += box2.getSize(new THREE.Vector3()).y / 2;
 
       this._loading = false;
       this._progress = 100;
