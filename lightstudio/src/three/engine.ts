@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { OBJLoader } from 'three/addons/loaders/OBJLoader.js';
 import { RectAreaLightUniformsLib } from 'three/addons/lights/RectAreaLightUniformsLib.js';
 import { setRawModelData, clearRawModelData } from '../store/modelDataStore';
 import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
@@ -1622,6 +1623,7 @@ export class ModelLoader {
   private _scene: THREE.Scene;
   private _currentModel: THREE.Group | null = null;
   private _loader = new GLTFLoader();
+  private _objLoader = new OBJLoader();
   private _loading = false;
   private _progress = 0;
   private _onProgress: ((progress: number) => void) | null = null;
@@ -1880,6 +1882,65 @@ export class ModelLoader {
       this._onError?.(msg);
     } finally {
       URL.revokeObjectURL(url);
+    }
+  }
+
+  /**
+   * Load a model from raw OBJ text (e.g. pushed from Maya, which has no
+   * native glTF export). OBJLoader carries no materials of its own - meshes
+   * come in with three.js's default material, ready for the app's own
+   * Material Editor to take over, same as any other freshly-loaded model.
+   */
+  async loadObjFromText(
+    text: string,
+    fileName: string,
+    options?: { skipCenterAndScale?: boolean }
+  ): Promise<void> {
+    if (this._loading) return;
+    const skipCenterAndScale = options?.skipCenterAndScale ?? false;
+    this._loading = true;
+    this._progress = 0;
+    this._onProgress?.(0);
+
+    try {
+      const obj = this._objLoader.parse(text);
+
+      this.removeCurrentModel();
+
+      this._currentModel = obj;
+      this._scene.add(obj);
+
+      obj.traverse((child) => {
+        if (child instanceof THREE.Mesh) {
+          child.castShadow = true;
+          child.receiveShadow = true;
+        }
+      });
+
+      if (!skipCenterAndScale) {
+        const box = new THREE.Box3().setFromObject(obj);
+        const size = box.getSize(new THREE.Vector3());
+        const maxDim = Math.max(size.x, size.y, size.z);
+        if (maxDim > 0) {
+          obj.scale.multiplyScalar(4 / maxDim);
+        }
+        const box2 = new THREE.Box3().setFromObject(obj);
+        const center2 = box2.getCenter(new THREE.Vector3());
+        obj.position.sub(center2);
+        obj.position.y += box2.getSize(new THREE.Vector3()).y / 2;
+      }
+
+      this._updateContactShadow(new THREE.Box3().setFromObject(obj));
+
+      this._loading = false;
+      this._progress = 100;
+      this._onProgress?.(100);
+      this._onLoaded?.(fileName.replace(/\.obj$/i, ''));
+    } catch (err) {
+      this._loading = false;
+      this._progress = 0;
+      const msg = err instanceof Error ? err.message : 'Failed to load OBJ model';
+      this._onError?.(msg);
     }
   }
 

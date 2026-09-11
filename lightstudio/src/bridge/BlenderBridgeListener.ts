@@ -1,7 +1,10 @@
 import * as THREE from 'three';
 import { useLightsStore } from '../store/lightsStore';
 import { useSceneStore } from '../store/sceneStore';
+import { useHDRIShapesStore } from '../store/hdriShapesStore';
 import type { Light, LightRotation, LightType } from '../types/Light';
+import { isTauri } from '@tauri-apps/api/core';
+import { listen } from '@tauri-apps/api/event';
 
 const HDRI_BRIDGE_EVENT = 'hdri-bridge:scene-update';
 
@@ -31,10 +34,18 @@ interface BridgeMeshPayload {
   fileName: string;
   dataBase64: string;
   objectNames: string[];
+  /** Which loader to run this through - defaults to 'glb' (e.g. Blender's
+   *  export). Maya has no native glTF export, so its addon sends 'obj'. */
+  format?: 'glb' | 'obj';
   error?: string;
 }
 
 interface BridgePayload {
+  /** Which DCC/addon sent this - controls axis conversion. Blender is Z-up
+   *  and needs remapping to Three.js's Y-up; Maya is already Y-up and needs
+   *  none. Missing/unrecognized defaults to 'blender' for older addon builds
+   *  that predate this field. */
+  source?: 'blender' | 'maya';
   lights?: BridgeLightData[];
   camera?: BridgeCameraData;
   world?: { hdri_path?: string; strength?: number };
@@ -42,8 +53,12 @@ interface BridgePayload {
 }
 
 // ─── Axis conversion ───────────────────────────────────────────────────────
-// Blender Z-up -> Three.js Y-up: X=X  Y=Z  Z=-Y
-function blToThreePos(b: Vec3): THREE.Vector3 {
+// Blender is Z-up: X=X  Y=Z  Z=-Y maps it to Three.js's Y-up. Maya is already
+// Y-up/right-handed like Three.js, so its coordinates pass through unchanged.
+function toThreePos(b: Vec3, source: BridgePayload['source']): THREE.Vector3 {
+  if (source === 'maya') {
+    return new THREE.Vector3(b.x, b.y, b.z);
+  }
   return new THREE.Vector3(b.x, b.z, -b.y);
 }
 
@@ -71,7 +86,7 @@ function energyToBrightness(type: BridgeLightData['type'], energy: number): numb
 }
 
 // ─── Apply lights ──────────────────────────────────────────────────────────
-function applyLights(lightsData: BridgeLightData[]) {
+function applyLights(lightsData: BridgeLightData[], source: BridgePayload['source']) {
   const { lights, addLight, updateLight } = useLightsStore.getState();
   const existingIds = new Set(lights.map((l) => l.id));
 
@@ -80,7 +95,7 @@ function applyLights(lightsData: BridgeLightData[]) {
 
     // Cartesian -> the spherical form the engine actually renders from
     // (radius = horizontal distance, height = world Y; see LightManager._updateLight)
-    const threePos = blToThreePos(bl.position);
+    const threePos = toThreePos(bl.position, source);
     const radius = Math.sqrt(threePos.x ** 2 + threePos.z ** 2);
     const lng = radius > 1e-6 ? (Math.atan2(threePos.z, threePos.x) * 180) / Math.PI : 0;
 
@@ -92,7 +107,7 @@ function applyLights(lightsData: BridgeLightData[]) {
       enabled: true,
       repeat: false,
       advanced: { lR: 0, p1: 0, p2: 0, p3: 0, rR: 0, ro: 0, roat: 0 },
-      ...(bl.aim_target ? { aimTarget: blToThreePos(bl.aim_target) } : {}),
+      ...(bl.aim_target ? { aimTarget: toThreePos(bl.aim_target, source) } : {}),
     };
 
     const updates: Partial<Light> = {
@@ -129,9 +144,9 @@ function applyMesh(mesh: BridgeMeshPayload) {
     console.warn('[BlenderBridge] mesh export error:', mesh.error);
     return;
   }
-  // skipFit=true so the engine preserves the Blender-space transform instead
-  // of auto-centering/rescaling the loaded model.
-  useSceneStore.getState().setPendingModelData(mesh.dataBase64, mesh.fileName, true);
+  // skipFit=true so the engine preserves the DCC-space transform instead of
+  // auto-centering/rescaling the loaded model.
+  useSceneStore.getState().setPendingModelData(mesh.dataBase64, mesh.fileName, true, mesh.format ?? 'glb');
 }
 
 // ─── Main handler ──────────────────────────────────────────────────────────
@@ -139,20 +154,45 @@ function handleBridgePayload(payload: BridgePayload) {
   console.log('[BlenderBridge] received payload', payload);
 
   if (payload.lights?.length) {
-    applyLights(payload.lights);
+    applyLights(payload.lights, payload.source ?? 'blender');
   }
   if (payload.mesh) {
     applyMesh(payload.mesh);
   }
   // Camera and world/HDRI handling can be extended here
+
+  if (payload.lights?.length || payload.mesh) {
+    // A push is a deliberate, one-off action (unlike a slider drag) - render
+    // the HDRI Preview once so the result is visible without the user having
+    // to also flip on Live Preview or hunt for the Refresh button.
+    useHDRIShapesStore.getState().requestPreviewRefresh();
+  }
 }
 
 // ─── Init (call once from main.tsx) ────────────────────────────────────────
+// Two transports carry the same event name/payload shape, picked by runtime:
+// - `npm run dev` (Vite dev server, browser or `tauri dev`): the dev-server
+//   plugin relays pushes over Vite's own HMR WebSocket.
+// - the built desktop app (no dev server exists): the Rust backend's own
+//   HTTP listener (src-tauri/src/lib.rs) relays pushes as a Tauri event.
 export function initBlenderBridge() {
   if (import.meta.hot) {
     import.meta.hot.on(HDRI_BRIDGE_EVENT, (data: BridgePayload) => {
       handleBridgePayload(data);
     });
-    console.log('[BlenderBridge] listening for Blender pushes on', HDRI_BRIDGE_EVENT);
+    console.log('[BlenderBridge] listening for Blender pushes (dev server) on', HDRI_BRIDGE_EVENT);
+    return;
+  }
+
+  if (isTauri()) {
+    listen<BridgePayload>(HDRI_BRIDGE_EVENT, (event) => {
+      handleBridgePayload(event.payload);
+    })
+      .then(() => {
+        console.log('[BlenderBridge] listening for Blender pushes (desktop app) on', HDRI_BRIDGE_EVENT);
+      })
+      .catch((e) => {
+        console.error('[BlenderBridge] failed to attach desktop listener', e);
+      });
   }
 }

@@ -138,6 +138,7 @@ export const HDRIPreviewPanel: React.FC = () => {
 
   const livePreview = useHDRIShapesStore((s) => s.livePreview);
   const setLivePreview = useHDRIShapesStore((s) => s.setLivePreview);
+  const previewRefreshRequestId = useHDRIShapesStore((s) => s.previewRefreshRequestId);
   const draggingRef = useRef(false);
   // Single source of truth = renderSettings.exposure (same value driving the
   // live viewport and Render Settings > Exposure), so this panel always
@@ -365,6 +366,18 @@ export const HDRIPreviewPanel: React.FC = () => {
       if (timerRef.current) window.clearTimeout(timerRef.current);
     };
   }, [livePreview, lights, environment, hdriAssets, shapes, resIndex, renderPreview]);
+
+  /** One-off render on request (e.g. right after a Blender/Maya bridge push),
+   *  regardless of the livePreview toggle - skips the initial mount so this
+   *  doesn't also fire a redundant render at startup. */
+  const skipInitialRefreshRequest = useRef(true);
+  useEffect(() => {
+    if (skipInitialRefreshRequest.current) {
+      skipInitialRefreshRequest.current = false;
+      return;
+    }
+    void renderPreview();
+  }, [previewRefreshRequestId, renderPreview]);
 
   /** Exposure only re-paints - no need to re-run the expensive pixel loop. */
   useEffect(() => {

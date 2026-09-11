@@ -1,6 +1,6 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
-  "productName": "LightForge Studio",
+  "productName": "HDRI Forge Studio",
   "version": "0.1.0",
   "identifier": "com.lightforge.studio",
   "build": {
@@ -12,7 +12,7 @@
   "app": {
     "windows": [
       {
-        "title": "LightForge Studio",
+        "title": "HDRI Forge Studio",
         "width": 1440,
         "height": 900,
         "minWidth": 1024,

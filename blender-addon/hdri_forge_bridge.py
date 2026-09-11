@@ -1,7 +1,7 @@
 bl_info = {
     "name":     "HDRI Forge Bridge",
     "author":   "HDRI Forge Studio",
-    "version":  (1, 0, 0),
+    "version":  (1, 1, 0),
     "blender":  (4, 0, 0),
     "location": "View3D > Sidebar > HDRI Bridge",
     "description": "Push selected Blender objects to HDRI Forge Studio in real time",
@@ -10,15 +10,97 @@ bl_info = {
 
 import bpy, math, json, base64, tempfile, os, urllib.request, urllib.error
 from mathutils import Quaternion
+from bpy.props import StringProperty, BoolProperty, EnumProperty
 
-STUDIO_URL = "http://localhost:5173/__hdri_bridge_push"
+# Dev server (npm run dev) listens on 5173; the installed desktop app's own
+# listener (src-tauri/src/lib.rs) listens on 8973 - kept distinct so both
+# can run at once without colliding. The addon auto-detects whichever one is
+# actually running, so nobody has to know these numbers exist.
+DEV_SERVER_URL = "http://localhost:5173/__hdri_bridge_push"
+DESKTOP_APP_URL = "http://localhost:8973/__hdri_bridge_push"
+CANDIDATES = [
+    (DESKTOP_APP_URL, "Desktop App"),
+    (DEV_SERVER_URL, "Dev Server"),
+]
+
+# Cached result of the last auto-detect probe, shared by the panel (read-only,
+# fast) and the probing/push operators (the only things allowed to update it).
+_state = {"url": None, "label": None}
+
+
+def _probe_one(url, timeout=0.35):
+    """GET the bridge endpoint - a real Studio answers 200 with no side effects."""
+    try:
+        with urllib.request.urlopen(url, timeout=timeout) as resp:
+            return resp.status == 200
+    except Exception:
+        return False
+
+
+def probe_studio():
+    """Check both known endpoints and cache whichever answers first (desktop app preferred)."""
+    for url, label in CANDIDATES:
+        if _probe_one(url):
+            _state["url"] = url
+            _state["label"] = label
+            return True
+    _state["url"] = None
+    _state["label"] = None
+    return False
+
+
+def get_studio_url(context):
+    prefs = context.preferences.addons[__name__].preferences
+    if not prefs.auto_detect and prefs.manual_url:
+        return prefs.manual_url
+    return _state["url"]
+
+
+class HDRIBRIDGE_AddonPreferences(bpy.types.AddonPreferences):
+    bl_idname = __name__
+
+    auto_detect: BoolProperty(
+        name="Auto-detect Studio",
+        description="Automatically find whichever HDRI Forge Studio is running "
+                    "(desktop app or dev server). Turn off to set the address manually.",
+        default=True,
+    )
+    manual_url: StringProperty(
+        name="Manual Studio URL",
+        description="Only used when Auto-detect is off",
+        default=DESKTOP_APP_URL,
+    )
+    active_tab: EnumProperty(
+        name="Tab",
+        items=[
+            ('STUDIO', "HDRI Forge Studio", "Push selected objects to HDRI Forge Studio"),
+            ('MAYA', "Maya", "Direct Blender <-> Maya connection"),
+        ],
+        default='STUDIO',
+    )
+
+    def draw(self, context):
+        layout = self.layout
+        layout.prop(self, "auto_detect")
+        col = layout.column()
+        col.enabled = not self.auto_detect
+        col.prop(self, "manual_url")
+
+
+# ─── Auto-detect on load, then keep it fresh in the background ─────────────
+def _background_probe():
+    probe_studio()
+    for area in getattr(bpy.context, 'screen', None).areas if bpy.context.screen else []:
+        area.tag_redraw()
+    return 4.0  # reschedule every 4s - cheap (one GET, ~0.35s worst case) and keeps status live
+
 
 # Quaternion that rotates Blender Z-up to Three.js Y-up (-90 deg around X)
 _CONV_Q = Quaternion((1, 0, 0), math.radians(-90))
 _CONV_Q_INV = _CONV_Q.inverted()
 
 
-# -- Rotation conversion -----------------------------------------------------
+# ── Rotation conversion ────────────────────────────────────────────────────
 def convert_rotation_to_euler_deg(q_blender: Quaternion) -> dict:
     """
     Converts a Blender quaternion to Three.js Euler XYZ degrees using the same
@@ -46,7 +128,7 @@ def convert_rotation_to_euler_deg(q_blender: Quaternion) -> dict:
     }
 
 
-# -- Mesh export --------------------------------------------------------------
+# ── Mesh export ────────────────────────────────────────────────────────────
 def _export_selected_meshes_glb(context) -> dict:
     """
     Export currently selected mesh objects to a temporary GLB file.
@@ -85,8 +167,8 @@ def _export_selected_meshes_glb(context) -> dict:
 
         file_name = '_'.join(o.name for o in selected[:3]) + '.glb'
         return {
-            'fileName': file_name,
-            'dataBase64': data,
+            'fileName':    file_name,
+            'dataBase64':  data,
             'objectNames': [o.name for o in selected],
         }
     except Exception as e:
@@ -102,54 +184,83 @@ def _export_selected_meshes_glb(context) -> dict:
                 pass
 
 
-# -- Main push operator --------------------------------------------------------
+# ── Refresh-connection operator ─────────────────────────────────────────────
+class HDRIBRIDGE_OT_refresh(bpy.types.Operator):
+    bl_idname = "hdribridge.refresh"
+    bl_label = "Refresh Connection"
+    bl_description = "Check for a running HDRI Forge Studio"
+
+    def execute(self, context):
+        found = probe_studio()
+        if found:
+            self.report({'INFO'}, f"Connected: {_state['label']}")
+        else:
+            self.report({'WARNING'}, "No HDRI Forge Studio found running")
+        for area in context.screen.areas:
+            area.tag_redraw()
+        return {'FINISHED'}
+
+
+# ── Main push operator ─────────────────────────────────────────────────────
 class HDRIBRIDGE_OT_push(bpy.types.Operator):
-    bl_idname = "hdribridge.push"
-    bl_label = "Push to HDRI Forge Studio"
+    bl_idname  = "hdribridge.push"
+    bl_label   = "Push to HDRI Forge Studio"
     bl_description = "Send selected objects to HDRI Forge Studio"
 
     def execute(self, context):
-        payload = {}
+        prefs = context.preferences.addons[__name__].preferences
+        if prefs.auto_detect:
+            # Always re-probe right before sending, rather than trusting the
+            # background timer's last result - it can go stale (e.g. the
+            # Desktop App was restarted since the last 4s tick) and silently
+            # send the push to the wrong target.
+            probe_studio()
+        studio_url = get_studio_url(context)
+        if not studio_url:
+            self.report({'ERROR'}, "No HDRI Forge Studio found running - open the app or start the dev server")
+            return {'CANCELLED'}
 
-        # -- Lights --
+        payload = {'source': 'blender'}
+
+        # ── Lights ──
         lights = []
         for obj in context.selected_objects:
             if obj.type != 'LIGHT':
                 continue
-            ld = obj.data
+            ld  = obj.data
             loc = obj.matrix_world.translation
-            q = obj.matrix_world.to_quaternion()
+            q   = obj.matrix_world.to_quaternion()
             rot = convert_rotation_to_euler_deg(q)
 
             entry = {
-                'id': obj.name,
-                'name': obj.name,
-                'type': ld.type,  # 'POINT', 'SUN', 'SPOT', 'AREA'
-                'color': {'r': ld.color.r, 'g': ld.color.g, 'b': ld.color.b},
-                'energy': ld.energy,
+                'id':       obj.name,
+                'name':     obj.name,
+                'type':     ld.type,          # 'POINT','SUN','SPOT','AREA'
+                'color':    {'r': ld.color.r, 'g': ld.color.g, 'b': ld.color.b},
+                'energy':   ld.energy,
                 'position': {'x': loc.x, 'y': loc.y, 'z': loc.z},
                 'rotation': rot,
             }
             if ld.type == 'SPOT':
-                entry['spot_size'] = ld.spot_size  # full cone angle, radians
+                entry['spot_size'] = ld.spot_size   # full cone angle in radians
             lights.append(entry)
 
         if lights:
             payload['lights'] = lights
 
-        # -- Camera --
+        # ── Camera ──
         cam_obj = context.scene.camera
         if cam_obj:
             loc = cam_obj.matrix_world.translation
-            q = cam_obj.matrix_world.to_quaternion()
+            q   = cam_obj.matrix_world.to_quaternion()
             rot = convert_rotation_to_euler_deg(q)
             payload['camera'] = {
                 'position': {'x': loc.x, 'y': loc.y, 'z': loc.z},
                 'rotation': rot,
-                'fov': math.degrees(cam_obj.data.angle),
+                'fov':      math.degrees(cam_obj.data.angle),
             }
 
-        # -- World / HDRI --
+        # ── World / HDRI ──
         world = context.scene.world
         if world and world.use_nodes:
             for node in world.node_tree.nodes:
@@ -157,7 +268,7 @@ class HDRIBRIDGE_OT_push(bpy.types.Operator):
                     payload['world'] = {'hdri_path': node.image.filepath}
                     break
 
-        # -- Mesh objects --
+        # ── Mesh objects ──
         mesh_objs = [o for o in context.selected_objects if o.type == 'MESH']
         if mesh_objs:
             payload['mesh'] = _export_selected_meshes_glb(context)
@@ -168,16 +279,18 @@ class HDRIBRIDGE_OT_push(bpy.types.Operator):
 
         try:
             data = json.dumps(payload).encode('utf-8')
-            req = urllib.request.Request(
-                STUDIO_URL,
-                data=data,
-                headers={'Content-Type': 'application/json'},
-                method='POST',
+            req  = urllib.request.Request(
+                studio_url,
+                data    = data,
+                headers = {'Content-Type': 'application/json'},
+                method  = 'POST',
             )
-            with urllib.request.urlopen(req, timeout=5) as resp:
+            with urllib.request.urlopen(req, timeout=15) as resp:
                 resp.read()
-            self.report({'INFO'}, f"Pushed to Studio: {list(payload.keys())}")
+            self.report({'INFO'}, f"Pushed to {_state['label'] or 'Studio'}: {list(payload.keys())}")
         except urllib.error.URLError as e:
+            _state["url"] = None
+            _state["label"] = None
             self.report({'ERROR'}, f"Studio unreachable: {e}")
             return {'CANCELLED'}
         except Exception as e:
@@ -187,34 +300,62 @@ class HDRIBRIDGE_OT_push(bpy.types.Operator):
         return {'FINISHED'}
 
 
-# -- Panel ----------------------------------------------------------------------
+# ── Panel ──────────────────────────────────────────────────────────────────
 class HDRIBRIDGE_PT_panel(bpy.types.Panel):
-    bl_label = "HDRI Forge Bridge"
-    bl_idname = "HDRIBRIDGE_PT_panel"
-    bl_space_type = "VIEW_3D"
+    bl_label       = "HDRI Forge Bridge"
+    bl_idname      = "HDRIBRIDGE_PT_panel"
+    bl_space_type  = "VIEW_3D"
     bl_region_type = "UI"
-    bl_category = "HDRI Bridge"
+    bl_category    = "HDRI Bridge"
 
     def draw(self, context):
         layout = self.layout
-        sel = context.selected_objects
+        prefs = context.preferences.addons[__name__].preferences
+
+        tabs = layout.row(align=True)
+        tabs.prop(prefs, "active_tab", expand=True)
+        layout.separator()
+
+        if prefs.active_tab == 'MAYA':
+            box = layout.box()
+            box.label(text="Blender <-> Maya direct connection", icon='INFO')
+            box.label(text="Not built yet - coming soon.")
+            box.label(text="For now, push through the")
+            box.label(text="HDRI Forge Studio tab from both apps.")
+            return
+
+        sel    = context.selected_objects
         lights = [o for o in sel if o.type == 'LIGHT']
         meshes = [o for o in sel if o.type == 'MESH']
 
+        row = layout.row(align=True)
+        if _state["url"]:
+            row.label(text=f"Connected — {_state['label']}", icon='CHECKMARK')
+        else:
+            row.label(text="Not connected", icon='X')
+        row.operator("hdribridge.refresh", text="", icon='FILE_REFRESH')
+
+        layout.separator()
         layout.label(text=f"Selected: {len(lights)} lights, {len(meshes)} meshes")
         layout.operator("hdribridge.push", icon='EXPORT')
-        layout.separator()
-        layout.label(text=f"Target: {STUDIO_URL}", icon='URL')
 
 
-# -- Registration -----------------------------------------------------------
-classes = [HDRIBRIDGE_OT_push, HDRIBRIDGE_PT_panel]
+# ── Registration ───────────────────────────────────────────────────────────
+classes = [
+    HDRIBRIDGE_AddonPreferences,
+    HDRIBRIDGE_OT_refresh,
+    HDRIBRIDGE_OT_push,
+    HDRIBRIDGE_PT_panel,
+]
 
 def register():
     for cls in classes:
         bpy.utils.register_class(cls)
+    bpy.app.timers.register(_background_probe, first_interval=0.5)
 
 def unregister():
+    if bpy.app.timers.is_registered(_background_probe):
+        bpy.app.timers.unregister(_background_probe)
     for cls in reversed(classes):
         bpy.utils.unregister_class(cls)
 

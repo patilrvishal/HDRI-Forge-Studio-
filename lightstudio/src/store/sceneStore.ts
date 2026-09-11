@@ -14,6 +14,9 @@ interface SceneStore extends SceneState {
   // Transient: when true, the pending model should keep its original transform
   // (e.g. positions pushed live from Blender) instead of being auto-centered/rescaled
   _pendingModelSkipFit: boolean;
+  // Transient: which loader to run the pending model through - 'glb' (default,
+  // e.g. Blender's export) or 'obj' (e.g. Maya, which has no native glTF export)
+  _pendingModelFormat: 'glb' | 'obj';
   // Transient: pending custom HDRI data (base64) from scene file restore
   _pendingHDRIDataBase64: string | null;
   _pendingHDRIFileName: string;
@@ -59,7 +62,7 @@ interface SceneStore extends SceneState {
   resetScene: () => void;
   
   // Model data restore
-  setPendingModelData: (base64: string | null, fileName: string, skipFit?: boolean) => void;
+  setPendingModelData: (base64: string | null, fileName: string, skipFit?: boolean, format?: 'glb' | 'obj') => void;
   clearPendingModelData: () => void;
   // HDRI data restore
   setPendingHDRIData: (base64: string | null, fileName: string) => void;
@@ -72,6 +75,7 @@ export const useSceneStore = create<SceneStore>((set, get) => ({
   _pendingModelDataBase64: null,
   _pendingModelFileName: 'model.glb',
   _pendingModelSkipFit: false,
+  _pendingModelFormat: 'glb',
   _pendingHDRIDataBase64: null,
   _pendingHDRIFileName: 'custom.hdr',
 
@@ -259,15 +263,15 @@ export const useSceneStore = create<SceneStore>((set, get) => ({
 
   resetScene: () => {
     history.record('New Scene');
-    set({ ...DEFAULT_SCENE_STATE, cameraBookmarks: [], _pendingModelDataBase64: null, _pendingModelFileName: 'model.glb', _pendingModelSkipFit: false });
+    set({ ...DEFAULT_SCENE_STATE, cameraBookmarks: [], _pendingModelDataBase64: null, _pendingModelFileName: 'model.glb', _pendingModelSkipFit: false, _pendingModelFormat: 'glb' });
   },
 
-  setPendingModelData: (base64, fileName, skipFit = false) => {
-    set({ _pendingModelDataBase64: base64, _pendingModelFileName: fileName, _pendingModelSkipFit: skipFit });
+  setPendingModelData: (base64, fileName, skipFit = false, format = 'glb') => {
+    set({ _pendingModelDataBase64: base64, _pendingModelFileName: fileName, _pendingModelSkipFit: skipFit, _pendingModelFormat: format });
   },
 
   clearPendingModelData: () => {
-    set({ _pendingModelDataBase64: null, _pendingModelFileName: 'model.glb', _pendingModelSkipFit: false });
+    set({ _pendingModelDataBase64: null, _pendingModelFileName: 'model.glb', _pendingModelSkipFit: false, _pendingModelFormat: 'glb' });
   },
 
   setPendingHDRIData: (base64, fileName) => {
