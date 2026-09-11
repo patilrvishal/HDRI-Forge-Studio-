@@ -267,11 +267,38 @@ class HDRIBRIDGE_OT_push(bpy.types.Operator):
             }
 
         # ── World / HDRI ──
+        # The Studio only has an RGBELoader wired up (no EXR support yet, a
+        # pre-existing gap unrelated to this bridge) - .hdr/.hdri environment
+        # textures work; anything else will fail to load on the Studio side
+        # with a clear error rather than silently.
         world = context.scene.world
         if world and world.use_nodes:
             for node in world.node_tree.nodes:
                 if node.type == 'TEX_ENVIRONMENT' and node.image:
-                    payload['world'] = {'hdri_path': node.image.filepath}
+                    img = node.image
+                    try:
+                        if img.packed_file:
+                            raw = img.packed_file.data
+                        else:
+                            with open(bpy.path.abspath(img.filepath), 'rb') as f:
+                                raw = f.read()
+
+                        file_name = os.path.basename(img.filepath) if img.filepath else img.name
+                        if not os.path.splitext(file_name)[1]:
+                            file_name += '.hdr'
+
+                        strength = 1.0
+                        bg_node = next((n for n in world.node_tree.nodes if n.type == 'BACKGROUND'), None)
+                        if bg_node:
+                            strength = bg_node.inputs['Strength'].default_value
+
+                        payload['world'] = {
+                            'fileName': file_name,
+                            'dataBase64': base64.b64encode(raw).decode('ascii'),
+                            'strength': strength,
+                        }
+                    except Exception as e:
+                        payload['world'] = {'error': f'Could not read HDRI "{img.name}": {e}'}
                     break
 
         # ── Mesh objects ──

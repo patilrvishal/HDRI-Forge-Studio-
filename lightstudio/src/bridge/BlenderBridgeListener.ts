@@ -3,6 +3,8 @@ import { useLightsStore } from '../store/lightsStore';
 import { useSceneStore } from '../store/sceneStore';
 import { useHDRIShapesStore } from '../store/hdriShapesStore';
 import { useCameraStore, type SceneCamera } from '../store/cameraStore';
+import { useHDRIAssetStore } from '../store/hdriAssetStore';
+import { base64ToArrayBuffer } from '../store/modelDataStore';
 import type { Light, LightRotation, LightType } from '../types/Light';
 import { isTauri } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
@@ -49,7 +51,7 @@ interface BridgePayload {
   source?: 'blender' | 'maya';
   lights?: BridgeLightData[];
   camera?: BridgeCameraData;
-  world?: { hdri_path?: string; strength?: number };
+  world?: { fileName?: string; dataBase64?: string; strength?: number; error?: string };
   mesh?: BridgeMeshPayload;
 }
 
@@ -180,6 +182,39 @@ function applyMesh(mesh: BridgeMeshPayload) {
   useSceneStore.getState().setPendingModelData(mesh.dataBase64, mesh.fileName, true, mesh.format ?? 'glb');
 }
 
+// ─── Apply world/HDRI ──────────────────────────────────────────────────────
+// Prefix marks an asset as bridge-owned, so a later push for the same file
+// can find and replace it instead of piling up duplicates - the store's
+// public addAsset()/updateAsset() API has no id parameter to reuse directly
+// (unlike lights/camera), so identity here is tracked through the name.
+const BRIDGE_WORLD_PREFIX = 'Bridge: ';
+
+function applyWorld(world: NonNullable<BridgePayload['world']>) {
+  if (world.error) {
+    console.warn('[BlenderBridge] world/HDRI push error:', world.error);
+    return;
+  }
+  if (!world.dataBase64 || !world.fileName) {
+    return;
+  }
+
+  const { assets, removeAsset, addAsset, updateAsset } = useHDRIAssetStore.getState();
+  const bridgeFileName = BRIDGE_WORLD_PREFIX + world.fileName;
+
+  const existing = assets.find((a) => a.fileName === bridgeFileName);
+  if (existing) {
+    removeAsset(existing.id);
+  }
+
+  const arrayBuffer = base64ToArrayBuffer(world.dataBase64);
+  const file = new File([arrayBuffer], bridgeFileName, { type: 'application/octet-stream' });
+  const asset = useHDRIAssetStore.getState().addAsset(file, arrayBuffer);
+
+  if (world.strength !== undefined) {
+    updateAsset(asset.id, { intensity: world.strength });
+  }
+}
+
 // ─── Main handler ──────────────────────────────────────────────────────────
 function handleBridgePayload(payload: BridgePayload) {
   console.log('[BlenderBridge] received payload', payload);
@@ -193,9 +228,11 @@ function handleBridgePayload(payload: BridgePayload) {
   if (payload.camera) {
     applyCamera(payload.camera, payload.source ?? 'blender');
   }
-  // World/HDRI handling can be extended here
+  if (payload.world) {
+    applyWorld(payload.world);
+  }
 
-  if (payload.lights?.length || payload.mesh || payload.camera) {
+  if (payload.lights?.length || payload.mesh || payload.camera || payload.world) {
     // A push is a deliberate, one-off action (unlike a slider drag) - render
     // the HDRI Preview once so the result is visible without the user having
     // to also flip on Live Preview or hunt for the Refresh button.
