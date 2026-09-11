@@ -95,9 +95,15 @@ def _background_probe():
     return 4.0  # reschedule every 4s - cheap (one GET, ~0.35s worst case) and keeps status live
 
 
-# Quaternion that rotates Blender Z-up to Three.js Y-up (-90 deg around X)
+# Quaternion that re-expresses a Blender (Z-up) orientation in Three.js's
+# (Y-up) world. This is a left-compose, NOT a conjugation/sandwich - an
+# "unrotated" object already points a different physical direction in each
+# engine (Blender's local -Z is world-down in a Z-up world; Three.js's local
+# -Z is horizontal in a Y-up world), so conjugating (which only re-expresses
+# a rotation in a new world basis) can't fix that mismatch - composing does.
+# Verified against Blender's own ground-truth forward vector
+# (cam.matrix_world @ Vector((0,0,-1))), not just internal round-trips.
 _CONV_Q = Quaternion((1, 0, 0), math.radians(-90))
-_CONV_Q_INV = _CONV_Q.inverted()
 
 
 # ── Rotation conversion ────────────────────────────────────────────────────
@@ -107,7 +113,7 @@ def convert_rotation_to_euler_deg(q_blender: Quaternion) -> dict:
     asin/atan2 formula as Three.js's Euler.setFromRotationMatrix, so the
     decomposition matches exactly on the Studio side.
     """
-    q3 = _CONV_Q @ q_blender @ _CONV_Q_INV
+    q3 = _CONV_Q @ q_blender
     m = q3.to_matrix()
     m11, m12, m13 = m[0][0], m[0][1], m[0][2]
     m21, m22, m23 = m[1][0], m[1][1], m[1][2]

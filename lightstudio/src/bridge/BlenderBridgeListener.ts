@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { useLightsStore } from '../store/lightsStore';
 import { useSceneStore } from '../store/sceneStore';
 import { useHDRIShapesStore } from '../store/hdriShapesStore';
+import { useCameraStore, type SceneCamera } from '../store/cameraStore';
 import type { Light, LightRotation, LightType } from '../types/Light';
 import { isTauri } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
@@ -138,6 +139,36 @@ function applyLights(lightsData: BridgeLightData[], source: BridgePayload['sourc
   });
 }
 
+// ─── Apply camera ──────────────────────────────────────────────────────────
+// One reserved camera slot for all bridge pushes, so pushing again updates
+// the same camera in place instead of piling up duplicates.
+const BRIDGE_CAMERA_ID = 'bridge-camera';
+
+function applyCamera(bc: BridgeCameraData, source: BridgePayload['source']) {
+  const { cameras, addCamera, updateCamera, setActiveCamera } = useCameraStore.getState();
+  const threePos = toThreePos(bc.position, source);
+
+  const updates: Partial<SceneCamera> = {
+    name: 'Bridge Camera',
+    position: { x: threePos.x, y: threePos.y, z: threePos.z },
+    // Already Three.js-space Euler degrees, pre-converted by the addon (same
+    // as light rotation) - the engine applies this directly when the camera
+    // has no targetId (see SceneManager.applyActiveCamera).
+    rotation: { x: bc.rotation.x, y: bc.rotation.y, z: bc.rotation.z },
+    targetId: null,
+    fov: bc.fov,
+  };
+
+  const existing = cameras.find((c) => c.id === BRIDGE_CAMERA_ID);
+  if (existing) {
+    updateCamera(BRIDGE_CAMERA_ID, updates);
+  } else {
+    const newId = addCamera(updates);
+    updateCamera(newId, { id: BRIDGE_CAMERA_ID });
+  }
+  setActiveCamera(BRIDGE_CAMERA_ID);
+}
+
 // ─── Apply mesh ────────────────────────────────────────────────────────────
 function applyMesh(mesh: BridgeMeshPayload) {
   if (mesh.error) {
@@ -159,9 +190,12 @@ function handleBridgePayload(payload: BridgePayload) {
   if (payload.mesh) {
     applyMesh(payload.mesh);
   }
-  // Camera and world/HDRI handling can be extended here
+  if (payload.camera) {
+    applyCamera(payload.camera, payload.source ?? 'blender');
+  }
+  // World/HDRI handling can be extended here
 
-  if (payload.lights?.length || payload.mesh) {
+  if (payload.lights?.length || payload.mesh || payload.camera) {
     // A push is a deliberate, one-off action (unlike a slider drag) - render
     // the HDRI Preview once so the result is visible without the user having
     // to also flip on Live Preview or hunt for the Refresh button.
