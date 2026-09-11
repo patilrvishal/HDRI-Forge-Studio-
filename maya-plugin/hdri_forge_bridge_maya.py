@@ -1,12 +1,17 @@
 """
 HDRI Forge Bridge for Autodesk Maya
 -------------------------------------
-Push selected Maya lights, the active camera, and selected mesh objects to
-HDRI Forge Studio in real time - the Maya-side counterpart to the Blender
-addon of the same name (blender-addon/hdri_forge_bridge.py). Both send the
-exact same JSON shape to the exact same endpoint, so the Studio side needs no
-per-DCC special-casing beyond the mesh `format` field (Maya has no native
-glTF exporter, so it sends OBJ instead of Blender's GLB).
+Push selected Maya lights, the active camera, selected mesh objects, and the
+scene's Arnold sky dome HDRI to HDRI Forge Studio in real time - the
+Maya-side counterpart to the Blender addon of the same name
+(blender-addon/hdri_forge_bridge.py). Both send the exact same JSON shape to
+the exact same endpoint, so the Studio side needs no per-DCC special-casing
+beyond the mesh `format` field (Maya has no native glTF exporter, so it
+sends OBJ instead of Blender's GLB).
+
+World/HDRI push currently supports Arnold only: it looks for a scene
+aiSkyDomeLight with a file texture connected to its Color input. Other
+renderers (V-Ray, Redshift) are not read.
 
 Install: Windows > Settings/Preferences > Plug-in Manager > Browse, select
 this file, and check "Loaded" (and "Auto load" to keep it enabled). A
@@ -190,6 +195,47 @@ def _export_selected_meshes_obj(selected_transforms):
                 pass
 
 
+# ─── World / HDRI (Arnold aiSkyDomeLight) ───────────────────────────────────
+def _gather_world_arnold():
+    """Read the scene's Arnold sky dome light (if any) into the same
+    {fileName, dataBase64, strength} shape the Blender addon sends for its
+    World Background HDRI - the Studio-side listener is renderer-agnostic
+    and doesn't care which DCC/renderer produced it."""
+    domes = cmds.ls(type='aiSkyDomeLight')
+    if not domes:
+        return None
+    dome = domes[0]
+
+    conns = cmds.listConnections(dome + '.color', source=True, destination=False, type='file') or []
+    if not conns:
+        return None
+    file_node = conns[0]
+
+    raw_path = cmds.getAttr(file_node + '.fileTextureName')
+    if not raw_path:
+        return None
+    resolved = cmds.workspace(expandName=raw_path)
+
+    try:
+        with open(resolved, 'rb') as f:
+            raw = f.read()
+    except Exception as e:
+        return {'error': f'Could not read HDRI texture "{raw_path}": {e}'}
+
+    intensity = cmds.getAttr(dome + '.intensity')
+    exposure = cmds.getAttr(dome + '.exposure')
+    # Arnold expresses brightness as intensity (linear multiplier) * 2^exposure
+    # (stops) - collapse both into the single linear `strength` the Studio
+    # expects, matching Blender's Background node "Strength" semantics.
+    strength = intensity * (2 ** exposure)
+
+    return {
+        'fileName': os.path.basename(resolved),
+        'dataBase64': base64.b64encode(raw).decode('ascii'),
+        'strength': strength,
+    }
+
+
 # ─── Build + send the payload ───────────────────────────────────────────────
 def push_to_studio(*_args):
     up_axis = cmds.upAxis(query=True, axis=True)
@@ -259,6 +305,11 @@ def push_to_studio(*_args):
             'rotation': quat_to_euler_deg(quat),
             'fov': hfov,
         }
+
+    # ── World / HDRI ──
+    world = _gather_world_arnold()
+    if world:
+        payload['world'] = world
 
     # ── Mesh objects ──
     mesh_transforms = [
