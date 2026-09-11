@@ -504,9 +504,6 @@ export class SceneManager {
     }).__cameraStore;
 
     const cam = store?.getState().getActiveCamera() ?? null;
-    console.log('[CAM] stored:', cam.position.x.toFixed(2), cam.position.y.toFixed(2), cam.position.z.toFixed(2),
-      '| actual camera:', this.camera.position.x.toFixed(2), this.camera.position.y.toFixed(2), this.camera.position.z.toFixed(2),
-      '| dragging:', this._cameraDragging);
 
     if (!cam) {
       if (!this.controls.enabled) this.controls.enabled = true;
@@ -526,7 +523,31 @@ export class SceneManager {
       return true;
     }
 
-    const pivot = this.resolveTargetWorld(cam.targetId ?? 'model') ?? { x: 0, y: 0, z: 0 };
+    // When there's no explicit look-at target, the pivot MUST lie on the
+    // camera's own view ray (position + its forward direction) - not an
+    // unrelated point like the model's bounding-box center. OrbitControls
+    // reads its internal spherical state directly off (position - target)
+    // for its own pointer-event handling, independent of the render loop's
+    // gating below; a mismatched target meant the very first drag snapped
+    // the camera toward that unrelated point instead of orbiting around
+    // where it actually looks, silently corrupting a pushed camera's
+    // position/rotation the moment the user touched the viewport.
+    let pivot: { x: number; y: number; z: number };
+    if (cam.targetId) {
+      pivot = this.resolveTargetWorld(cam.targetId) ?? { x: 0, y: 0, z: 0 };
+    } else {
+      const rotRad = new THREE.Euler(
+        (cam.rotation.x * Math.PI) / 180,
+        (cam.rotation.y * Math.PI) / 180,
+        (cam.rotation.z * Math.PI) / 180,
+      );
+      const forward = new THREE.Vector3(0, 0, -1).applyEuler(rotRad);
+      pivot = {
+        x: cam.position.x + forward.x,
+        y: cam.position.y + forward.y,
+        z: cam.position.z + forward.z,
+      };
+    }
     this.controls.target.set(pivot.x, pivot.y, pivot.z);
 
     this.camera.position.set(cam.position.x, cam.position.y, cam.position.z);

@@ -2,6 +2,9 @@ import * as THREE from 'three';
 import { useLightsStore } from '../store/lightsStore';
 import { useSceneStore } from '../store/sceneStore';
 import { useHDRIShapesStore } from '../store/hdriShapesStore';
+import { useCameraStore, type SceneCamera } from '../store/cameraStore';
+import { useHDRIAssetStore } from '../store/hdriAssetStore';
+import { base64ToArrayBuffer } from '../store/modelDataStore';
 import type { Light, LightRotation, LightType } from '../types/Light';
 import { isTauri } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
@@ -48,7 +51,7 @@ interface BridgePayload {
   source?: 'blender' | 'maya';
   lights?: BridgeLightData[];
   camera?: BridgeCameraData;
-  world?: { hdri_path?: string; strength?: number };
+  world?: { fileName?: string; dataBase64?: string; strength?: number; error?: string };
   mesh?: BridgeMeshPayload;
 }
 
@@ -138,6 +141,36 @@ function applyLights(lightsData: BridgeLightData[], source: BridgePayload['sourc
   });
 }
 
+// ─── Apply camera ──────────────────────────────────────────────────────────
+// One reserved camera slot for all bridge pushes, so pushing again updates
+// the same camera in place instead of piling up duplicates.
+const BRIDGE_CAMERA_ID = 'bridge-camera';
+
+function applyCamera(bc: BridgeCameraData, source: BridgePayload['source']) {
+  const { cameras, addCamera, updateCamera, setActiveCamera } = useCameraStore.getState();
+  const threePos = toThreePos(bc.position, source);
+
+  const updates: Partial<SceneCamera> = {
+    name: 'Bridge Camera',
+    position: { x: threePos.x, y: threePos.y, z: threePos.z },
+    // Already Three.js-space Euler degrees, pre-converted by the addon (same
+    // as light rotation) - the engine applies this directly when the camera
+    // has no targetId (see SceneManager.applyActiveCamera).
+    rotation: { x: bc.rotation.x, y: bc.rotation.y, z: bc.rotation.z },
+    targetId: null,
+    fov: bc.fov,
+  };
+
+  const existing = cameras.find((c) => c.id === BRIDGE_CAMERA_ID);
+  if (existing) {
+    updateCamera(BRIDGE_CAMERA_ID, updates);
+  } else {
+    const newId = addCamera(updates);
+    updateCamera(newId, { id: BRIDGE_CAMERA_ID });
+  }
+  setActiveCamera(BRIDGE_CAMERA_ID);
+}
+
 // ─── Apply mesh ────────────────────────────────────────────────────────────
 function applyMesh(mesh: BridgeMeshPayload) {
   if (mesh.error) {
@@ -147,6 +180,39 @@ function applyMesh(mesh: BridgeMeshPayload) {
   // skipFit=true so the engine preserves the DCC-space transform instead of
   // auto-centering/rescaling the loaded model.
   useSceneStore.getState().setPendingModelData(mesh.dataBase64, mesh.fileName, true, mesh.format ?? 'glb');
+}
+
+// ─── Apply world/HDRI ──────────────────────────────────────────────────────
+// Prefix marks an asset as bridge-owned, so a later push for the same file
+// can find and replace it instead of piling up duplicates - the store's
+// public addAsset()/updateAsset() API has no id parameter to reuse directly
+// (unlike lights/camera), so identity here is tracked through the name.
+const BRIDGE_WORLD_PREFIX = 'Bridge: ';
+
+function applyWorld(world: NonNullable<BridgePayload['world']>) {
+  if (world.error) {
+    console.warn('[BlenderBridge] world/HDRI push error:', world.error);
+    return;
+  }
+  if (!world.dataBase64 || !world.fileName) {
+    return;
+  }
+
+  const { assets, removeAsset, addAsset, updateAsset } = useHDRIAssetStore.getState();
+  const bridgeFileName = BRIDGE_WORLD_PREFIX + world.fileName;
+
+  const existing = assets.find((a) => a.fileName === bridgeFileName);
+  if (existing) {
+    removeAsset(existing.id);
+  }
+
+  const arrayBuffer = base64ToArrayBuffer(world.dataBase64);
+  const file = new File([arrayBuffer], bridgeFileName, { type: 'application/octet-stream' });
+  const asset = useHDRIAssetStore.getState().addAsset(file, arrayBuffer);
+
+  if (world.strength !== undefined) {
+    updateAsset(asset.id, { intensity: world.strength });
+  }
 }
 
 // ─── Main handler ──────────────────────────────────────────────────────────
@@ -159,9 +225,14 @@ function handleBridgePayload(payload: BridgePayload) {
   if (payload.mesh) {
     applyMesh(payload.mesh);
   }
-  // Camera and world/HDRI handling can be extended here
+  if (payload.camera) {
+    applyCamera(payload.camera, payload.source ?? 'blender');
+  }
+  if (payload.world) {
+    applyWorld(payload.world);
+  }
 
-  if (payload.lights?.length || payload.mesh) {
+  if (payload.lights?.length || payload.mesh || payload.camera || payload.world) {
     // A push is a deliberate, one-off action (unlike a slider drag) - render
     // the HDRI Preview once so the result is visible without the user having
     // to also flip on Live Preview or hunt for the Refresh button.
