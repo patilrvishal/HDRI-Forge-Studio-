@@ -10,6 +10,11 @@ interface HDRIShapesStore {
    *  react to the same on/off switch instead of the toggle being private
    *  React state that the viewport can never see. */
   livePreview: boolean;
+  /** Bumped to trigger a single one-off HDRI Preview render regardless of
+   *  the livePreview toggle - e.g. right after a bridge push from Blender/
+   *  Maya, where continuous auto-render would be overkill but the user very
+   *  much wants to see the result without hunting for the Refresh button. */
+  previewRefreshRequestId: number;
 
   addShape: (type: HDRIShapeType) => HDRIShape;
   removeShape: (id: string) => void;
@@ -26,12 +31,14 @@ interface HDRIShapesStore {
   duplicateShape: (id: string) => void;
   clearShapes: () => void;
   setLivePreview: (on: boolean) => void;
+  requestPreviewRefresh: () => void;
 }
 
 export const useHDRIShapesStore = create<HDRIShapesStore>((set, get) => ({
   shapes: [],
   selectedShapeId: null,
   livePreview: false,
+  previewRefreshRequestId: 0,
 
   addShape: (type) => {
     const shape = createDefaultHDRIShape(type, get().shapes.length);
@@ -103,4 +110,6 @@ export const useHDRIShapesStore = create<HDRIShapesStore>((set, get) => ({
   clearShapes: () => set({ shapes: [], selectedShapeId: null }),
 
   setLivePreview: (on) => set({ livePreview: on }),
+
+  requestPreviewRefresh: () => set((s) => ({ previewRefreshRequestId: s.previewRefreshRequestId + 1 })),
 }));

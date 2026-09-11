@@ -22,6 +22,13 @@ export function hdriBridgePlugin(): Plugin {
       });
 
       server.middlewares.use(ENDPOINT, (req, res) => {
+        // Lightweight presence check - lets the Blender addon auto-detect
+        // "is the dev server here?" without performing a real push.
+        if (req.method === 'GET') {
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ ok: true, app: 'HDRI Forge Studio', mode: 'dev' }));
+          return;
+        }
         if (req.method !== 'POST') {
           res.writeHead(405).end('Method Not Allowed');
           return;

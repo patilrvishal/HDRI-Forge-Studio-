@@ -67,6 +67,7 @@ export const Viewport: React.FC<ViewportProps> = ({ sceneManagerRef, onScreensho
   const pendingModelData = useSceneStore((s) => s._pendingModelDataBase64);
   const pendingModelFileName = useSceneStore((s) => s._pendingModelFileName);
   const pendingModelSkipFit = useSceneStore((s) => s._pendingModelSkipFit);
+  const pendingModelFormat = useSceneStore((s) => s._pendingModelFormat);
   const clearPendingModelData = useSceneStore((s) => s.clearPendingModelData);
   const pendingHDRIData = useSceneStore((s) => s._pendingHDRIDataBase64);
   const clearPendingHDRIData = useSceneStore((s) => s.clearPendingHDRIData);
@@ -615,14 +616,19 @@ export const Viewport: React.FC<ViewportProps> = ({ sceneManagerRef, onScreensho
 
     try {
       const arrayBuffer = base64ToArrayBuffer(pendingModelData);
-      ml.loadFromBuffer(arrayBuffer, pendingModelFileName, { skipCenterAndScale: pendingModelSkipFit });
+      if (pendingModelFormat === 'obj') {
+        const text = new TextDecoder('utf-8').decode(arrayBuffer);
+        ml.loadObjFromText(text, pendingModelFileName, { skipCenterAndScale: pendingModelSkipFit });
+      } else {
+        ml.loadFromBuffer(arrayBuffer, pendingModelFileName, { skipCenterAndScale: pendingModelSkipFit });
+      }
     } catch {
       setLoadError('Failed to restore model from scene file');
       setIsLoading(false);
     }
 
     clearPendingModelData();
-  }, [pendingModelData, pendingModelFileName, pendingModelSkipFit, modelLoaderRef, clearPendingModelData]);
+  }, [pendingModelData, pendingModelFileName, pendingModelSkipFit, pendingModelFormat, modelLoaderRef, clearPendingModelData]);
 
   // Restore custom HDRI from scene file
   useEffect(() => {
