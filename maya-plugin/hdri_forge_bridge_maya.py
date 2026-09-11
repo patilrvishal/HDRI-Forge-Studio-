@@ -200,7 +200,12 @@ def _export_selected_meshes_obj(selected_transforms):
         cmds.file(
             tmp_path,
             force=True,
-            options='groups=0;ptgroups=0;materials=0;smoothing=0;normals=1',
+            # groups=1 writes a 'g <objectName>' line per selected object -
+            # without it (groups=0) multiple objects merge into one
+            # undifferentiated vertex/face soup with no way to tell them
+            # apart again (verified empirically: zero 'o'/'g' lines emitted
+            # for a 2-object export with groups=0).
+            options='groups=1;ptgroups=0;materials=0;smoothing=0;normals=1',
             type='OBJexport',
             preserveReferences=True,
             exportSelected=True,
@@ -323,6 +328,145 @@ def _gather_camera():
     }
 
 
+# ─── Per-object OBJ import (direct-bridge mesh receiving) ──────────────────
+# Maya's own OBJ importer merges every object in a file into a single mesh
+# regardless of any option flag passed to it (verified empirically - 'mo=0',
+# 'mo=1', and 'groups=1' all produced exactly one merged transform for a
+# 2-object file). The only reliable way to get separate Maya objects back is
+# to split the incoming OBJ ourselves and import each object from its own
+# single-object file.
+def _split_obj_by_object(obj_text):
+    """Split a multi-object Wavefront OBJ (Blender's exporter writes one
+    'o <name>' block per object, sharing one global v/vt/vn list) into
+    {object_name: single_object_obj_text}, with face indices remapped to a
+    fresh local v/vt/vn list per object."""
+    lines = obj_text.splitlines()
+    global_v, global_vt, global_vn = [], [], []
+    objects = []
+    current_name = None
+    current_faces = []
+
+    def flush():
+        if current_name is not None:
+            objects.append((current_name, current_faces))
+
+    for line in lines:
+        if line.startswith('v '):
+            global_v.append(line)
+        elif line.startswith('vt '):
+            global_vt.append(line)
+        elif line.startswith('vn '):
+            global_vn.append(line)
+        elif line.startswith('o '):
+            flush()
+            current_name = line[2:].strip()
+            current_faces = []
+        elif line.startswith('f '):
+            if current_name is None:
+                current_name = 'Object'
+                current_faces = []
+            current_faces.append(line)
+    flush()
+
+    result = {}
+    for name, faces in objects:
+        if not faces:
+            continue
+        v_used, vt_used, vn_used = set(), set(), set()
+        for line in faces:
+            for token in line.split()[1:]:
+                parts = token.split('/')
+                if len(parts) >= 1 and parts[0]:
+                    v_used.add(int(parts[0]))
+                if len(parts) >= 2 and parts[1]:
+                    vt_used.add(int(parts[1]))
+                if len(parts) >= 3 and parts[2]:
+                    vn_used.add(int(parts[2]))
+
+        v_map = {old: i + 1 for i, old in enumerate(sorted(v_used))}
+        vt_map = {old: i + 1 for i, old in enumerate(sorted(vt_used))}
+        vn_map = {old: i + 1 for i, old in enumerate(sorted(vn_used))}
+
+        out_lines = ['o ' + name]
+        out_lines.extend(global_v[old - 1] for old in sorted(v_used))
+        out_lines.extend(global_vt[old - 1] for old in sorted(vt_used))
+        out_lines.extend(global_vn[old - 1] for old in sorted(vn_used))
+
+        for line in faces:
+            new_tokens = ['f']
+            for token in line.split()[1:]:
+                parts = token.split('/')
+                new_parts = [str(v_map[int(parts[0])]) if parts[0] else '']
+                if len(parts) >= 2:
+                    new_parts.append(str(vt_map[int(parts[1])]) if parts[1] else '')
+                if len(parts) >= 3:
+                    new_parts.append(str(vn_map[int(parts[2])]) if parts[2] else '')
+                new_tokens.append('/'.join(new_parts) if len(new_parts) > 1 else new_parts[0])
+            out_lines.append(' '.join(new_tokens))
+
+        result[name] = '\n'.join(out_lines) + '\n'
+
+    return result
+
+
+def _import_single_object_obj(obj_text, final_name):
+    """Import a single-object OBJ file and rename the resulting transform.
+    Returns the new transform's name, or None if nothing came in."""
+    fd, tmp_path = tempfile.mkstemp(suffix='.obj')
+    os.close(fd)
+    try:
+        with open(tmp_path, 'w') as f:
+            f.write(obj_text)
+        before = set(cmds.ls(assemblies=True, long=True) or [])
+        cmds.file(tmp_path, i=True, type='OBJ', ignoreVersion=True,
+                  mergeNamespacesOnClash=False, preserveReferences=True)
+        after = set(cmds.ls(assemblies=True, long=True) or [])
+        new_transforms = [n for n in (after - before) if cmds.listRelatives(n, shapes=True, type='mesh', fullPath=True)]
+        if not new_transforms:
+            return None
+        return cmds.rename(new_transforms[0], final_name)
+    finally:
+        try:
+            os.remove(tmp_path)
+        except Exception:
+            pass
+
+
+def _replace_mesh_geometry(existing_transform, obj_text):
+    """Import obj_text into a throwaway transform, then move its mesh shape
+    onto existing_transform and delete the throwaway - keeps the existing
+    transform's name/identity intact (so repeated pushes update the same
+    Maya object instead of piling up new ones) while swapping the geometry."""
+    fd, tmp_path = tempfile.mkstemp(suffix='.obj')
+    os.close(fd)
+    try:
+        with open(tmp_path, 'w') as f:
+            f.write(obj_text)
+        before = set(cmds.ls(assemblies=True, long=True) or [])
+        cmds.file(tmp_path, i=True, type='OBJ', ignoreVersion=True,
+                  mergeNamespacesOnClash=False, preserveReferences=True)
+        after = set(cmds.ls(assemblies=True, long=True) or [])
+        new_transforms = [n for n in (after - before) if cmds.listRelatives(n, shapes=True, type='mesh', fullPath=True)]
+        if not new_transforms:
+            return False
+        new_transform = new_transforms[0]
+        new_shape = cmds.listRelatives(new_transform, shapes=True, type='mesh', fullPath=True)[0]
+
+        old_shapes = cmds.listRelatives(existing_transform, shapes=True, type='mesh', fullPath=True) or []
+        cmds.parent(new_shape, existing_transform, shape=True, relative=True)
+        for s in old_shapes:
+            if cmds.objExists(s):
+                cmds.delete(s)
+        if cmds.objExists(new_transform):
+            cmds.delete(new_transform)
+        return True
+    finally:
+        try:
+            os.remove(tmp_path)
+        except Exception:
+            pass
+
+
 # ─── Apply an incoming payload from Blender directly into the Maya scene ──
 def _apply_payload_from_blender(payload):
     # ── Lights ──
@@ -397,43 +541,35 @@ def _apply_payload_from_blender(payload):
             except Exception:
                 pass
 
-    # ── Mesh objects (Blender sends OBJ over the direct bridge) ──
+    # ── Mesh objects (Blender sends OBJ over the direct bridge, one 'o'
+    # block per object) ──
     mesh_data = payload.get('mesh')
     if mesh_data and mesh_data.get('dataBase64'):
-        old_transforms = cmds.ls('BlenderBridge_*', long=True, type='transform') or []
-        for node in old_transforms:
-            if cmds.objExists(node) and cmds.listRelatives(node, shapes=True, type='mesh', fullPath=True):
-                cmds.delete(node)
-
-        raw = base64.b64decode(mesh_data['dataBase64'])
-        fd, tmp_path = tempfile.mkstemp(suffix='.obj')
-        os.close(fd)
         try:
-            with open(tmp_path, 'wb') as f:
-                f.write(raw)
-            try:
-                if not cmds.pluginInfo('objExport', query=True, loaded=True):
-                    cmds.loadPlugin('objExport')
-            except Exception:
-                pass
+            if not cmds.pluginInfo('objExport', query=True, loaded=True):
+                cmds.loadPlugin('objExport')
+        except Exception:
+            pass
 
-            before = set(cmds.ls(assemblies=True, long=True) or [])
-            cmds.file(tmp_path, i=True, type='OBJ', ignoreVersion=True,
-                      mergeNamespacesOnClash=False, options='mo=0', preserveReferences=True)
-            after = set(cmds.ls(assemblies=True, long=True) or [])
+        obj_text = base64.b64decode(mesh_data['dataBase64']).decode('utf-8', errors='replace')
+        pieces = _split_obj_by_object(obj_text)
 
-            for node in (after - before):
-                if cmds.listRelatives(node, shapes=True, type='mesh', fullPath=True):
-                    short = node.split('|')[-1]
-                    try:
-                        cmds.rename(node, f"BlenderBridge_{short}")
-                    except Exception:
-                        pass
-        finally:
-            try:
-                os.remove(tmp_path)
-            except Exception:
-                pass
+        group_name = "BlenderBridge_Meshes"
+        if not cmds.objExists(group_name):
+            cmds.group(empty=True, name=group_name)
+
+        for obj_name, piece_text in pieces.items():
+            node_name = f"BlenderBridge_{_sanitize_name(obj_name)}"
+            if cmds.objExists(node_name) and cmds.listRelatives(node_name, shapes=True, type='mesh', fullPath=True):
+                # Same name already exists - swap its geometry in place
+                # instead of deleting and recreating the node, so the
+                # transform's identity (and anything else attached to it
+                # in Maya) survives repeated pushes.
+                _replace_mesh_geometry(node_name, piece_text)
+            else:
+                new_transform = _import_single_object_obj(piece_text, node_name)
+                if new_transform and cmds.objExists(group_name):
+                    cmds.parent(new_transform, group_name)
 
     # ── World / HDRI -> Arnold aiSkyDomeLight ──
     world_data = payload.get('world')

@@ -430,13 +430,9 @@ def _apply_payload_from_maya(payload):
 
         context.scene.camera = obj
 
-    # ── Mesh objects (Maya sends OBJ) ──
+    # ── Mesh objects (Maya sends OBJ, one 'g <name>' group per object) ──
     mesh_data = payload.get('mesh')
     if mesh_data and mesh_data.get('dataBase64'):
-        for obj in list(bpy.data.objects):
-            if obj.get('_mayabridge_mesh'):
-                bpy.data.objects.remove(obj, do_unlink=True)
-
         raw = base64.b64decode(mesh_data['dataBase64'])
         tmp_path = None
         try:
@@ -444,16 +440,39 @@ def _apply_payload_from_maya(payload):
                 tf.write(raw)
                 tmp_path = tf.name
 
+            group = bpy.data.objects.get("MayaBridge_Meshes")
+            if group is None:
+                group = bpy.data.objects.new("MayaBridge_Meshes", None)
+                context.scene.collection.objects.link(group)
+
             before = set(context.scene.objects)
             if hasattr(bpy.ops.wm, 'obj_import'):
-                bpy.ops.wm.obj_import(filepath=tmp_path)
+                # use_split_groups: Maya's OBJ export writes each selected
+                # object as its own 'g <name>' group (not 'o') - without
+                # this flag Blender's importer merges every group in the
+                # file into one object (verified empirically).
+                bpy.ops.wm.obj_import(filepath=tmp_path, use_split_groups=True)
             else:
                 bpy.ops.import_scene.obj(filepath=tmp_path)
             after = set(context.scene.objects)
 
             for obj in (after - before):
-                obj['_mayabridge_mesh'] = True
-                obj.name = f"MayaBridge_{obj.name}"
+                final_name = f"MayaBridge_{obj.name}"
+                existing = bpy.data.objects.get(final_name)
+                if existing and existing != obj:
+                    # Same name already exists - swap geometry in place so
+                    # repeated pushes update the same object instead of
+                    # piling up new ones each time.
+                    old_data = existing.data
+                    existing.data = obj.data
+                    bpy.data.objects.remove(obj, do_unlink=True)
+                    if old_data and old_data.users == 0:
+                        bpy.data.meshes.remove(old_data)
+                else:
+                    obj.name = final_name
+                    obj['_mayabridge_mesh'] = True
+                    obj.parent = group
+                    obj.matrix_parent_inverse = group.matrix_world.inverted()
         finally:
             if tmp_path:
                 try:
