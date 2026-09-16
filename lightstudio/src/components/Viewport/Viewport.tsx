@@ -18,7 +18,7 @@ import { CameraSwitcher } from './CameraSwitcher';
 import { ViewportPropertiesPanel } from './ViewportPropertiesPanel';
 import { CameraPanel } from './CameraPanel';
 import { GizmoManager, type GizmoMode } from '../../three/GizmoManager';
-import { solveLightPaint, smoothNormalAt, computeLightDistance, type PaintMode } from '../../three/LightPaint';
+import { solveLightPaint, smoothNormalAt, computeLightDistance, pickLightForReflection, type PaintMode } from '../../three/LightPaint';
 import { cartesianToSpherical } from '../../utils/math';
 import { CameraBookmarks } from './CameraBookmarks';
 import type { AnimatedProperty } from '../../types/Animation';
@@ -1046,6 +1046,54 @@ export const Viewport: React.FC<ViewportProps> = ({ sceneManagerRef, onScreensho
     } as never);
   }, [paintMode, distanceScale, containerRef, sceneManagerRef, updateHDRIShape]);
 
+  // Right-click a reflection to select the light producing it - HDR Light
+  // Studio's other half of LightPaint. Read-only: no light gets moved, this
+  // only changes the selection so the right panel jumps to that light.
+  const pickReflectionAt = useCallback((clientX: number, clientY: number) => {
+    const container = containerRef.current;
+    const sm = sceneManagerRef.current;
+    if (!container || !sm) return;
+
+    const rect = container.getBoundingClientRect();
+    const mouse = new THREE.Vector2(
+      ((clientX - rect.left) / rect.width) * 2 - 1,
+      -((clientY - rect.top) / rect.height) * 2 + 1,
+    );
+
+    const raycaster = new THREE.Raycaster();
+    raycaster.setFromCamera(mouse, sm.camera);
+
+    const meshes: THREE.Mesh[] = [];
+    sm.scene.traverse((obj) => {
+      if (
+        obj instanceof THREE.Mesh &&
+        !obj.userData?.isHelper &&
+        !obj.userData?.isProxy &&
+        obj.name !== '__floor__'
+      ) {
+        meshes.push(obj);
+      }
+    });
+
+    const hit = raycaster.intersectObjects(meshes, false)[0];
+    if (!hit) return;
+
+    const P = hit.point.clone();
+    const N = smoothNormalAt(hit);
+
+    const candidates = useLightsStore.getState().lights
+      .filter((l) => l.visible)
+      .map((l) => ({
+        id: l.id,
+        position: new THREE.Vector3(l.transform.position.x, l.transform.position.y, l.transform.position.z),
+      }));
+
+    const pickedId = pickLightForReflection(P, N, sm.camera, candidates);
+    if (pickedId) {
+      useLightsStore.getState().selectLight(pickedId);
+    }
+  }, [containerRef, sceneManagerRef]);
+
   // Pointer handling lives on the container so no JSX surgery is needed.
   useEffect(() => {
     const container = containerRef.current;
@@ -1058,6 +1106,10 @@ export const Viewport: React.FC<ViewportProps> = ({ sceneManagerRef, onScreensho
       paintBoundsRef.current = null;
       sm.controls.enabled = false;
       paintAt(e.clientX, e.clientY);
+    };
+    const context = (e: MouseEvent) => {
+      e.preventDefault();
+      pickReflectionAt(e.clientX, e.clientY);
     };
     const move = (e: PointerEvent) => {
       if (!paintingRef.current) return;
@@ -1088,16 +1140,18 @@ export const Viewport: React.FC<ViewportProps> = ({ sceneManagerRef, onScreensho
     container.addEventListener('pointerdown', down);
     window.addEventListener('pointermove', move);
     window.addEventListener('pointerup', up);
+    container.addEventListener('contextmenu', context);
     container.style.cursor = 'crosshair';
 
     return () => {
       container.removeEventListener('pointerdown', down);
       window.removeEventListener('pointermove', move);
       window.removeEventListener('pointerup', up);
+      container.removeEventListener('contextmenu', context);
       container.style.cursor = '';
       sm.controls.enabled = true;
     };
-  }, [paintActive, paintAt, containerRef, sceneManagerRef]);
+  }, [paintActive, paintAt, pickReflectionAt, containerRef, sceneManagerRef]);
 
   // Click-to-select material from viewport
   const handleViewportClick = useCallback((event: React.MouseEvent) => {

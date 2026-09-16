@@ -144,6 +144,50 @@ export function solveLightPaint(
   }
 }
 
+export interface ReflectionCandidate {
+  id: string;
+  position: THREE.Vector3;
+}
+
+/**
+ * HDR Light Studio's "right-click a reflection to select its light": given
+ * where the viewer clicked on the model, work out the ideal reflection
+ * direction (mirror the view ray about the surface normal, same math as
+ * 'reflection' mode above), then return whichever candidate light sits
+ * closest to that direction from the clicked point - that's the light
+ * actually producing the highlight there.
+ *
+ * Returns null if nothing lines up closely enough (dot < threshold) so a
+ * right-click on bare surface with no real reflection doesn't just grab
+ * whatever light happens to be nearest.
+ */
+export function pickLightForReflection(
+  P: THREE.Vector3,
+  N: THREE.Vector3,
+  camera: THREE.Camera,
+  candidates: ReflectionCandidate[],
+  threshold = 0.85,
+): string | null {
+  if (candidates.length === 0) return null;
+
+  const V = P.clone().sub(camera.position).normalize();
+  const R = V.clone().sub(N.clone().multiplyScalar(2 * V.dot(N))).normalize();
+
+  let bestId: string | null = null;
+  let bestDot = threshold;
+
+  for (const c of candidates) {
+    const toLight = c.position.clone().sub(P).normalize();
+    const dot = toLight.dot(R);
+    if (dot > bestDot) {
+      bestDot = dot;
+      bestId = c.id;
+    }
+  }
+
+  return bestId;
+}
+
 /**
  * Interpolated (smooth) surface normal at a raycast hit, in world space.
  *
