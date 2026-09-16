@@ -344,6 +344,7 @@ export const Viewport: React.FC<ViewportProps> = ({ sceneManagerRef, onScreensho
     return () => {
       observer.disconnect();
       sceneManager.stopRenderLoop();
+      renderPipeline.disposePathTracer();
       renderPipeline.dispose();
       modelLoader.dispose();
       erikLoader.dispose();
@@ -621,6 +622,19 @@ export const Viewport: React.FC<ViewportProps> = ({ sceneManagerRef, onScreensho
     sm.scene.backgroundRotation = new THREE.Euler(0, 0, 0);
     sm.scene.environmentRotation = new THREE.Euler(0, 0, 0);
   }, [hdriShapes, hdriLivePreview, environment.gradientBackground, environment.intensity, environment.presetId, sceneManagerRef, envLoaderRef]);
+
+  // Path-traced preview mode holds a snapshot of the scene (geometry, lights,
+  // materials, environment) the moment it's built - editing anything after
+  // that wouldn't show up until the mode is toggled off and back on. Flag
+  // the snapshot stale on the changes a lighting-studio session actually
+  // makes while in this mode, so RenderPipeline.render() rebuilds it on the
+  // next frame instead. No-op when path tracing isn't active.
+  useEffect(() => {
+    // Raw (pre-PMREM) equirect texture, only present for a real loaded HDRI
+    // file - see the _pathTracerRawEnv doc comment in RenderPipeline.
+    const rawEnv = envLoaderRef.current?.getEquirectTexture() ?? null;
+    renderPipelineRef.current?.markPathTracerDirty(rawEnv);
+  }, [lights, hdriShapes, environment.presetId, environment.rotation, environment.intensity, environment.hdri, environment.gradientBackground, environment.background, environment.showBackground, renderSettings.engine, envLoaderRef]);
 
   // Restore model from scene file (triggered when _pendingModelDataBase64 is set)
   useEffect(() => {
@@ -1324,6 +1338,7 @@ export const Viewport: React.FC<ViewportProps> = ({ sceneManagerRef, onScreensho
       <div style={{ display: 'flex', flexDirection: 'column', width: '100%', height: '100%' }}>
         <ViewportToolbar
           sceneManagerRef={sceneManagerRef}
+          renderPipelineRef={renderPipelineRef}
           onScreenshot={handleScreenshot}
           onLoadModel={handleOpenFilePicker}
         />

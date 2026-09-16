@@ -1,12 +1,13 @@
 import React, { useRef, useState, useCallback, useEffect } from 'react';
 import { useSceneStore } from '../../store/sceneStore';
 import { useUIStore } from '../../store/uiStore';
-import { SceneManager } from '../../three/engine';
+import { SceneManager, RenderPipeline } from '../../three/engine';
 import type { ViewMode } from '../../types/Light';
 
 
 interface ViewportToolbarProps {
   sceneManagerRef: React.MutableRefObject<SceneManager | null>;
+  renderPipelineRef: React.MutableRefObject<RenderPipeline | null>;
   onScreenshot: () => void;
   onLoadModel: () => void;
 }
@@ -20,12 +21,14 @@ const VIEW_PRESETS: Record<ViewMode, { position: [number, number, number]; targe
 
 export const ViewportToolbar: React.FC<ViewportToolbarProps> = ({
   sceneManagerRef,
+  renderPipelineRef,
   onScreenshot,
   onLoadModel,
 }) => {
   const [viewMode, setViewMode] = useState<ViewMode>('perspective');
   const [resolution, setResolution] = useState({ width: 0, height: 0 });
   const resizeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [pathTracerStatus, setPathTracerStatus] = useState<{ ready: boolean; samples: number; error: string | null } | null>(null);
 
   const modelName = useSceneStore((s) => s.modelName);
   const renderEngine = useSceneStore((s) => s.renderSettings.engine);
@@ -82,6 +85,25 @@ export const ViewportToolbar: React.FC<ViewportToolbarProps> = ({
     const next = renderEngine === 'pbr' ? 'pathtracer' : 'pbr';
     setRenderSettings({ engine: next });
   }, [renderEngine, setRenderSettings]);
+
+  // Poll the path tracer's live sample count - it accumulates every rendered
+  // frame inside RenderPipeline, not through a store, so there's nothing to
+  // subscribe to; only run this extra rAF loop while pathtracer mode is on.
+  useEffect(() => {
+    if (renderEngine !== 'pathtracer') {
+      setPathTracerStatus(null);
+      return;
+    }
+    // Throttled to a few times a second - polling every rendered frame would
+    // re-render this toolbar every frame for as long as the mode is on.
+    const interval = setInterval(() => {
+      const rp = renderPipelineRef.current;
+      if (rp) {
+        setPathTracerStatus({ ready: rp.isPathTracingReady(), samples: rp.getPathTracerSamples(), error: rp.getPathTracerError() });
+      }
+    }, 200);
+    return () => clearInterval(interval);
+  }, [renderEngine, renderPipelineRef]);
 
   // Handle turntable speed change
   const handleSpeedChange = useCallback(
@@ -143,6 +165,31 @@ export const ViewportToolbar: React.FC<ViewportToolbarProps> = ({
           >
             {renderEngine === 'pbr' ? 'PBR' : 'Pathtracer'}
           </button>
+          {renderEngine === 'pathtracer' && (
+            <span
+              style={{
+                fontSize: 9,
+                fontFamily: 'var(--font-mono)',
+                color: pathTracerStatus?.error ? 'var(--danger, #e5484d)' : 'var(--accent)',
+                whiteSpace: 'nowrap',
+                maxWidth: 220,
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+              }}
+              title={
+                pathTracerStatus?.error ??
+                'Path-traced final-quality preview: accumulates samples while the camera and scene are still, resets on any change.'
+              }
+            >
+              {pathTracerStatus
+                ? pathTracerStatus.error
+                  ? pathTracerStatus.error
+                  : pathTracerStatus.ready
+                  ? `${pathTracerStatus.samples} spp`
+                  : 'Building…'
+                : ''}
+            </span>
+          )}
         </div>
 
         {/* View mode */}

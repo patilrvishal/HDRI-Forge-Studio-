@@ -14,6 +14,7 @@ import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { FXAAShader } from 'three/addons/shaders/FXAAShader.js';
 import type { GroundSettings } from '../types/Scene';
 import { paintGradientOntoContext } from './HDRIExporter';
+import { WebGLPathTracer } from 'three-gpu-pathtracer';
 
 let _rectAreaLibInitialized = false;
 function ensureRectAreaLib(): void {
@@ -727,6 +728,29 @@ export class RenderPipeline {
   private _config: PipelineConfig;
   private _needsRebuild = false;
 
+  // ------ Path-traced "final quality" preview (GPU path tracer, WebGL-based) ---------------
+  private _pathTracer: WebGLPathTracer | null = null;
+  /** Target state requested via setEngine - true while the user has the toggle on. */
+  private _pathTracingEnabled = false;
+  /** True once a scene build has completed and renderSample() is safe to call. */
+  private _pathTracerReady = false;
+  private _pathTracerBuilding = false;
+  /** Set by markPathTracerDirty() when lights/shapes/environment change while
+   *  path tracing is active - triggers a full scene rebuild on the next render(). */
+  private _pathTracerDirty = false;
+  private _pathTracerError: string | null = null;
+  private _lastPathTracerCamMatrix = new THREE.Matrix4();
+  /** The RAW equirectangular HDRI texture (pre-PMREM), supplied by the
+   *  viewport whenever the environment changes. three-gpu-pathtracer needs
+   *  the original equirect pixel data to build its HDRI importance-sampling
+   *  tables - scene.environment normally holds the PMREM/CubeUV-prefiltered
+   *  texture used for real-time IBL instead, which has no raw pixel array
+   *  and crashes the path tracer if handed to it directly. Only set for a
+   *  real loaded HDRI file; null for procedural gradient/studio presets,
+   *  which have no equirect source (path tracing then falls back to
+   *  lights-only, no environment lighting). */
+  private _pathTracerRawEnv: THREE.Texture | null = null;
+
   constructor(sceneManager: SceneManager) {
     this._sm = sceneManager;
     this._config = {
@@ -826,10 +850,169 @@ export class RenderPipeline {
 
   /** Render one frame through the composer (or fallback direct render). */
   render(): void {
+    if (this._pathTracingEnabled && this._pathTracer && this._pathTracerReady && !this._pathTracerBuilding) {
+      this._syncPathTracer();
+      this._pathTracer.renderSample();
+      return;
+    }
     if (this._composer) {
       this._composer.render();
     } else {
       this._sm.renderer.render(this._sm.scene, this._sm.camera);
+    }
+  }
+
+  /** Re-syncs the path tracer with the live camera each frame, and rebuilds
+   *  the whole traced scene when markPathTracerDirty() flagged a change
+   *  (lights/shapes/environment edited while path tracing is active). Both
+   *  paths call updateCamera()/setSceneAsync() internally, which reset the
+   *  sample accumulation - exactly what's wanted, since anything that moves
+   *  the camera or changes the scene invalidates the accumulated samples. */
+  private _syncPathTracer(): void {
+    const pt = this._pathTracer;
+    if (!pt) return;
+    const cam = this._sm.camera;
+    cam.updateMatrixWorld();
+
+    if (this._pathTracerDirty) {
+      this._pathTracerDirty = false;
+      // Synchronous BVH rebuild (see _buildPathTracer for why: async needs a
+      // Worker via setBVHWorker, which this app doesn't wire up). A dirty
+      // rebuild only happens after an edit while path tracing is active, so
+      // one blocking frame here is an acceptable trade for not needing a
+      // worker bundle.
+      try {
+        this._withPathTracerEnv(() => pt.setScene(this._sm.scene, cam));
+        this._lastPathTracerCamMatrix.copy(cam.matrixWorld);
+      } catch (e) {
+        console.error('[LightForge] Path tracer rebuild failed:', e);
+      }
+      return;
+    }
+
+    if (!cam.matrixWorld.equals(this._lastPathTracerCamMatrix)) {
+      this._lastPathTracerCamMatrix.copy(cam.matrixWorld);
+      pt.updateCamera();
+    }
+  }
+
+  /** Flags the currently-traced scene as stale so the next render() rebuilds
+   *  it (new/changed lights, HDRI shapes, or environment). No-op while path
+   *  tracing isn't active - callers don't need to check isPathTracingActive()
+   *  themselves before calling this on every relevant store change.
+   *  `rawEnvTexture` (pass explicitly, even as null) updates the raw equirect
+   *  HDRI used for path-traced environment lighting - see _pathTracerRawEnv. */
+  markPathTracerDirty(rawEnvTexture?: THREE.Texture | null): void {
+    if (rawEnvTexture !== undefined) this._pathTracerRawEnv = rawEnvTexture;
+    if (this._pathTracingEnabled) this._pathTracerDirty = true;
+  }
+
+  /** Temporarily swaps scene.environment to the raw equirect texture (or
+   *  null) and hides non-scene helper meshes for the duration of `fn`,
+   *  restoring both afterward - setScene()/generate() only read the scene
+   *  synchronously during the call, so this never affects the normal
+   *  rasterized render in between path-traced rebuilds.
+   *
+   *  Helper exclusion matters because PathTracingSceneGenerator (via
+   *  three-mesh-bvh's StaticGeometryGenerator) walks every visible mesh with
+   *  traverseVisible() and assumes PBR-ish material properties
+   *  (m.color.r, m.emissive.r, ...) - it has no concept of "this is UI, not
+   *  scene content". Two concrete cases confirmed live: the ground fade
+   *  overlay (a plain THREE.ShaderMaterial with no .color at all - hard
+   *  crash) and the transform gizmo (traceable MeshBasicMaterial, so no
+   *  crash, but it would otherwise get baked into the "final quality"
+   *  render as a set of colored arrows). userData.isProxy is the existing
+   *  convention this codebase already uses to mark the ground overlay as
+   *  "not real scene content" (originally for SceneHierarchy); reused here
+   *  for the same reason, alongside userData.isHelper (measure line) and
+   *  the gizmo root found via getHelper(). */
+  private _withPathTracerEnv<T>(fn: () => T): T {
+    const scene = this._sm.scene;
+    const savedEnv = scene.environment;
+    scene.environment = this._pathTracerRawEnv;
+
+    const hidden: THREE.Object3D[] = [];
+    scene.traverse((o) => {
+      if (o.visible && (o.userData?.isProxy || o.userData?.isHelper)) {
+        hidden.push(o);
+      }
+    });
+
+    for (const o of hidden) o.visible = false;
+    try {
+      return fn();
+    } finally {
+      for (const o of hidden) o.visible = true;
+      scene.environment = savedEnv;
+    }
+  }
+
+  isPathTracingActive(): boolean {
+    return this._pathTracingEnabled;
+  }
+
+  /** True once the path tracer has a built scene and is actively accumulating -
+   *  false during the initial BVH build (render() falls back to rasterizing). */
+  isPathTracingReady(): boolean {
+    return this._pathTracingEnabled && this._pathTracerReady && !this._pathTracerBuilding;
+  }
+
+  getPathTracerSamples(): number {
+    return this._pathTracer?.samples ?? 0;
+  }
+
+  getPathTracerError(): string | null {
+    return this._pathTracerError;
+  }
+
+  /** Builds (or rebuilds) the path tracer against the current scene/camera.
+   *  Runs the BVH build synchronously on the main thread: the library's async
+   *  path (setSceneAsync) requires a Worker wired up via setBVHWorker, which
+   *  would need bundling a dedicated worker file through Vite/Tauri - not
+   *  worth the fragility for a "final quality still preview" mode. A brief
+   *  blocking hitch when entering the mode (or after an edit) is an
+   *  acceptable trade. Kept as an async method so callers can still `void`
+   *  it uniformly and so a future move to the worker path wouldn't change
+   *  the call sites. */
+  private async _buildPathTracer(): Promise<void> {
+    if (this._pathTracerBuilding) return;
+    this._pathTracerBuilding = true;
+    this._pathTracerReady = false;
+    this._pathTracerError = null;
+    try {
+      // The library throws a cryptic internal error ("Cannot read properties
+      // of undefined") when asked to trace a scene with zero actual Mesh
+      // objects (e.g. nothing loaded yet, ground plane off, no HDRI shapes -
+      // just helpers/lights) because its merged geometry ends up empty.
+      // Fail with a clear message instead of that stack trace.
+      let hasMesh = false;
+      this._sm.scene.traverse((o) => {
+        if ((o as THREE.Mesh).isMesh) hasMesh = true;
+      });
+      if (!hasMesh) {
+        throw new Error('Nothing to path trace yet - load a model or enable the ground plane first.');
+      }
+
+      if (!this._pathTracer) {
+        this._pathTracer = new WebGLPathTracer(this._sm.renderer);
+        this._pathTracer.minSamples = 1;
+        this._pathTracer.renderDelay = 0;
+        this._pathTracer.fadeDuration = 400;
+        this._pathTracer.bounces = 6;
+        this._pathTracer.filterGlossyFactor = 0.5;
+        this._pathTracer.renderScale = 1;
+        this._pathTracer.multipleImportanceSampling = true;
+      }
+      this._withPathTracerEnv(() => this._pathTracer!.setScene(this._sm.scene, this._sm.camera));
+      this._lastPathTracerCamMatrix.copy(this._sm.camera.matrixWorld);
+      this._pathTracerReady = true;
+    } catch (e) {
+      console.error('[LightForge] Path tracer failed to build, falling back to PBR:', e);
+      this._pathTracerError = e instanceof Error ? e.message : String(e);
+      this._pathTracingEnabled = false;
+      this._pathTracerReady = false;
+    } finally {
+      this._pathTracerBuilding = false;
     }
   }
 
@@ -921,9 +1104,22 @@ export class RenderPipeline {
 
   setEngine(engine: 'pbr' | 'pathtracer'): void {
     if (engine === 'pbr') {
+      this._pathTracingEnabled = false;
       this._applyToneMapping(this._config.tonemapping);
     } else {
+      // This is called from a useEffect keyed on the whole renderSettings
+      // object, so it re-fires on unrelated changes (bloom, AO, ...) while
+      // already in pathtracer mode - only kick off a (re)build on an actual
+      // pbr->pathtracer transition or after a previous build failed, not on
+      // every re-fire, or every bloom-slider tweak would restart the BVH build.
+      const wasEnabled = this._pathTracingEnabled;
+      this._pathTracingEnabled = true;
+      // Path tracing does its own tone mapping internally via the material;
+      // leave the renderer's tone mapping off so it isn't applied twice.
       this._sm.renderer.toneMapping = THREE.NoToneMapping;
+      if (!wasEnabled && !this._pathTracerReady && !this._pathTracerBuilding) {
+        void this._buildPathTracer();
+      }
     }
   }
 
@@ -1002,6 +1198,21 @@ export class RenderPipeline {
     this._vignettePass = null;
     this._colorGradingPass = null;
     this._outputPass = null;
+  }
+
+  /** Fully tears down the path tracer (GPU buffers, BVH). Separate from the
+   *  composer-only dispose() above so a config-driven build() rebuild doesn't
+   *  throw away accumulated path-tracing state - only called on unmount or
+   *  when explicitly leaving path-tracing mode for good. */
+  disposePathTracer(): void {
+    if (this._pathTracer) {
+      this._pathTracer.dispose();
+      this._pathTracer = null;
+    }
+    this._pathTracingEnabled = false;
+    this._pathTracerReady = false;
+    this._pathTracerBuilding = false;
+    this._pathTracerDirty = false;
   }
 
   // ------ Private helpers ---------------------------------------------------------------------------------------------------------------------------------------------------------------------
