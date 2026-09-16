@@ -632,7 +632,7 @@ export const HDRIPreviewPanel: React.FC = () => {
             display: 'flex',
             alignItems: 'center',
             gap: 2,
-            background: 'rgba(20,20,26,0.85)',
+            background: 'var(--bg-floating-glass)',
             border: '1px solid var(--border)',
             borderRadius: 4,
             padding: 2,
