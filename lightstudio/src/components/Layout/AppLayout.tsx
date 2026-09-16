@@ -817,19 +817,26 @@ export const AppLayout: React.FC = () => {
             position: 'fixed',
             inset: 0,
             background: 'rgba(0,0,0,0.6)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
             zIndex: 9999,
           }}
           onClick={() => setAboutModal(false)}
         >
+          {/* top/left 50% + translate, not flex-centering - see the
+              ConfirmPromptModal comment for why (invisible in WebView2). */}
           <div
-            className="context-menu"
             style={{
+              position: 'fixed',
+              top: '50%',
+              left: '50%',
+              transform: 'translate(-50%, -50%)',
               minWidth: 260,
               padding: 16,
               textAlign: 'center',
+              background: 'var(--bg-elevated)',
+              border: '1px solid var(--border-light)',
+              borderRadius: 'var(--radius)',
+              boxShadow: '0 12px 36px rgba(0,0,0,0.55)',
+              zIndex: 10000,
             }}
             onClick={(e) => e.stopPropagation()}
           >

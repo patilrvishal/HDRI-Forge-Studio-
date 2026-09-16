@@ -35,23 +35,40 @@ export const ConfirmPromptModal: React.FC = () => {
     position: 'fixed',
     inset: 0,
     background: 'rgba(0,0,0,0.6)',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
     zIndex: 10000,
   };
 
+  // Deliberately NOT flex-centering this via the overlay, and NOT the
+  // shared .context-menu class: in the packaged desktop app's WebView2
+  // runtime, a fixed-position box centered by a flex parent (or using
+  // .context-menu's own position:fixed + backdrop-filter) rendered
+  // completely invisible - the dimmed overlay showed up but the dialog
+  // content never did, confirmed live across three separate rebuilds, even
+  // though the identical markup rendered fine in a regular Chromium dev
+  // browser. top/left 50% + translate(-50%,-50%) is the old, boring,
+  // maximally-cross-engine-compatible centering technique - it sidesteps
+  // whatever flex/out-of-flow-child or backdrop-filter compositing quirk
+  // caused that.
   const boxStyle: React.CSSProperties = {
+    position: 'fixed',
+    top: '50%',
+    left: '50%',
+    transform: 'translate(-50%, -50%)',
     minWidth: 300,
     maxWidth: 420,
     padding: 16,
+    background: 'var(--bg-elevated)',
+    border: '1px solid var(--border-light)',
+    borderRadius: 'var(--radius)',
+    boxShadow: '0 12px 36px rgba(0,0,0,0.55)',
+    zIndex: 10001,
   };
 
   if (confirmDialog) {
     const { message, confirmLabel } = confirmDialog;
     return (
       <div style={overlayStyle} onClick={() => resolveConfirm(false)}>
-        <div className="context-menu" style={boxStyle} onClick={(e) => e.stopPropagation()}>
+        <div style={boxStyle} onClick={(e) => e.stopPropagation()}>
           <div style={{ fontSize: 12, color: 'var(--text)', lineHeight: 1.5, marginBottom: 14 }}>{message}</div>
           <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
             <button className="btn-sm" onClick={() => resolveConfirm(false)}>
@@ -71,7 +88,7 @@ export const ConfirmPromptModal: React.FC = () => {
 
   return (
     <div style={overlayStyle} onClick={() => resolvePrompt(null)}>
-      <div className="context-menu" style={boxStyle} onClick={(e) => e.stopPropagation()}>
+      <div style={boxStyle} onClick={(e) => e.stopPropagation()}>
         <div style={{ fontSize: 12, color: 'var(--text)', lineHeight: 1.5, marginBottom: 8 }}>{message}</div>
         <input
           ref={inputRef}
