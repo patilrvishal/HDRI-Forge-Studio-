@@ -13,6 +13,7 @@ import { ViewportDesignPanel } from '../Viewport/ViewportDesignPanel';
 import { RenderSettingsPanel } from '../Settings/RenderSettingsPanel';
 import { ResizeHandle } from '../UI/ResizeHandle';
 import { ErrorBoundary } from '../UI/ErrorBoundary';
+import { ConfirmPromptModal } from '../UI/ConfirmPromptModal';
 import { useUIStore, type PanelKey } from '../../store/uiStore';
 import { useSceneStore } from '../../store/sceneStore';
 import { useLightsStore } from '../../store/lightsStore';
@@ -854,6 +855,9 @@ export const AppLayout: React.FC = () => {
 
       {/* Manual / Documentation Modal */}
       {manualModalOpen && <ManualWindow onClose={() => setManualModal(false)} />}
+
+      {/* Confirm/prompt dialogs - see uiStore.requestConfirm/requestPrompt */}
+      <ConfirmPromptModal />
 
       {/* Transient status toast (save / load / export feedback) */}
       <StatusToast />

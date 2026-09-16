@@ -48,8 +48,13 @@ const MENU_DEFINITIONS = (
     newScene: {
       label: 'New Scene',
       shortcut: 'Ctrl+N',
-      action: () => {
-        if (!confirm('Create a new scene? Unsaved changes will be lost.')) return;
+      action: async () => {
+        // Not window.confirm() - unsupported in the packaged desktop app's
+        // WebView2 runtime, where it silently no-ops instead of showing a
+        // dialog (confirmed live; same class of bug already found once on
+        // the Looks panel's Save button).
+        const ok = await useUIStore.getState().requestConfirm('Create a new scene? Unsaved changes will be lost.', 'New Scene');
+        if (!ok) return;
         useSceneStore.getState().resetScene();
         useLightsStore.getState().clearAllLights();
         useSceneStore.getState().setCamera([5, 3, 5], [0, 0, 0]);
@@ -104,9 +109,10 @@ const MENU_DEFINITIONS = (
     },
     saveAs: {
       label: 'Save Scene As...',
-      action: () => {
+      action: async () => {
         const ui = useUIStore.getState();
-        const name = prompt('Enter filename:', `lightforge_scene_${Date.now()}.lightscene`);
+        // Not window.prompt() - see the New Scene action's comment above.
+        const name = await ui.requestPrompt('Enter filename:', `lightforge_scene_${Date.now()}.lightscene`);
         if (!name) return;
         try {
           const data = SceneExporter.exportScene();
