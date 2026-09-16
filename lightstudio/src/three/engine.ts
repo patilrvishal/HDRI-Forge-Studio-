@@ -15,6 +15,7 @@ import { FXAAShader } from 'three/addons/shaders/FXAAShader.js';
 import type { GroundSettings } from '../types/Scene';
 import { paintGradientOntoContext } from './HDRIExporter';
 import { WebGLPathTracer } from 'three-gpu-pathtracer';
+import { LightProbeGenerator } from 'three/addons/lights/LightProbeGenerator.js';
 
 let _rectAreaLibInitialized = false;
 function ensureRectAreaLib(): void {
@@ -53,6 +54,17 @@ export class SceneManager {
   _floorCubeCamera: THREE.CubeCamera | null = null;
   _floorCubeRT: THREE.WebGLCubeRenderTarget | null = null;
   _floorMaterial: THREE.MeshStandardMaterial | null = null;
+
+  // ------ Global illumination: single spherical-harmonics light probe ------
+  /** Persistent probe instance kept in the scene once GI is enabled -
+   *  bakeLightProbe() only overwrites its .sh coefficients, so toggling
+   *  intensity or re-baking never has to remove/re-add it (which would
+   *  cause a visible pop as materials briefly lose the probe). */
+  _lightProbe: THREE.LightProbe | null = null;
+  _giCubeCamera: THREE.CubeCamera | null = null;
+  _giCubeRT: THREE.WebGLCubeRenderTarget | null = null;
+  _giEnabled = false;
+  _giBaking = false;
 
   constructor() {
     this.scene = new THREE.Scene();
@@ -446,7 +458,8 @@ export class SceneManager {
         !(child instanceof THREE.GridHelper) &&
         !child.userData.isHelper &&
         child !== this.ground &&
-        child !== this._floorCubeCamera
+        child !== this._floorCubeCamera &&
+        child !== this._giCubeCamera
       ) {
         return child;
       }
@@ -456,6 +469,95 @@ export class SceneManager {
 
   stopRenderLoop(): void {
     cancelAnimationFrame(this._animationId);
+  }
+
+  // ------ Global illumination (light probe) ---------------------------------------------------------------------------------------------------------------------------------------
+
+  setGIEnabled(enabled: boolean): void {
+    if (enabled === this._giEnabled) return;
+    this._giEnabled = enabled;
+
+    if (enabled) {
+      if (!this._lightProbe) {
+        this._lightProbe = new THREE.LightProbe();
+        this.scene.add(this._lightProbe);
+      }
+      if (!this._giCubeCamera) {
+        // Small on purpose: a light probe only captures very low-frequency
+        // (diffuse) irradiance via spherical harmonics, so a sharp capture
+        // buys nothing - 16px/face keeps the CPU readback + SH projection
+        // in LightProbeGenerator cheap enough to re-bake periodically
+        // without stalling the render loop.
+        this._giCubeRT = new THREE.WebGLCubeRenderTarget(16, { type: THREE.UnsignedByteType });
+        this._giCubeCamera = new THREE.CubeCamera(0.1, 100, this._giCubeRT);
+        this._giCubeCamera.userData.isProxy = true; // exclude from SceneHierarchy + path tracer
+        this.scene.add(this._giCubeCamera);
+      }
+      this.bakeLightProbe();
+    } else {
+      if (this._lightProbe) {
+        this.scene.remove(this._lightProbe);
+        this._lightProbe = null;
+      }
+      if (this._giCubeCamera) {
+        this.scene.remove(this._giCubeCamera);
+        this._giCubeCamera = null;
+      }
+      if (this._giCubeRT) {
+        this._giCubeRT.dispose();
+        this._giCubeRT = null;
+      }
+    }
+  }
+
+  setGIIntensity(intensity: number): void {
+    if (this._lightProbe) this._lightProbe.intensity = intensity;
+  }
+
+  /** Re-captures the probe's surroundings and re-projects them to spherical
+   *  harmonics. Synchronous GPU readback (see LightProbeGenerator), so this
+   *  is throttled by the caller (Viewport's render loop) rather than run
+   *  every frame - a light probe approximates static/slow-changing bounce
+   *  lighting, not real-time reflections. */
+  bakeLightProbe(): void {
+    if (!this._giEnabled || !this._lightProbe || !this._giCubeCamera || !this._giCubeRT || this._giBaking) return;
+    this._giBaking = true;
+    try {
+      // Center the probe on the loaded model (falls back to the origin,
+      // roughly where the ground/subject sits, if nothing is loaded yet) -
+      // one probe placed there is a reasonable single-probe approximation
+      // for this app's hero-product-on-a-turntable scenes.
+      const model = this._findModel();
+      if (model) {
+        const box = new THREE.Box3().setFromObject(model);
+        if (!box.isEmpty()) {
+          const center = box.getCenter(new THREE.Vector3());
+          this._giCubeCamera.position.copy(center);
+        }
+      }
+
+      // Exclude UI helpers (gizmo, ground fade overlay, measure line, this
+      // probe's own CubeCamera helper, the floor reflection CubeCamera) from
+      // the capture the same way the path tracer does - otherwise transform
+      // gizmo colors could bleed into the probe's irradiance estimate.
+      const hidden: THREE.Object3D[] = [];
+      this.scene.traverse((o) => {
+        if (o.visible && (o.userData?.isProxy || o.userData?.isHelper)) hidden.push(o);
+      });
+      for (const o of hidden) o.visible = false;
+
+      try {
+        this._giCubeCamera.update(this.renderer, this.scene);
+        const generated = LightProbeGenerator.fromCubeRenderTarget(this.renderer, this._giCubeRT);
+        this._lightProbe.sh.copy(generated.sh);
+      } finally {
+        for (const o of hidden) o.visible = true;
+      }
+    } catch (e) {
+      console.warn('[LightForge] Light probe bake failed:', e);
+    } finally {
+      this._giBaking = false;
+    }
   }
 
   getCameraState(): { position: [number, number, number]; target: [number, number, number]; fov: number } {
@@ -612,6 +714,7 @@ export class SceneManager {
   dispose(): void {
     this.stopRenderLoop();
     this.detach();
+    this.setGIEnabled(false); // properly clean up the probe's CubeCamera + render target
     this._disposeGround(); // properly clean up CubeCamera + render targets
     this.pmremGenerator.dispose();
     this.scene.traverse((obj) => {

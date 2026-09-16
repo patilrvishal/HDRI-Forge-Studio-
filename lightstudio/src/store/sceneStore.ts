@@ -40,6 +40,7 @@ interface SceneStore extends SceneState {
   setRenderSettings: (settings: Partial<SceneState['renderSettings']>) => void;
   setBloom: (bloom: Partial<SceneState['renderSettings']['bloom']>) => void;
   setAO: (ao: Partial<SceneState['renderSettings']['ao']>) => void;
+  setGI: (gi: Partial<SceneState['renderSettings']['gi']>) => void;
   setGround: (ground: Partial<SceneState['renderSettings']['ground']>) => void;
   setExposure: (exposure: number) => void;
   setVignette: (vignette: Partial<SceneState['renderSettings']['vignette']>) => void;
@@ -154,6 +155,16 @@ export const useSceneStore = create<SceneStore>((set, get) => ({
     }));
   },
 
+  setGI: (gi) => {
+    history.recordThrottled('Change Global Illumination');
+    set((state) => ({
+      renderSettings: {
+        ...state.renderSettings,
+        gi: { ...state.renderSettings.gi, ...gi },
+      },
+    }));
+  },
+
   setGround: (ground) => {
     history.recordThrottled('Change Ground');
     set((state) => ({
@@ -253,6 +264,7 @@ export const useSceneStore = create<SceneStore>((set, get) => ({
         ...newState.renderSettings,
         bloom: { ...DEFAULT_RENDER_SETTINGS.bloom, ...newState.renderSettings.bloom },
         ao: { ...DEFAULT_RENDER_SETTINGS.ao, ...newState.renderSettings.ao },
+        gi: { ...DEFAULT_RENDER_SETTINGS.gi, ...(newState.renderSettings as Partial<RenderSettings>).gi },
         ground: { ...DEFAULT_RENDER_SETTINGS.ground, ...(newState.renderSettings as Partial<RenderSettings>).ground },
         vignette: { ...DEFAULT_RENDER_SETTINGS.vignette, ...newState.renderSettings.vignette },
         colorGrading: { ...DEFAULT_RENDER_SETTINGS.colorGrading, ...newState.renderSettings.colorGrading },

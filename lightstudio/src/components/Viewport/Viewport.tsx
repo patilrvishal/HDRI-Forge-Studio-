@@ -45,6 +45,7 @@ export const Viewport: React.FC<ViewportProps> = ({ sceneManagerRef, onScreensho
   const materialManagerRef = useRef<MaterialManager | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const animAccumulatorRef = useRef(0);
+  const giAccumulatorRef = useRef(0);
   const mouseDownPos = useRef<{ x: number; y: number } | null>(null);
 
   const [isDragging, setIsDragging] = useState(false);
@@ -320,6 +321,21 @@ export const Viewport: React.FC<ViewportProps> = ({ sceneManagerRef, onScreensho
             sceneManager._floorCubeCamera = null;
           }
         }
+      }
+
+      // ------ Global illumination: periodic light-probe re-bake ---------------------------------------------------
+      // Throttled (not every frame) - bakeLightProbe() does a synchronous
+      // GPU readback (see LightProbeGenerator), and a probe only needs to
+      // track slow-changing bounce lighting, not track every frame like a
+      // reflection would.
+      if (sceneManager._giEnabled) {
+        giAccumulatorRef.current += delta;
+        if (giAccumulatorRef.current >= 1) {
+          giAccumulatorRef.current = 0;
+          sceneManager.bakeLightProbe();
+        }
+      } else {
+        giAccumulatorRef.current = 0;
       }
 
       sceneManager.controls.update();
@@ -731,10 +747,15 @@ export const Viewport: React.FC<ViewportProps> = ({ sceneManagerRef, onScreensho
         renderSettings.colorGrading.contrast,
         renderSettings.colorGrading.saturation
       );
+      const sm = sceneManagerRef.current;
+      if (sm) {
+        sm.setGIEnabled(renderSettings.gi.enabled);
+        sm.setGIIntensity(renderSettings.gi.intensity);
+      }
     } catch (e) {
       console.error('[LightForge] Failed to sync render settings:', e);
     }
-  }, [renderSettings, renderPipelineRef]);
+  }, [renderSettings, renderPipelineRef, sceneManagerRef]);
 
   // -- Transform gizmo --------------------------------------------------------
   const gizmoRef = useRef<GizmoManager | null>(null);
