@@ -366,7 +366,11 @@ export const Viewport: React.FC<ViewportProps> = ({ sceneManagerRef, onScreensho
     sceneManagerRef.current?.setGrid(showGrid);
   }, [showGrid, sceneManagerRef]);
 
-  // Backplate: render as scene.background when set
+  // Backplate: render as scene.background when set. Composited onto a
+  // solid-color canvas rather than assigned as scene.background directly -
+  // Three.js's scene.background holds a single Color OR Texture, it can't
+  // blend a texture at partial alpha over a color by itself, so the opacity
+  // slider needs this canvas pre-composite to do anything at all.
   const backplateTextureRef = useRef<THREE.Texture | null>(null);
 
   useEffect(() => {
@@ -374,21 +378,35 @@ export const Viewport: React.FC<ViewportProps> = ({ sceneManagerRef, onScreensho
     if (!sm) return;
 
     if (backplate) {
-      // Load backplate as texture for background
       if (backplateTextureRef.current) {
         backplateTextureRef.current.dispose();
         backplateTextureRef.current = null;
       }
-      const loader = new THREE.TextureLoader();
-      loader.load(backplate, (tex) => {
+
+      const img = new Image();
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        canvas.width = img.naturalWidth || 1;
+        canvas.height = img.naturalHeight || 1;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) return;
+
+        // Solid backdrop the photo fades toward as opacity drops - the same
+        // color "Show BG" uses, so dialing opacity down reads as fading to
+        // the scene's own background color, not to black.
+        ctx.fillStyle = useSceneStore.getState().environment.background;
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.globalAlpha = Math.max(0, Math.min(1, backplateOpacity));
+        ctx.drawImage(img, 0, 0);
+
+        const tex = new THREE.CanvasTexture(canvas);
         tex.colorSpace = THREE.SRGBColorSpace;
         tex.minFilter = THREE.LinearFilter;
         tex.magFilter = THREE.LinearFilter;
         backplateTextureRef.current = tex;
-        if (backplateOpacity >= 0.99) {
-          sm.scene.background = tex;
-        }
-      });
+        sm.scene.background = tex;
+      };
+      img.src = backplate;
     } else {
       if (backplateTextureRef.current) {
         backplateTextureRef.current.dispose();

@@ -99,6 +99,13 @@ const EnvironmentBrowser: React.FC<EnvironmentBrowserProps> = ({ onClose, onPres
     setEnvironment({ backplate: null, backplateOpacity: 1 });
   }, [setEnvironment]);
 
+  const handleBackplateOpacityChange = useCallback(
+    (v: number) => {
+      setEnvironment({ backplateOpacity: v });
+    },
+    [setEnvironment],
+  );
+
   const handleCustomUpload = useCallback(() => {
     fileInputRef.current?.click();
   }, []);
@@ -253,8 +260,19 @@ const EnvironmentBrowser: React.FC<EnvironmentBrowserProps> = ({ onClose, onPres
                   flexShrink: 0,
                 }}
               />
-              <div style={{ fontSize: 10, color: 'var(--text-sec)' }}>
-                Backplate active - shown as viewport background
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 2, flex: 1 }}>
+                <div style={{ fontSize: 10, color: 'var(--text-sec)' }}>
+                  Backplate active - shown as viewport background
+                </div>
+                <Slider
+                  label="Opacity"
+                  value={environment.backplateOpacity}
+                  min={0}
+                  max={1}
+                  step={0.01}
+                  onChange={handleBackplateOpacityChange}
+                  unit=""
+                />
               </div>
             </div>
           ) : null}
