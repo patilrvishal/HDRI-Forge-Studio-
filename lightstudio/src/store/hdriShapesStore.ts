@@ -30,6 +30,10 @@ interface HDRIShapesStore {
   setShapesOrder: (ids: string[]) => void;
   duplicateShape: (id: string) => void;
   clearShapes: () => void;
+  /** Replace the whole shape stack in one go, with fresh ids so restoring
+   *  the same Look twice never collides with whatever's already on screen -
+   *  used by looksStore when applying a saved Look. */
+  setShapesFromLook: (shapes: HDRIShape[]) => void;
   setLivePreview: (on: boolean) => void;
   requestPreviewRefresh: () => void;
 }
@@ -108,6 +112,14 @@ export const useHDRIShapesStore = create<HDRIShapesStore>((set, get) => ({
   },
 
   clearShapes: () => set({ shapes: [], selectedShapeId: null }),
+
+  setShapesFromLook: (shapes) => {
+    const fresh = shapes.map((sh) => ({
+      ...sh,
+      id: `hdrishape_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+    }));
+    set({ shapes: fresh, selectedShapeId: null });
+  },
 
   setLivePreview: (on) => set({ livePreview: on }),
 

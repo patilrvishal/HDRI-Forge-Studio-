@@ -5,6 +5,7 @@ import { presetToLights } from '../../types/Preset';
 import type { Preset } from '../../types/Preset';
 import { renderPresetThumbnail } from '../../three/PresetThumbnailRenderer';
 import { useHDRIAssetStore } from '../../store/hdriAssetStore';
+import { useLooksStore } from '../../store/looksStore';
 
 interface PresetBrowserProps {
   /** Optional ref to a MaterialPreview's renderThumbnail function for generating thumbnails */
@@ -56,6 +57,31 @@ export const PresetBrowser: React.FC<PresetBrowserProps> = ({ onGenerateThumbnai
   const loadHDRIsFromDB = useHDRIAssetStore((s) => s.loadFromDB);
   const saveHDRIsToDB = useHDRIAssetStore((s) => s.saveAllToDB);
 
+  // Looks: whole-scene snapshots (lights + HDRI shapes + camera), a
+  // superset of a Preset (lights only) - HDR Light Studio's "Light Looks".
+  const looks = useLooksStore((s) => s.looks);
+  const looksDbLoaded = useLooksStore((s) => s.dbLoaded);
+  const loadLooksFromDB = useLooksStore((s) => s.loadFromDB);
+  const saveCurrentAsLook = useLooksStore((s) => s.saveCurrentAsLook);
+  const applyLook = useLooksStore((s) => s.applyLook);
+  const deleteLook = useLooksStore((s) => s.deleteLook);
+  const [browserMode, setBrowserMode] = useState<'presets' | 'looks'>('presets');
+  // A/B compare: each slot holds a Look id (or null = not set). Clicking
+  // "Compare" applies whichever slot ISN'T currently shown, so repeated
+  // clicks flicker between the two - the same workflow as HDR Light
+  // Studio's Light Looks compare, without needing a real split-screen
+  // render (a second full render pass just to preview two static Looks
+  // side-by-side isn't worth the complexity here).
+  const [compareA, setCompareA] = useState<string>('');
+  const [compareB, setCompareB] = useState<string>('');
+  const [showingSlot, setShowingSlot] = useState<'A' | 'B' | null>(null);
+  // null = "Save Look" button showing; a string = the inline name field is
+  // showing with this as its current value. window.prompt() is NOT an
+  // option here - WebView2 (the desktop app's actual runtime) doesn't
+  // support it at all, confirmed live ("prompt() is not supported"), so
+  // this needed a real in-app input regardless of how it tested.
+  const [savingLookName, setSavingLookName] = useState<string | null>(null);
+
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [toast, setToast] = useState<string | null>(null);
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -102,6 +128,13 @@ export const PresetBrowser: React.FC<PresetBrowserProps> = ({ onGenerateThumbnai
       loadHDRIsFromDB().catch(() => {});
     }
   }, [hdriDbLoaded, loadHDRIsFromDB]);
+
+  // Restore saved Looks on mount
+  useEffect(() => {
+    if (!looksDbLoaded) {
+      loadLooksFromDB().catch(() => {});
+    }
+  }, [looksDbLoaded, loadLooksFromDB]);
 
   // Async thumbnail rendering for presets without 3D thumbnails
   useEffect(() => {
@@ -223,6 +256,55 @@ export const PresetBrowser: React.FC<PresetBrowserProps> = ({ onGenerateThumbnai
     [presets, deletePresetFromDB, showToast],
   );
 
+  // Save the current scene (lights + HDRI shapes + camera) as a new Look
+  const startSaveLook = useCallback(() => {
+    setSavingLookName(`Look ${looks.length + 1}`);
+  }, [looks.length]);
+
+  const confirmSaveLook = useCallback(async () => {
+    const name = savingLookName?.trim();
+    if (!name) return;
+    const look = await saveCurrentAsLook(name);
+    setSavingLookName(null);
+    showToast(`"${look.name}" saved`);
+  }, [savingLookName, saveCurrentAsLook, showToast]);
+
+  const handleApplyLook = useCallback(
+    (id: string) => {
+      const look = looks.find((l) => l.id === id);
+      if (!look) return;
+      applyLook(id);
+      setShowingSlot(null);
+      showToast(`Applied "${look.name}"`);
+    },
+    [looks, applyLook, showToast],
+  );
+
+  const handleDeleteLook = useCallback(
+    (e: React.MouseEvent, id: string) => {
+      e.stopPropagation();
+      const look = looks.find((l) => l.id === id);
+      deleteLook(id);
+      if (compareA === id) setCompareA('');
+      if (compareB === id) setCompareB('');
+      showToast(`Deleted "${look?.name ?? 'Look'}"`);
+    },
+    [looks, deleteLook, compareA, compareB, showToast],
+  );
+
+  // Flicker-compare: apply whichever slot isn't currently shown, so
+  // repeated clicks alternate A/B/A/B like a photo lighting comparison.
+  const handleCompareToggle = useCallback(() => {
+    const nextSlot = showingSlot === 'A' ? 'B' : 'A';
+    const nextId = nextSlot === 'A' ? compareA : compareB;
+    if (!nextId) {
+      showToast(`Pick a Look for slot ${nextSlot} first`);
+      return;
+    }
+    applyLook(nextId);
+    setShowingSlot(nextSlot);
+  }, [showingSlot, compareA, compareB, applyLook, showToast]);
+
   // Import presets (JSON). Custom HDRI loading moved to the Create menu's
   // "Custom HDRI..." entry and the HDRI Preview panel's "Custom HDRI"
   // button (both use src/utils/loadCustomHDRI.ts), so this only handles
@@ -273,6 +355,25 @@ export const PresetBrowser: React.FC<PresetBrowserProps> = ({ onGenerateThumbnai
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', position: 'relative' }}>
+      {/* Presets / Looks mode switch */}
+      <div className="preset-tabs" style={{ paddingRight: 6 }}>
+        <div
+          className={`preset-tab ${browserMode === 'presets' ? 'active' : ''}`}
+          onClick={() => setBrowserMode('presets')}
+        >
+          Presets
+        </div>
+        <div
+          className={`preset-tab ${browserMode === 'looks' ? 'active' : ''}`}
+          onClick={() => setBrowserMode('looks')}
+          title="Whole-scene snapshots: lights, HDRI shapes, and camera together"
+        >
+          Looks
+        </div>
+      </div>
+
+      {browserMode === 'presets' && (
+        <>
       {/* Category tabs + thumbnail size adjuster */}
       <div className="preset-tabs" style={{ justifyContent: 'space-between', paddingRight: 6 }}>
         <div style={{ display: 'flex' }}>
@@ -386,6 +487,96 @@ export const PresetBrowser: React.FC<PresetBrowserProps> = ({ onGenerateThumbnai
           </div>
         )}
       </div>
+        </>
+      )}
+
+      {browserMode === 'looks' && (
+        <>
+          {/* A/B compare */}
+          <div style={{ padding: '6px', borderBottom: '1px solid var(--border)', display: 'flex', flexDirection: 'column', gap: 5 }}>
+            <div style={{ display: 'flex', gap: 5, alignItems: 'center' }}>
+              <select
+                className="field-input"
+                style={{ flex: 1, fontSize: 10 }}
+                value={compareA}
+                onChange={(e) => setCompareA(e.target.value)}
+              >
+                <option value="">A: pick a Look…</option>
+                {looks.map((l) => (
+                  <option key={l.id} value={l.id}>{l.name}</option>
+                ))}
+              </select>
+              <select
+                className="field-input"
+                style={{ flex: 1, fontSize: 10 }}
+                value={compareB}
+                onChange={(e) => setCompareB(e.target.value)}
+              >
+                <option value="">B: pick a Look…</option>
+                {looks.map((l) => (
+                  <option key={l.id} value={l.id}>{l.name}</option>
+                ))}
+              </select>
+            </div>
+            <button
+              className="btn-sm btn-glow"
+              onClick={handleCompareToggle}
+              disabled={!compareA || !compareB}
+              title="Flicker between Look A and Look B"
+            >
+              {showingSlot ? `Showing ${showingSlot} — click for ${showingSlot === 'A' ? 'B' : 'A'}` : 'Compare A / B'}
+            </button>
+          </div>
+
+          {/* Looks grid */}
+          <div className="panel-body" style={{ flex: 1, padding: '6px', overflowY: 'auto' }}>
+            {looks.length === 0 ? (
+              <div className="preset-empty">No Looks saved yet — set up your lighting, then Save below</div>
+            ) : (
+              <div className="preset-grid" style={{ '--preset-thumb-size': `${thumbSize}px` } as React.CSSProperties}>
+                {looks.map((look) => (
+                  <div
+                    key={look.id}
+                    className="preset-card"
+                    onClick={() => handleApplyLook(look.id)}
+                    title="Click to apply this Look"
+                    style={{ position: 'relative' }}
+                  >
+                    <div className="pc-inner">
+                      {look.thumbnail ? (
+                        <img src={look.thumbnail} alt={look.name} loading="lazy" draggable={false} />
+                      ) : (
+                        <div className="pc-placeholder">
+                          <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.2" opacity="0.3">
+                            <circle cx="10" cy="10" r="5" />
+                            <path d="M10 3v2M10 15v2M3 10h2M15 10h2" />
+                          </svg>
+                        </div>
+                      )}
+                      <button
+                        className="pc-del"
+                        onClick={(e) => handleDeleteLook(e, look.id)}
+                        title="Delete Look"
+                        aria-label={`Delete ${look.name}`}
+                      >
+                        <svg width="8" height="8" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="2">
+                          <path d="M1 1l10 10M11 1L1 11" />
+                        </svg>
+                      </button>
+                    </div>
+                    <div className="pc-name">{look.name}</div>
+                    <div style={{ fontSize: 8, color: 'var(--text-dim)', padding: '0 4px 3px', textAlign: 'center' }}>
+                      {look.lights.length} light{look.lights.length !== 1 ? 's' : ''}
+                      {look.hdriShapes.length > 0 ? ` · ${look.hdriShapes.length} shape${look.hdriShapes.length !== 1 ? 's' : ''}` : ''}
+                      {look.camera ? ' · cam' : ''}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </>
+      )}
 
       {/* Bottom toolbar: Save / Export / Import */}
       <div
@@ -398,38 +589,76 @@ export const PresetBrowser: React.FC<PresetBrowserProps> = ({ onGenerateThumbnai
           flexShrink: 0,
         }}
       >
-        <button className="btn-sm btn-glow" onClick={handleSavePreset} title="Save current lights as preset">
-          <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.5">
-            <path d="M1 9V3l2-2h4l2 2v6H1z" />
-            <rect x="3.5" y="5" width="3" height="4" />
-          </svg>
-          Save
-        </button>
-        <button className="btn-sm btn-glow" onClick={exportPresets} title="Export presets to JSON">
-          <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.5">
-            <path d="M5 1v6M2 4l3 3 3-3" />
-            <path d="M1 8h8" />
-          </svg>
-          Export
-        </button>
-        <button
-          className="btn-sm btn-glow"
-          onClick={() => fileInputRef.current?.click()}
-          title="Import presets from JSON"
-        >
-          <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.5">
-            <path d="M5 9V3M2 6l3-3 3 3" />
-            <path d="M1 2h8" />
-          </svg>
-          Import
-        </button>
-        <input
-          ref={fileInputRef}
-          type="file"
-          accept=".json"
-          style={{ display: 'none' }}
-          onChange={handleImport}
-        />
+        {browserMode === 'looks' ? (
+          savingLookName !== null ? (
+            <div style={{ display: 'flex', gap: 4, flex: 1 }}>
+              <input
+                className="field-input"
+                style={{ flex: 1, fontSize: 11 }}
+                value={savingLookName}
+                autoFocus
+                onChange={(e) => setSavingLookName(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') void confirmSaveLook();
+                  if (e.key === 'Escape') setSavingLookName(null);
+                }}
+              />
+              <button className="btn-sm btn-glow" onClick={confirmSaveLook} title="Confirm">
+                <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.6">
+                  <path d="M1.5 5.5l2.5 2.5 4.5-5.5" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+              </button>
+              <button className="btn-sm" onClick={() => setSavingLookName(null)} title="Cancel">
+                <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.6">
+                  <path d="M1.5 1.5l7 7M8.5 1.5l-7 7" strokeLinecap="round" />
+                </svg>
+              </button>
+            </div>
+          ) : (
+            <button className="btn-sm btn-glow" onClick={startSaveLook} title="Save the current lights, HDRI shapes, and camera as a Look">
+              <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.5">
+                <path d="M1 9V3l2-2h4l2 2v6H1z" />
+                <rect x="3.5" y="5" width="3" height="4" />
+              </svg>
+              Save Look
+            </button>
+          )
+        ) : (
+          <>
+            <button className="btn-sm btn-glow" onClick={handleSavePreset} title="Save current lights as preset">
+              <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.5">
+                <path d="M1 9V3l2-2h4l2 2v6H1z" />
+                <rect x="3.5" y="5" width="3" height="4" />
+              </svg>
+              Save
+            </button>
+            <button className="btn-sm btn-glow" onClick={exportPresets} title="Export presets to JSON">
+              <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.5">
+                <path d="M5 1v6M2 4l3 3 3-3" />
+                <path d="M1 8h8" />
+              </svg>
+              Export
+            </button>
+            <button
+              className="btn-sm btn-glow"
+              onClick={() => fileInputRef.current?.click()}
+              title="Import presets from JSON"
+            >
+              <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.5">
+                <path d="M5 9V3M2 6l3-3 3 3" />
+                <path d="M1 2h8" />
+              </svg>
+              Import
+            </button>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept=".json"
+              style={{ display: 'none' }}
+              onChange={handleImport}
+            />
+          </>
+        )}
       </div>
 
       {/* Toast notification */}
