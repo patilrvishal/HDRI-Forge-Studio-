@@ -59,7 +59,7 @@ export const Viewport: React.FC<ViewportProps> = ({ sceneManagerRef, onScreensho
   const hdriShapes = useHDRIShapesStore((s) => s.shapes);
   const hdriLivePreview = useHDRIShapesStore((s) => s.livePreview);
   const hdriSelectedShapeId = useHDRIShapesStore((s) => s.selectedShapeId);
-  const updateHDRIShape = useHDRIShapesStore((s) => s.updateShape);
+  const moveHDRIShapeAndGroup = useHDRIShapesStore((s) => s.moveShapeAndGroup);
   const renderSettings = useSceneStore((s) => s.renderSettings);
   const setModel = useSceneStore((s) => s.setModel);
   const setExposure = useSceneStore((s) => s.setExposure);
@@ -1002,7 +1002,7 @@ export const Viewport: React.FC<ViewportProps> = ({ sceneManagerRef, onScreensho
       u = ((u % 1) + 1) % 1;
       const v = Math.acos(Math.max(-1, Math.min(1, R.y))) / Math.PI;
 
-      updateHDRIShape(shapeId, { u, v });
+      moveHDRIShapeAndGroup(shapeId, u, v);
       return;
     }
 
@@ -1062,7 +1062,7 @@ export const Viewport: React.FC<ViewportProps> = ({ sceneManagerRef, onScreensho
       aimTarget: { x: P.x, y: P.y, z: P.z },
       rotation: { ...l.transform.rotation, enabled: false },
     } as never);
-  }, [paintMode, distanceScale, containerRef, sceneManagerRef, updateHDRIShape]);
+  }, [paintMode, distanceScale, containerRef, sceneManagerRef, moveHDRIShapeAndGroup]);
 
   // Right-click a reflection to select the light producing it - HDR Light
   // Studio's other half of LightPaint. Read-only: no light gets moved, this
