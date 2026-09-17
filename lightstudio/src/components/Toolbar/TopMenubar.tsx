@@ -48,8 +48,13 @@ const MENU_DEFINITIONS = (
     newScene: {
       label: 'New Scene',
       shortcut: 'Ctrl+N',
-      action: () => {
-        if (!confirm('Create a new scene? Unsaved changes will be lost.')) return;
+      action: async () => {
+        // Not window.confirm() - unsupported in the packaged desktop app's
+        // WebView2 runtime, where it silently no-ops instead of showing a
+        // dialog (confirmed live; same class of bug already found once on
+        // the Looks panel's Save button).
+        const ok = await useUIStore.getState().requestConfirm('Create a new scene? Unsaved changes will be lost.', 'New Scene');
+        if (!ok) return;
         useSceneStore.getState().resetScene();
         useLightsStore.getState().clearAllLights();
         useSceneStore.getState().setCamera([5, 3, 5], [0, 0, 0]);
@@ -104,9 +109,10 @@ const MENU_DEFINITIONS = (
     },
     saveAs: {
       label: 'Save Scene As...',
-      action: () => {
+      action: async () => {
         const ui = useUIStore.getState();
-        const name = prompt('Enter filename:', `lightforge_scene_${Date.now()}.lightscene`);
+        // Not window.prompt() - see the New Scene action's comment above.
+        const name = await ui.requestPrompt('Enter filename:', `lightforge_scene_${Date.now()}.lightscene`);
         if (!name) return;
         try {
           const data = SceneExporter.exportScene();
@@ -324,6 +330,7 @@ const THEME_OPTIONS: Array<{ value: string; label: string; dot: string }> = [
 ];
 
 const THEME_STORAGE_KEY = 'lightforge-accent-theme';
+const MODE_STORAGE_KEY = 'lightforge-color-mode';
 
 // ── Nav icon set - minimal 14x14 stroke glyphs, matching style ──────────
 const IconHome = () => (
@@ -480,6 +487,54 @@ function ThemeSwitcher() {
         </div>
       )}
     </div>
+  );
+}
+
+/** Light/dark mode toggle, independent of the accent-color ThemeSwitcher
+ *  above - applies a separate data-mode attribute on <body> so the two
+ *  choices (accent hue, surface lightness) combine freely instead of one
+ *  overwriting the other's attribute. Same localStorage-persisted pattern
+ *  as ThemeSwitcher. Defaults to dark (no attribute) - every existing
+ *  user's current look is unchanged unless they opt into light. */
+function ColorModeToggle() {
+  const [mode, setMode] = useState<'dark' | 'light'>(() => {
+    try {
+      return localStorage.getItem(MODE_STORAGE_KEY) === 'light' ? 'light' : 'dark';
+    } catch {
+      return 'dark';
+    }
+  });
+
+  useEffect(() => {
+    if (mode === 'light') {
+      document.body.dataset.mode = 'light';
+    } else {
+      delete document.body.dataset.mode;
+    }
+    try {
+      localStorage.setItem(MODE_STORAGE_KEY, mode);
+    } catch {
+      // ignore storage errors (private browsing, etc.)
+    }
+  }, [mode]);
+
+  return (
+    <button
+      className="theme-switcher-btn"
+      onClick={() => setMode((m) => (m === 'light' ? 'dark' : 'light'))}
+      title={mode === 'light' ? 'Switch to dark mode' : 'Switch to light mode'}
+    >
+      {mode === 'light' ? (
+        <svg width="13" height="13" viewBox="0 0 16 16" fill="none">
+          <circle cx="8" cy="8" r="3.5" stroke="currentColor" strokeWidth="1.4" />
+          <path d="M8 1v2M8 13v2M1 8h2M13 8h2M3.05 3.05l1.4 1.4M11.55 11.55l1.4 1.4M3.05 12.95l1.4-1.4M11.55 4.45l1.4-1.4" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+        </svg>
+      ) : (
+        <svg width="13" height="13" viewBox="0 0 16 16" fill="none">
+          <path d="M13.5 9.5A5.5 5.5 0 0 1 6.5 2.5a5.5 5.5 0 1 0 7 7z" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round" />
+        </svg>
+      )}
+    </button>
   );
 }
 
@@ -710,6 +765,7 @@ export const TopMenubar: React.FC<TopMenubarProps> = ({ sceneManagerRef, onExpor
 
       <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 4 }}>
         <div style={{ width: 1, alignSelf: 'stretch', margin: '10px 4px', background: 'var(--border-light)', flexShrink: 0 }} />
+        <ColorModeToggle />
         <ThemeSwitcher />
       </div>
     </div>

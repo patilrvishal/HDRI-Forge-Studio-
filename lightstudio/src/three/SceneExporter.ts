@@ -139,6 +139,7 @@ export class SceneExporter {
           shadowQuality: sceneState.renderSettings.shadowQuality,
           bloom: { ...sceneState.renderSettings.bloom },
           ao: { ...sceneState.renderSettings.ao },
+          gi: { ...sceneState.renderSettings.gi },
           ground: { ...sceneState.renderSettings.ground },
           vignette: { ...sceneState.renderSettings.vignette },
           colorGrading: { ...sceneState.renderSettings.colorGrading },

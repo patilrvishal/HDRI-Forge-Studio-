@@ -1,12 +1,14 @@
 import React, { useRef, useState, useCallback, useEffect } from 'react';
 import { useSceneStore } from '../../store/sceneStore';
 import { useUIStore } from '../../store/uiStore';
-import { SceneManager } from '../../three/engine';
+import { useViewportModeStore } from '../../store/viewportModeStore';
+import { SceneManager, RenderPipeline } from '../../three/engine';
 import type { ViewMode } from '../../types/Light';
 
 
 interface ViewportToolbarProps {
   sceneManagerRef: React.MutableRefObject<SceneManager | null>;
+  renderPipelineRef: React.MutableRefObject<RenderPipeline | null>;
   onScreenshot: () => void;
   onLoadModel: () => void;
 }
@@ -20,12 +22,14 @@ const VIEW_PRESETS: Record<ViewMode, { position: [number, number, number]; targe
 
 export const ViewportToolbar: React.FC<ViewportToolbarProps> = ({
   sceneManagerRef,
+  renderPipelineRef,
   onScreenshot,
   onLoadModel,
 }) => {
   const [viewMode, setViewMode] = useState<ViewMode>('perspective');
   const [resolution, setResolution] = useState({ width: 0, height: 0 });
   const resizeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [pathTracerStatus, setPathTracerStatus] = useState<{ ready: boolean; samples: number; error: string | null } | null>(null);
 
   const modelName = useSceneStore((s) => s.modelName);
   const renderEngine = useSceneStore((s) => s.renderSettings.engine);
@@ -39,6 +43,12 @@ export const ViewportToolbar: React.FC<ViewportToolbarProps> = ({
   const toggleTurntable = useSceneStore((s) => s.toggleTurntable);
 
   const setSettingsModal = useUIStore((s) => s.setSettingsModal);
+
+  const workspaceMode = useViewportModeStore((s) => s.mode);
+  const setWorkspaceMode = useViewportModeStore((s) => s.setMode);
+  const handleWorkspaceToggle = useCallback(() => {
+    setWorkspaceMode(workspaceMode === '360' ? 'angleHunt' : '360');
+  }, [workspaceMode, setWorkspaceMode]);
 
   // Observe container size for resolution display
   useEffect(() => {
@@ -83,6 +93,25 @@ export const ViewportToolbar: React.FC<ViewportToolbarProps> = ({
     setRenderSettings({ engine: next });
   }, [renderEngine, setRenderSettings]);
 
+  // Poll the path tracer's live sample count - it accumulates every rendered
+  // frame inside RenderPipeline, not through a store, so there's nothing to
+  // subscribe to; only run this extra rAF loop while pathtracer mode is on.
+  useEffect(() => {
+    if (renderEngine !== 'pathtracer') {
+      setPathTracerStatus(null);
+      return;
+    }
+    // Throttled to a few times a second - polling every rendered frame would
+    // re-render this toolbar every frame for as long as the mode is on.
+    const interval = setInterval(() => {
+      const rp = renderPipelineRef.current;
+      if (rp) {
+        setPathTracerStatus({ ready: rp.isPathTracingReady(), samples: rp.getPathTracerSamples(), error: rp.getPathTracerError() });
+      }
+    }, 200);
+    return () => clearInterval(interval);
+  }, [renderEngine, renderPipelineRef]);
+
   // Handle turntable speed change
   const handleSpeedChange = useCallback(
     (speed: number) => {
@@ -117,8 +146,41 @@ export const ViewportToolbar: React.FC<ViewportToolbarProps> = ({
         </button>
       </div>
 
-      {/* Center: Engine + View */}
+      {/* Center: Workspace + Engine + View */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexShrink: 0 }}>
+        {/* Workspace toggle: 360 Workspace (free-orbit) vs Angle Hunt Mode
+            (locked to one camera, HDR Light Studio's Camera/Light-Editor
+            workflow). */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+          <span
+            style={{
+              fontSize: 9,
+              fontWeight: 600,
+              textTransform: 'uppercase',
+              letterSpacing: '0.5px',
+              color: 'var(--text-dim)',
+            }}
+          >
+            WORKSPACE
+          </span>
+          <button
+            className="btn-sm"
+            onClick={handleWorkspaceToggle}
+            style={{
+              fontSize: 10,
+              borderColor: workspaceMode === 'angleHunt' ? 'var(--accent)' : undefined,
+              color: workspaceMode === 'angleHunt' ? 'var(--accent)' : undefined,
+            }}
+            title={
+              workspaceMode === '360'
+                ? 'Free-orbit - edit the HDRI environment from any angle'
+                : 'Locked to one camera shot - position lights precisely against that exact angle'
+            }
+          >
+            {workspaceMode === '360' ? '360 Workspace' : 'Angle Hunt'}
+          </button>
+        </div>
+
         {/* Engine toggle */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
           <span
@@ -143,33 +205,62 @@ export const ViewportToolbar: React.FC<ViewportToolbarProps> = ({
           >
             {renderEngine === 'pbr' ? 'PBR' : 'Pathtracer'}
           </button>
+          {renderEngine === 'pathtracer' && (
+            <span
+              style={{
+                fontSize: 9,
+                fontFamily: 'var(--font-mono)',
+                color: pathTracerStatus?.error ? 'var(--danger, #e5484d)' : 'var(--accent)',
+                whiteSpace: 'nowrap',
+                maxWidth: 220,
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+              }}
+              title={
+                pathTracerStatus?.error ??
+                'Path-traced final-quality preview: accumulates samples while the camera and scene are still, resets on any change.'
+              }
+            >
+              {pathTracerStatus
+                ? pathTracerStatus.error
+                  ? pathTracerStatus.error
+                  : pathTracerStatus.ready
+                  ? `${pathTracerStatus.samples} spp`
+                  : 'Building…'
+                : ''}
+            </span>
+          )}
         </div>
 
-        {/* View mode */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-          <span
-            style={{
-              fontSize: 9,
-              fontWeight: 600,
-              textTransform: 'uppercase',
-              letterSpacing: '0.5px',
-              color: 'var(--text-dim)',
-            }}
-          >
-            VIEW
-          </span>
-          <select
-            className="field-select"
-            value={viewMode}
-            onChange={(e) => handleViewModeChange(e.target.value)}
-            style={{ width: 90, height: 22, fontSize: 10 }}
-          >
-            <option value="perspective">Perspective</option>
-            <option value="front">Front</option>
-            <option value="right">Right</option>
-            <option value="top">Top</option>
-          </select>
-        </div>
+        {/* View mode - drives the raw live camera transform directly,
+            bypassing cameraStore entirely, so it would silently do nothing
+            useful (or feel broken) against a locked Angle Hunt camera. */}
+        {workspaceMode === '360' && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+            <span
+              style={{
+                fontSize: 9,
+                fontWeight: 600,
+                textTransform: 'uppercase',
+                letterSpacing: '0.5px',
+                color: 'var(--text-dim)',
+              }}
+            >
+              VIEW
+            </span>
+            <select
+              className="field-select"
+              value={viewMode}
+              onChange={(e) => handleViewModeChange(e.target.value)}
+              style={{ width: 90, height: 22, fontSize: 10 }}
+            >
+              <option value="perspective">Perspective</option>
+              <option value="front">Front</option>
+              <option value="right">Right</option>
+              <option value="top">Top</option>
+            </select>
+          </div>
+        )}
       </div>
 
       {/* Right: Controls */}

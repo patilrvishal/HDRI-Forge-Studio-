@@ -33,6 +33,8 @@ import { hdriBase64ToArrayBuffer } from '../store/hdriDataStore';
 import { useHDRIAssetStore } from '../store/hdriAssetStore';
 import { useSceneStore } from '../store/sceneStore';
 import { RGBELoader } from 'three/addons/loaders/RGBELoader.js';
+import { EXRLoader } from 'three/addons/loaders/EXRLoader.js';
+import { isEXRBuffer } from '../utils/hdriFormat';
 
 // --------- Types ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 
@@ -1408,13 +1410,15 @@ export async function downloadHDRI(
 // --------- Environment texture loader ------------------------------------------------------------------------------------------------------------------------------------------
 
 /**
- * Load a raw .hdr ArrayBuffer into a THREE.DataTexture via RGBELoader.
+ * Load a raw .hdr or .exr ArrayBuffer into a THREE.DataTexture, picking the
+ * loader from the file's actual magic bytes (see utils/hdriFormat) since
+ * this buffer arrives with no filename attached.
  */
 function loadHDRITexture(buffer: ArrayBuffer): Promise<THREE.DataTexture | null> {
   return new Promise<THREE.DataTexture | null>((resolve) => {
     const blob = new Blob([buffer], { type: 'application/octet-stream' });
     const url = URL.createObjectURL(blob);
-    const loader = new RGBELoader();
+    const loader = isEXRBuffer(buffer) ? new EXRLoader() : new RGBELoader();
     loader.load(
       url,
       (texture) => {

@@ -67,7 +67,13 @@ export class GizmoManager {
     // In three r16x+ TransformControls is a helper, not a scene object - its
     // gizmo is exposed separately and must be added on its own.
     const helper = (this.controls as unknown as { getHelper?: () => THREE.Object3D }).getHelper?.();
-    scene.add(helper ?? (this.controls as unknown as THREE.Object3D));
+    const gizmoRoot = helper ?? (this.controls as unknown as THREE.Object3D);
+    // Marks this as non-scene-content, same convention as the ground fade
+    // overlay - excluded from the path-traced "final quality" preview
+    // (RenderPipeline._withPathTracerEnv), which otherwise has no way to
+    // tell the gizmo's colored arrows apart from real scene geometry.
+    gizmoRoot.userData.isProxy = true;
+    scene.add(gizmoRoot);
   }
 
   setMode(mode: GizmoMode): void {

@@ -14,6 +14,8 @@ import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { FXAAShader } from 'three/addons/shaders/FXAAShader.js';
 import type { GroundSettings } from '../types/Scene';
 import { paintGradientOntoContext } from './HDRIExporter';
+import { WebGLPathTracer } from 'three-gpu-pathtracer';
+import { LightProbeGenerator } from 'three/addons/lights/LightProbeGenerator.js';
 
 let _rectAreaLibInitialized = false;
 function ensureRectAreaLib(): void {
@@ -37,6 +39,9 @@ export class SceneManager {
   controls: OrbitControls;
   /** True while the user is orbit-dragging a scripted camera. */
   _cameraDragging = false;
+  /** Angle Hunt Mode: the active camera is genuinely read-only - see
+   *  setViewportLocked() and applyActiveCamera(). */
+  _viewportLocked = false;
   container: HTMLElement | null = null;
   ground: THREE.Mesh | null = null;
   groundOverlay: THREE.Mesh | null = null;
@@ -52,6 +57,17 @@ export class SceneManager {
   _floorCubeCamera: THREE.CubeCamera | null = null;
   _floorCubeRT: THREE.WebGLCubeRenderTarget | null = null;
   _floorMaterial: THREE.MeshStandardMaterial | null = null;
+
+  // ------ Global illumination: single spherical-harmonics light probe ------
+  /** Persistent probe instance kept in the scene once GI is enabled -
+   *  bakeLightProbe() only overwrites its .sh coefficients, so toggling
+   *  intensity or re-baking never has to remove/re-add it (which would
+   *  cause a visible pop as materials briefly lose the probe). */
+  _lightProbe: THREE.LightProbe | null = null;
+  _giCubeCamera: THREE.CubeCamera | null = null;
+  _giCubeRT: THREE.WebGLCubeRenderTarget | null = null;
+  _giEnabled = false;
+  _giBaking = false;
 
   constructor() {
     this.scene = new THREE.Scene();
@@ -445,7 +461,8 @@ export class SceneManager {
         !(child instanceof THREE.GridHelper) &&
         !child.userData.isHelper &&
         child !== this.ground &&
-        child !== this._floorCubeCamera
+        child !== this._floorCubeCamera &&
+        child !== this._giCubeCamera
       ) {
         return child;
       }
@@ -455,6 +472,95 @@ export class SceneManager {
 
   stopRenderLoop(): void {
     cancelAnimationFrame(this._animationId);
+  }
+
+  // ------ Global illumination (light probe) ---------------------------------------------------------------------------------------------------------------------------------------
+
+  setGIEnabled(enabled: boolean): void {
+    if (enabled === this._giEnabled) return;
+    this._giEnabled = enabled;
+
+    if (enabled) {
+      if (!this._lightProbe) {
+        this._lightProbe = new THREE.LightProbe();
+        this.scene.add(this._lightProbe);
+      }
+      if (!this._giCubeCamera) {
+        // Small on purpose: a light probe only captures very low-frequency
+        // (diffuse) irradiance via spherical harmonics, so a sharp capture
+        // buys nothing - 16px/face keeps the CPU readback + SH projection
+        // in LightProbeGenerator cheap enough to re-bake periodically
+        // without stalling the render loop.
+        this._giCubeRT = new THREE.WebGLCubeRenderTarget(16, { type: THREE.UnsignedByteType });
+        this._giCubeCamera = new THREE.CubeCamera(0.1, 100, this._giCubeRT);
+        this._giCubeCamera.userData.isProxy = true; // exclude from SceneHierarchy + path tracer
+        this.scene.add(this._giCubeCamera);
+      }
+      this.bakeLightProbe();
+    } else {
+      if (this._lightProbe) {
+        this.scene.remove(this._lightProbe);
+        this._lightProbe = null;
+      }
+      if (this._giCubeCamera) {
+        this.scene.remove(this._giCubeCamera);
+        this._giCubeCamera = null;
+      }
+      if (this._giCubeRT) {
+        this._giCubeRT.dispose();
+        this._giCubeRT = null;
+      }
+    }
+  }
+
+  setGIIntensity(intensity: number): void {
+    if (this._lightProbe) this._lightProbe.intensity = intensity;
+  }
+
+  /** Re-captures the probe's surroundings and re-projects them to spherical
+   *  harmonics. Synchronous GPU readback (see LightProbeGenerator), so this
+   *  is throttled by the caller (Viewport's render loop) rather than run
+   *  every frame - a light probe approximates static/slow-changing bounce
+   *  lighting, not real-time reflections. */
+  bakeLightProbe(): void {
+    if (!this._giEnabled || !this._lightProbe || !this._giCubeCamera || !this._giCubeRT || this._giBaking) return;
+    this._giBaking = true;
+    try {
+      // Center the probe on the loaded model (falls back to the origin,
+      // roughly where the ground/subject sits, if nothing is loaded yet) -
+      // one probe placed there is a reasonable single-probe approximation
+      // for this app's hero-product-on-a-turntable scenes.
+      const model = this._findModel();
+      if (model) {
+        const box = new THREE.Box3().setFromObject(model);
+        if (!box.isEmpty()) {
+          const center = box.getCenter(new THREE.Vector3());
+          this._giCubeCamera.position.copy(center);
+        }
+      }
+
+      // Exclude UI helpers (gizmo, ground fade overlay, measure line, this
+      // probe's own CubeCamera helper, the floor reflection CubeCamera) from
+      // the capture the same way the path tracer does - otherwise transform
+      // gizmo colors could bleed into the probe's irradiance estimate.
+      const hidden: THREE.Object3D[] = [];
+      this.scene.traverse((o) => {
+        if (o.visible && (o.userData?.isProxy || o.userData?.isHelper)) hidden.push(o);
+      });
+      for (const o of hidden) o.visible = false;
+
+      try {
+        this._giCubeCamera.update(this.renderer, this.scene);
+        const generated = LightProbeGenerator.fromCubeRenderTarget(this.renderer, this._giCubeRT);
+        this._lightProbe.sh.copy(generated.sh);
+      } finally {
+        for (const o of hidden) o.visible = true;
+      }
+    } catch (e) {
+      console.warn('[LightForge] Light probe bake failed:', e);
+    } finally {
+      this._giBaking = false;
+    }
   }
 
   getCameraState(): { position: [number, number, number]; target: [number, number, number]; fov: number } {
@@ -486,10 +592,26 @@ export class SceneManager {
   }
 
   /**
+   * Angle Hunt Mode: locks the active camera so it's genuinely read-only -
+   * orbit-drag stops reaching OrbitControls entirely (controls.enabled =
+   * false), instead of the 360-Workspace behavior below where a scripted
+   * camera's transform can still be permanently overwritten by dragging.
+   * Setting controls.enabled = false also means OrbitControls never fires
+   * its 'start'/'end' events, so the drag-end write-back listener (see the
+   * constructor) naturally never fires while locked - no separate gating
+   * needed there.
+   */
+  setViewportLocked(locked: boolean): void {
+    this._viewportLocked = locked;
+  }
+
+  /**
    * If a scripted camera is active, drive the real viewport camera from it and,
    * when it has a target, lookAt() the target's live world position every frame.
-   * OrbitControls is disabled while a camera is active so the user cannot fight
-   * the scripted transform.
+   * In 360 Workspace, OrbitControls stays enabled so orbit-drag can adjust a
+   * scripted camera (see the pivot-resolution comment below); in Angle Hunt
+   * Mode (_viewportLocked), the camera is fully locked - see
+   * setViewportLocked().
    */
   applyActiveCamera(): boolean {
     const store = (window as unknown as {
@@ -499,18 +621,44 @@ export class SceneManager {
           rotation: { x: number; y: number; z: number };
           targetId: string | null;
           fov: number;
+          locked?: boolean;
         };
       } };
     }).__cameraStore;
 
     const cam = store?.getState().getActiveCamera() ?? null;
-    console.log('[CAM] stored:', cam.position.x.toFixed(2), cam.position.y.toFixed(2), cam.position.z.toFixed(2),
-      '| actual camera:', this.camera.position.x.toFixed(2), this.camera.position.y.toFixed(2), this.camera.position.z.toFixed(2),
-      '| dragging:', this._cameraDragging);
 
     if (!cam) {
       if (!this.controls.enabled) this.controls.enabled = true;
       return false;
+    }
+
+    if (this._viewportLocked || cam.locked) {
+      // Angle Hunt Mode always locks the active camera (_viewportLocked);
+      // in 360 Workspace, a camera locks only when the user has explicitly
+      // toggled its own per-camera lock (cam.locked, via the lock button
+      // next to CameraSwitcher) - otherwise 360 Workspace's default
+      // drag-adjustable behavior below applies. Either way: no orbit pivot
+      // to resolve - OrbitControls is fully disabled, so nothing will ever
+      // read controls.target. Drive the transform straight through every
+      // frame.
+      this.controls.enabled = false;
+      this.camera.position.set(cam.position.x, cam.position.y, cam.position.z);
+      if (cam.fov !== this.camera.fov) {
+        this.camera.fov = cam.fov;
+        this.camera.updateProjectionMatrix();
+      }
+      if (cam.targetId) {
+        const t = this.resolveTargetWorld(cam.targetId);
+        if (t) this.camera.lookAt(t.x, t.y, t.z);
+      } else {
+        this.camera.rotation.set(
+          (cam.rotation.x * Math.PI) / 180,
+          (cam.rotation.y * Math.PI) / 180,
+          (cam.rotation.z * Math.PI) / 180,
+        );
+      }
+      return true;
     }
 
     // A scripted camera owns the view, but orbit-drag is allowed to adjust it.
@@ -526,7 +674,31 @@ export class SceneManager {
       return true;
     }
 
-    const pivot = this.resolveTargetWorld(cam.targetId ?? 'model') ?? { x: 0, y: 0, z: 0 };
+    // When there's no explicit look-at target, the pivot MUST lie on the
+    // camera's own view ray (position + its forward direction) - not an
+    // unrelated point like the model's bounding-box center. OrbitControls
+    // reads its internal spherical state directly off (position - target)
+    // for its own pointer-event handling, independent of the render loop's
+    // gating below; a mismatched target meant the very first drag snapped
+    // the camera toward that unrelated point instead of orbiting around
+    // where it actually looks, silently corrupting a pushed camera's
+    // position/rotation the moment the user touched the viewport.
+    let pivot: { x: number; y: number; z: number };
+    if (cam.targetId) {
+      pivot = this.resolveTargetWorld(cam.targetId) ?? { x: 0, y: 0, z: 0 };
+    } else {
+      const rotRad = new THREE.Euler(
+        (cam.rotation.x * Math.PI) / 180,
+        (cam.rotation.y * Math.PI) / 180,
+        (cam.rotation.z * Math.PI) / 180,
+      );
+      const forward = new THREE.Vector3(0, 0, -1).applyEuler(rotRad);
+      pivot = {
+        x: cam.position.x + forward.x,
+        y: cam.position.y + forward.y,
+        z: cam.position.z + forward.z,
+      };
+    }
     this.controls.target.set(pivot.x, pivot.y, pivot.z);
 
     this.camera.position.set(cam.position.x, cam.position.y, cam.position.z);
@@ -590,6 +762,7 @@ export class SceneManager {
   dispose(): void {
     this.stopRenderLoop();
     this.detach();
+    this.setGIEnabled(false); // properly clean up the probe's CubeCamera + render target
     this._disposeGround(); // properly clean up CubeCamera + render targets
     this.pmremGenerator.dispose();
     this.scene.traverse((obj) => {
@@ -706,6 +879,29 @@ export class RenderPipeline {
   private _config: PipelineConfig;
   private _needsRebuild = false;
 
+  // ------ Path-traced "final quality" preview (GPU path tracer, WebGL-based) ---------------
+  private _pathTracer: WebGLPathTracer | null = null;
+  /** Target state requested via setEngine - true while the user has the toggle on. */
+  private _pathTracingEnabled = false;
+  /** True once a scene build has completed and renderSample() is safe to call. */
+  private _pathTracerReady = false;
+  private _pathTracerBuilding = false;
+  /** Set by markPathTracerDirty() when lights/shapes/environment change while
+   *  path tracing is active - triggers a full scene rebuild on the next render(). */
+  private _pathTracerDirty = false;
+  private _pathTracerError: string | null = null;
+  private _lastPathTracerCamMatrix = new THREE.Matrix4();
+  /** The RAW equirectangular HDRI texture (pre-PMREM), supplied by the
+   *  viewport whenever the environment changes. three-gpu-pathtracer needs
+   *  the original equirect pixel data to build its HDRI importance-sampling
+   *  tables - scene.environment normally holds the PMREM/CubeUV-prefiltered
+   *  texture used for real-time IBL instead, which has no raw pixel array
+   *  and crashes the path tracer if handed to it directly. Only set for a
+   *  real loaded HDRI file; null for procedural gradient/studio presets,
+   *  which have no equirect source (path tracing then falls back to
+   *  lights-only, no environment lighting). */
+  private _pathTracerRawEnv: THREE.Texture | null = null;
+
   constructor(sceneManager: SceneManager) {
     this._sm = sceneManager;
     this._config = {
@@ -805,10 +1001,169 @@ export class RenderPipeline {
 
   /** Render one frame through the composer (or fallback direct render). */
   render(): void {
+    if (this._pathTracingEnabled && this._pathTracer && this._pathTracerReady && !this._pathTracerBuilding) {
+      this._syncPathTracer();
+      this._pathTracer.renderSample();
+      return;
+    }
     if (this._composer) {
       this._composer.render();
     } else {
       this._sm.renderer.render(this._sm.scene, this._sm.camera);
+    }
+  }
+
+  /** Re-syncs the path tracer with the live camera each frame, and rebuilds
+   *  the whole traced scene when markPathTracerDirty() flagged a change
+   *  (lights/shapes/environment edited while path tracing is active). Both
+   *  paths call updateCamera()/setSceneAsync() internally, which reset the
+   *  sample accumulation - exactly what's wanted, since anything that moves
+   *  the camera or changes the scene invalidates the accumulated samples. */
+  private _syncPathTracer(): void {
+    const pt = this._pathTracer;
+    if (!pt) return;
+    const cam = this._sm.camera;
+    cam.updateMatrixWorld();
+
+    if (this._pathTracerDirty) {
+      this._pathTracerDirty = false;
+      // Synchronous BVH rebuild (see _buildPathTracer for why: async needs a
+      // Worker via setBVHWorker, which this app doesn't wire up). A dirty
+      // rebuild only happens after an edit while path tracing is active, so
+      // one blocking frame here is an acceptable trade for not needing a
+      // worker bundle.
+      try {
+        this._withPathTracerEnv(() => pt.setScene(this._sm.scene, cam));
+        this._lastPathTracerCamMatrix.copy(cam.matrixWorld);
+      } catch (e) {
+        console.error('[LightForge] Path tracer rebuild failed:', e);
+      }
+      return;
+    }
+
+    if (!cam.matrixWorld.equals(this._lastPathTracerCamMatrix)) {
+      this._lastPathTracerCamMatrix.copy(cam.matrixWorld);
+      pt.updateCamera();
+    }
+  }
+
+  /** Flags the currently-traced scene as stale so the next render() rebuilds
+   *  it (new/changed lights, HDRI shapes, or environment). No-op while path
+   *  tracing isn't active - callers don't need to check isPathTracingActive()
+   *  themselves before calling this on every relevant store change.
+   *  `rawEnvTexture` (pass explicitly, even as null) updates the raw equirect
+   *  HDRI used for path-traced environment lighting - see _pathTracerRawEnv. */
+  markPathTracerDirty(rawEnvTexture?: THREE.Texture | null): void {
+    if (rawEnvTexture !== undefined) this._pathTracerRawEnv = rawEnvTexture;
+    if (this._pathTracingEnabled) this._pathTracerDirty = true;
+  }
+
+  /** Temporarily swaps scene.environment to the raw equirect texture (or
+   *  null) and hides non-scene helper meshes for the duration of `fn`,
+   *  restoring both afterward - setScene()/generate() only read the scene
+   *  synchronously during the call, so this never affects the normal
+   *  rasterized render in between path-traced rebuilds.
+   *
+   *  Helper exclusion matters because PathTracingSceneGenerator (via
+   *  three-mesh-bvh's StaticGeometryGenerator) walks every visible mesh with
+   *  traverseVisible() and assumes PBR-ish material properties
+   *  (m.color.r, m.emissive.r, ...) - it has no concept of "this is UI, not
+   *  scene content". Two concrete cases confirmed live: the ground fade
+   *  overlay (a plain THREE.ShaderMaterial with no .color at all - hard
+   *  crash) and the transform gizmo (traceable MeshBasicMaterial, so no
+   *  crash, but it would otherwise get baked into the "final quality"
+   *  render as a set of colored arrows). userData.isProxy is the existing
+   *  convention this codebase already uses to mark the ground overlay as
+   *  "not real scene content" (originally for SceneHierarchy); reused here
+   *  for the same reason, alongside userData.isHelper (measure line) and
+   *  the gizmo root found via getHelper(). */
+  private _withPathTracerEnv<T>(fn: () => T): T {
+    const scene = this._sm.scene;
+    const savedEnv = scene.environment;
+    scene.environment = this._pathTracerRawEnv;
+
+    const hidden: THREE.Object3D[] = [];
+    scene.traverse((o) => {
+      if (o.visible && (o.userData?.isProxy || o.userData?.isHelper)) {
+        hidden.push(o);
+      }
+    });
+
+    for (const o of hidden) o.visible = false;
+    try {
+      return fn();
+    } finally {
+      for (const o of hidden) o.visible = true;
+      scene.environment = savedEnv;
+    }
+  }
+
+  isPathTracingActive(): boolean {
+    return this._pathTracingEnabled;
+  }
+
+  /** True once the path tracer has a built scene and is actively accumulating -
+   *  false during the initial BVH build (render() falls back to rasterizing). */
+  isPathTracingReady(): boolean {
+    return this._pathTracingEnabled && this._pathTracerReady && !this._pathTracerBuilding;
+  }
+
+  getPathTracerSamples(): number {
+    return this._pathTracer?.samples ?? 0;
+  }
+
+  getPathTracerError(): string | null {
+    return this._pathTracerError;
+  }
+
+  /** Builds (or rebuilds) the path tracer against the current scene/camera.
+   *  Runs the BVH build synchronously on the main thread: the library's async
+   *  path (setSceneAsync) requires a Worker wired up via setBVHWorker, which
+   *  would need bundling a dedicated worker file through Vite/Tauri - not
+   *  worth the fragility for a "final quality still preview" mode. A brief
+   *  blocking hitch when entering the mode (or after an edit) is an
+   *  acceptable trade. Kept as an async method so callers can still `void`
+   *  it uniformly and so a future move to the worker path wouldn't change
+   *  the call sites. */
+  private async _buildPathTracer(): Promise<void> {
+    if (this._pathTracerBuilding) return;
+    this._pathTracerBuilding = true;
+    this._pathTracerReady = false;
+    this._pathTracerError = null;
+    try {
+      // The library throws a cryptic internal error ("Cannot read properties
+      // of undefined") when asked to trace a scene with zero actual Mesh
+      // objects (e.g. nothing loaded yet, ground plane off, no HDRI shapes -
+      // just helpers/lights) because its merged geometry ends up empty.
+      // Fail with a clear message instead of that stack trace.
+      let hasMesh = false;
+      this._sm.scene.traverse((o) => {
+        if ((o as THREE.Mesh).isMesh) hasMesh = true;
+      });
+      if (!hasMesh) {
+        throw new Error('Nothing to path trace yet - load a model or enable the ground plane first.');
+      }
+
+      if (!this._pathTracer) {
+        this._pathTracer = new WebGLPathTracer(this._sm.renderer);
+        this._pathTracer.minSamples = 1;
+        this._pathTracer.renderDelay = 0;
+        this._pathTracer.fadeDuration = 400;
+        this._pathTracer.bounces = 6;
+        this._pathTracer.filterGlossyFactor = 0.5;
+        this._pathTracer.renderScale = 1;
+        this._pathTracer.multipleImportanceSampling = true;
+      }
+      this._withPathTracerEnv(() => this._pathTracer!.setScene(this._sm.scene, this._sm.camera));
+      this._lastPathTracerCamMatrix.copy(this._sm.camera.matrixWorld);
+      this._pathTracerReady = true;
+    } catch (e) {
+      console.error('[LightForge] Path tracer failed to build, falling back to PBR:', e);
+      this._pathTracerError = e instanceof Error ? e.message : String(e);
+      this._pathTracingEnabled = false;
+      this._pathTracerReady = false;
+    } finally {
+      this._pathTracerBuilding = false;
     }
   }
 
@@ -900,9 +1255,22 @@ export class RenderPipeline {
 
   setEngine(engine: 'pbr' | 'pathtracer'): void {
     if (engine === 'pbr') {
+      this._pathTracingEnabled = false;
       this._applyToneMapping(this._config.tonemapping);
     } else {
+      // This is called from a useEffect keyed on the whole renderSettings
+      // object, so it re-fires on unrelated changes (bloom, AO, ...) while
+      // already in pathtracer mode - only kick off a (re)build on an actual
+      // pbr->pathtracer transition or after a previous build failed, not on
+      // every re-fire, or every bloom-slider tweak would restart the BVH build.
+      const wasEnabled = this._pathTracingEnabled;
+      this._pathTracingEnabled = true;
+      // Path tracing does its own tone mapping internally via the material;
+      // leave the renderer's tone mapping off so it isn't applied twice.
       this._sm.renderer.toneMapping = THREE.NoToneMapping;
+      if (!wasEnabled && !this._pathTracerReady && !this._pathTracerBuilding) {
+        void this._buildPathTracer();
+      }
     }
   }
 
@@ -981,6 +1349,21 @@ export class RenderPipeline {
     this._vignettePass = null;
     this._colorGradingPass = null;
     this._outputPass = null;
+  }
+
+  /** Fully tears down the path tracer (GPU buffers, BVH). Separate from the
+   *  composer-only dispose() above so a config-driven build() rebuild doesn't
+   *  throw away accumulated path-tracing state - only called on unmount or
+   *  when explicitly leaving path-tracing mode for good. */
+  disposePathTracer(): void {
+    if (this._pathTracer) {
+      this._pathTracer.dispose();
+      this._pathTracer = null;
+    }
+    this._pathTracingEnabled = false;
+    this._pathTracerReady = false;
+    this._pathTracerBuilding = false;
+    this._pathTracerDirty = false;
   }
 
   // ------ Private helpers ---------------------------------------------------------------------------------------------------------------------------------------------------------------------

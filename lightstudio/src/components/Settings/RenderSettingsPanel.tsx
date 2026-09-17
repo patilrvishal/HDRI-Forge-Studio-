@@ -55,6 +55,7 @@ export const RenderSettingsPanel: React.FC<RenderSettingsPanelProps> = ({ onClos
   const setRenderSettings = useSceneStore((s) => s.setRenderSettings);
   const setBloom = useSceneStore((s) => s.setBloom);
   const setAO = useSceneStore((s) => s.setAO);
+  const setGI = useSceneStore((s) => s.setGI);
   const setGround = useSceneStore((s) => s.setGround);
   const setExposure = useSceneStore((s) => s.setExposure);
   const setVignette = useSceneStore((s) => s.setVignette);
@@ -122,6 +123,16 @@ export const RenderSettingsPanel: React.FC<RenderSettingsPanelProps> = ({ onClos
   const handleAOIntensity = useCallback(
     (v: number) => setAO({ intensity: v }),
     [setAO],
+  );
+
+  // ── Global Illumination ─────────────────────────────────────────────────────
+  const handleGIToggle = useCallback(
+    () => setGI({ enabled: !rs.gi.enabled }),
+    [setGI, rs.gi.enabled],
+  );
+  const handleGIIntensity = useCallback(
+    (v: number) => setGI({ intensity: v }),
+    [setGI],
   );
 
   // ── Ground ─────────────────────────────────────────────────────────────────
@@ -259,6 +270,15 @@ export const RenderSettingsPanel: React.FC<RenderSettingsPanelProps> = ({ onClos
               </>
             )}
             <div className="rs-note">Screen-space ambient occlusion (SSAO). Adds contact shadows in creases and corners.</div>
+          </Section>
+
+          {/* ─── Global Illumination ────────────────────────────── */}
+          <Section title="Global Illumination">
+            <Toggle variant="glossy" label="Enable" checked={rs.gi.enabled} onChange={handleGIToggle} />
+            {rs.gi.enabled && (
+              <Slider label="Intensity" value={rs.gi.intensity} min={0} max={2} step={0.05} onChange={handleGIIntensity} />
+            )}
+            <div className="rs-note">Real bounce light from a probe placed at the model, re-baked every second. Picks up light reflecting off the ground/environment onto the model - unlike the HDRI environment map alone, which only lights from the sky, never from other objects.</div>
           </Section>
 
           {/* ─── Ground / Floor ─────────────────────────────────── */}

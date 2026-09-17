@@ -53,6 +53,13 @@
   --glow-md: 0 0 18px rgba(34, 211, 238, 0.28);
   --glow-lg: 0 0 30px rgba(34, 211, 238, 0.3);
   --panel-glow: 0 0 1px var(--border-glow), inset 0 0 0 1px rgba(255,255,255,0.03);
+  /* Floating glass chrome - toolbars that sit directly on top of the 3D
+     viewport or a canvas (GizmoToolbar, HDRI Preview's zoom controls).
+     Kept as its own token because these use var(--text-sec)/var(--text-dim)
+     for their icons, which flips light-on-dark vs dark-on-light between
+     modes - the glass itself has to flip with it or the icons go
+     invisible against it. */
+  --bg-floating-glass: rgba(20, 20, 26, 0.85);
 }
 
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -315,6 +322,50 @@ body[data-theme="red-grey"] {
   --theme-accent-bg: rgba(179, 71, 77, 0.16);
   --theme-accent-glow: rgba(179, 71, 77, 0.5);
   --theme-accent-glow-strong: rgba(179, 71, 77, 0.2);
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   Light mode — opt-in via the header's sun/moon toggle (body[data-mode]),
+   independent of the accent-color ThemeSwitcher above so the two combine
+   freely. Placed AFTER all six accent presets on purpose: this selector
+   has the same specificity as body[data-theme="X"], so source order
+   decides the tiebreak when both attributes are set - this needs to win.
+
+   A genuine light palette, not an inverted dark one: cool near-white
+   ground (never pure #fff against pure-black text), and the "glow"
+   language rebuilt as soft elevation shadows - a saturated glow reads as
+   a pale wash on a light surface, not a glow.
+
+   --accent-bright / --theme-accent-bright are the one accent pairing that
+   DOES need a light-mode override, not left alone like the rest: every
+   preset tunes them to read as a bright highlight on a near-black ground
+   (the "white-orange" preset's bright value is literally #fff3e0), and
+   they get used directly as TEXT color for active-tab labels - on a white
+   ground that text goes from a signature highlight to unreadable. One
+   shared dark-cyan value here trades "matches whichever accent hue is
+   selected" for "readable regardless of which of the 6 presets is active",
+   which is the right tradeoff for text.
+   ═══════════════════════════════════════════════════════════════════════ */
+body[data-mode="light"] {
+  --bg-deep: #eef0f3;
+  --bg-panel: #ffffff;
+  --bg-card: #f8f9fb;
+  --bg-input: #f2f3f6;
+  --bg-elevated: #e9ebef;
+  --track: #dde1e6;
+  --text: #14161a;
+  --text-sec: #565d66;
+  --text-dim: #8b919b;
+  --border: #dfe2e7;
+  --border-light: #c9cdd4;
+  --border-glow: rgba(14, 116, 144, 0.18);
+  --glow-sm: 0 1px 2px rgba(20, 22, 26, 0.06), 0 0 8px rgba(14, 116, 144, 0.10);
+  --glow-md: 0 2px 6px rgba(20, 22, 26, 0.08), 0 0 14px rgba(14, 116, 144, 0.12);
+  --glow-lg: 0 4px 14px rgba(20, 22, 26, 0.10), 0 0 22px rgba(14, 116, 144, 0.14);
+  --panel-glow: 0 1px 2px rgba(20, 22, 26, 0.05), inset 0 0 0 1px rgba(20, 22, 26, 0.02);
+  --accent-bright: #0e7490;
+  --theme-accent-bright: #0e7490;
+  --bg-floating-glass: rgba(255, 255, 255, 0.88);
 }
 
 .tab-icon { color: var(--text-dim); transition: color 0.15s ease, filter 0.15s ease; }
