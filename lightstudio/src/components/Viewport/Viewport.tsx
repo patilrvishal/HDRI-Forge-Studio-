@@ -14,6 +14,7 @@ import { hdriBase64ToArrayBuffer, setRawHDRIData } from '../../store/hdriDataSto
 import { ViewportToolbar } from './ViewportToolbar';
 import { GizmoToolbar } from './GizmoToolbar';
 import { useCameraStore } from '../../store/cameraStore';
+import { useViewportModeStore } from '../../store/viewportModeStore';
 import { CameraSwitcher } from './CameraSwitcher';
 import { ViewportPropertiesPanel } from './ViewportPropertiesPanel';
 import { CameraPanel } from './CameraPanel';
@@ -78,6 +79,9 @@ export const Viewport: React.FC<ViewportProps> = ({ sceneManagerRef, onScreensho
   const lights = useLightsStore((s) => s.lights);
   const selectedLightId = useLightsStore((s) => s.selectedLightId);
   const updateLight = useLightsStore((s) => s.updateLight);
+
+  const workspaceMode = useViewportModeStore((s) => s.mode);
+  const activeCameraId = useCameraStore((s) => s.activeCameraId);
 
   // Animation store selectors (non-reactive - read inside the loop via getState)
   // We only use isPlaying for the dependency to know if animation is active
@@ -338,7 +342,21 @@ export const Viewport: React.FC<ViewportProps> = ({ sceneManagerRef, onScreensho
         giAccumulatorRef.current = 0;
       }
 
-      sceneManager.controls.update();
+      // Drive the viewport from the active scripted camera (cameraStore), if
+      // any - this is what applyActiveCamera() has always been for, but this
+      // loop is the app's real render loop (SceneManager.startRenderLoop()
+      // is never called), so calling controls.update() unconditionally here
+      // meant applyActiveCamera() never actually ran: an active camera
+      // changed the view once (via the "sync render settings" style effects
+      // elsewhere) but nothing reasserted it frame-to-frame, so orbit-drag
+      // just freely spun the live camera with no lock and no write-back ever
+      // engaging - confirmed live via a drag test that silently moved an
+      // "active" camera's stored position/rotation with Angle Hunt Mode
+      // supposedly locked. Mirroring engine.ts's own startRenderLoop() here
+      // is what actually wires up both 360 Workspace's scripted-camera-is-
+      // orbit-adjustable behavior AND Angle Hunt Mode's real lock.
+      const scriptedCam = sceneManager.applyActiveCamera();
+      if (!scriptedCam) sceneManager.controls.update();
       try {
         renderPipeline.render();
       } catch (e) {
@@ -714,6 +732,14 @@ export const Viewport: React.FC<ViewportProps> = ({ sceneManagerRef, onScreensho
 
     clearPendingHDRIData();
   }, [pendingHDRIData, sceneManagerRef, envLoaderRef, clearPendingHDRIData]);
+
+  // Angle Hunt Mode: lock the viewport to the active camera once one exists.
+  // With no active camera yet, stay free-look so switching into the mode
+  // doesn't strand the user in a frozen empty view before they've picked or
+  // pushed a shot.
+  useEffect(() => {
+    sceneManagerRef.current?.setViewportLocked(workspaceMode === 'angleHunt' && !!activeCameraId);
+  }, [workspaceMode, activeCameraId, sceneManagerRef]);
 
   // Sync render settings
   useEffect(() => {
@@ -1440,7 +1466,9 @@ export const Viewport: React.FC<ViewportProps> = ({ sceneManagerRef, onScreensho
             onChange={handleFileInput}
           />
 
-          <CameraBookmarks sceneManagerRef={sceneManagerRef} />
+          {/* Raw position/target/fov snapshots, unrelated to cameraStore - would
+              silently do nothing useful against a locked Angle Hunt camera. */}
+          {workspaceMode === '360' && <CameraBookmarks sceneManagerRef={sceneManagerRef} />}
 
           {activeTool === 'measure' && (
             <div

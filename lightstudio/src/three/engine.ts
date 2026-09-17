@@ -39,6 +39,9 @@ export class SceneManager {
   controls: OrbitControls;
   /** True while the user is orbit-dragging a scripted camera. */
   _cameraDragging = false;
+  /** Angle Hunt Mode: the active camera is genuinely read-only - see
+   *  setViewportLocked() and applyActiveCamera(). */
+  _viewportLocked = false;
   container: HTMLElement | null = null;
   ground: THREE.Mesh | null = null;
   groundOverlay: THREE.Mesh | null = null;
@@ -589,10 +592,26 @@ export class SceneManager {
   }
 
   /**
+   * Angle Hunt Mode: locks the active camera so it's genuinely read-only -
+   * orbit-drag stops reaching OrbitControls entirely (controls.enabled =
+   * false), instead of the 360-Workspace behavior below where a scripted
+   * camera's transform can still be permanently overwritten by dragging.
+   * Setting controls.enabled = false also means OrbitControls never fires
+   * its 'start'/'end' events, so the drag-end write-back listener (see the
+   * constructor) naturally never fires while locked - no separate gating
+   * needed there.
+   */
+  setViewportLocked(locked: boolean): void {
+    this._viewportLocked = locked;
+  }
+
+  /**
    * If a scripted camera is active, drive the real viewport camera from it and,
    * when it has a target, lookAt() the target's live world position every frame.
-   * OrbitControls is disabled while a camera is active so the user cannot fight
-   * the scripted transform.
+   * In 360 Workspace, OrbitControls stays enabled so orbit-drag can adjust a
+   * scripted camera (see the pivot-resolution comment below); in Angle Hunt
+   * Mode (_viewportLocked), the camera is fully locked - see
+   * setViewportLocked().
    */
   applyActiveCamera(): boolean {
     const store = (window as unknown as {
@@ -611,6 +630,29 @@ export class SceneManager {
     if (!cam) {
       if (!this.controls.enabled) this.controls.enabled = true;
       return false;
+    }
+
+    if (this._viewportLocked) {
+      // No orbit pivot to resolve - OrbitControls is fully disabled, so
+      // nothing will ever read controls.target. Drive the transform straight
+      // through every frame.
+      this.controls.enabled = false;
+      this.camera.position.set(cam.position.x, cam.position.y, cam.position.z);
+      if (cam.fov !== this.camera.fov) {
+        this.camera.fov = cam.fov;
+        this.camera.updateProjectionMatrix();
+      }
+      if (cam.targetId) {
+        const t = this.resolveTargetWorld(cam.targetId);
+        if (t) this.camera.lookAt(t.x, t.y, t.z);
+      } else {
+        this.camera.rotation.set(
+          (cam.rotation.x * Math.PI) / 180,
+          (cam.rotation.y * Math.PI) / 180,
+          (cam.rotation.z * Math.PI) / 180,
+        );
+      }
+      return true;
     }
 
     // A scripted camera owns the view, but orbit-drag is allowed to adjust it.

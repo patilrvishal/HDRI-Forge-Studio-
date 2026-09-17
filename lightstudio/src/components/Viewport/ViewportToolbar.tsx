@@ -1,6 +1,7 @@
 import React, { useRef, useState, useCallback, useEffect } from 'react';
 import { useSceneStore } from '../../store/sceneStore';
 import { useUIStore } from '../../store/uiStore';
+import { useViewportModeStore } from '../../store/viewportModeStore';
 import { SceneManager, RenderPipeline } from '../../three/engine';
 import type { ViewMode } from '../../types/Light';
 
@@ -42,6 +43,12 @@ export const ViewportToolbar: React.FC<ViewportToolbarProps> = ({
   const toggleTurntable = useSceneStore((s) => s.toggleTurntable);
 
   const setSettingsModal = useUIStore((s) => s.setSettingsModal);
+
+  const workspaceMode = useViewportModeStore((s) => s.mode);
+  const setWorkspaceMode = useViewportModeStore((s) => s.setMode);
+  const handleWorkspaceToggle = useCallback(() => {
+    setWorkspaceMode(workspaceMode === '360' ? 'angleHunt' : '360');
+  }, [workspaceMode, setWorkspaceMode]);
 
   // Observe container size for resolution display
   useEffect(() => {
@@ -139,8 +146,41 @@ export const ViewportToolbar: React.FC<ViewportToolbarProps> = ({
         </button>
       </div>
 
-      {/* Center: Engine + View */}
+      {/* Center: Workspace + Engine + View */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexShrink: 0 }}>
+        {/* Workspace toggle: 360 Workspace (free-orbit) vs Angle Hunt Mode
+            (locked to one camera, HDR Light Studio's Camera/Light-Editor
+            workflow). */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+          <span
+            style={{
+              fontSize: 9,
+              fontWeight: 600,
+              textTransform: 'uppercase',
+              letterSpacing: '0.5px',
+              color: 'var(--text-dim)',
+            }}
+          >
+            WORKSPACE
+          </span>
+          <button
+            className="btn-sm"
+            onClick={handleWorkspaceToggle}
+            style={{
+              fontSize: 10,
+              borderColor: workspaceMode === 'angleHunt' ? 'var(--accent)' : undefined,
+              color: workspaceMode === 'angleHunt' ? 'var(--accent)' : undefined,
+            }}
+            title={
+              workspaceMode === '360'
+                ? 'Free-orbit - edit the HDRI environment from any angle'
+                : 'Locked to one camera shot - position lights precisely against that exact angle'
+            }
+          >
+            {workspaceMode === '360' ? '360 Workspace' : 'Angle Hunt'}
+          </button>
+        </div>
+
         {/* Engine toggle */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
           <span
@@ -192,31 +232,35 @@ export const ViewportToolbar: React.FC<ViewportToolbarProps> = ({
           )}
         </div>
 
-        {/* View mode */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-          <span
-            style={{
-              fontSize: 9,
-              fontWeight: 600,
-              textTransform: 'uppercase',
-              letterSpacing: '0.5px',
-              color: 'var(--text-dim)',
-            }}
-          >
-            VIEW
-          </span>
-          <select
-            className="field-select"
-            value={viewMode}
-            onChange={(e) => handleViewModeChange(e.target.value)}
-            style={{ width: 90, height: 22, fontSize: 10 }}
-          >
-            <option value="perspective">Perspective</option>
-            <option value="front">Front</option>
-            <option value="right">Right</option>
-            <option value="top">Top</option>
-          </select>
-        </div>
+        {/* View mode - drives the raw live camera transform directly,
+            bypassing cameraStore entirely, so it would silently do nothing
+            useful (or feel broken) against a locked Angle Hunt camera. */}
+        {workspaceMode === '360' && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+            <span
+              style={{
+                fontSize: 9,
+                fontWeight: 600,
+                textTransform: 'uppercase',
+                letterSpacing: '0.5px',
+                color: 'var(--text-dim)',
+              }}
+            >
+              VIEW
+            </span>
+            <select
+              className="field-select"
+              value={viewMode}
+              onChange={(e) => handleViewModeChange(e.target.value)}
+              style={{ width: 90, height: 22, fontSize: 10 }}
+            >
+              <option value="perspective">Perspective</option>
+              <option value="front">Front</option>
+              <option value="right">Right</option>
+              <option value="top">Top</option>
+            </select>
+          </div>
+        )}
       </div>
 
       {/* Right: Controls */}
