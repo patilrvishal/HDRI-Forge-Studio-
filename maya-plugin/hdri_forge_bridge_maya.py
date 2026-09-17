@@ -352,15 +352,22 @@ def _gather_all_or_selected_cameras():
         dag_path = _dag_path_for(cam_transform)
         quat = _world_quaternion(dag_path)
         try:
-            hfov = cmds.camera(cam_transform, query=True, horizontalFieldOfView=True)
+            # Three.js's PerspectiveCamera.fov is always VERTICAL - querying
+            # horizontalFieldOfView here (as this used to) sent the wrong
+            # angle whenever the camera's aspect ratio isn't square, which is
+            # always, making every pushed camera's framing wrong even with
+            # correct position/rotation (same bug found and fixed on the
+            # Blender side, where .angle is sensor_fit-dependent and silently
+            # returns horizontal fov under the common AUTO fit).
+            vfov = cmds.camera(cam_transform, query=True, verticalFieldOfView=True)
         except Exception:
-            hfov = 50.0
+            vfov = 40.0
         result.append({
             'id': cam_transform,
             'name': cam_transform.split('|')[-1],
             'position': _world_translation(dag_path),
             'rotation': quat_to_euler_deg(quat),
-            'fov': hfov,
+            'fov': vfov,
             'clipStart': cmds.getAttr(cam_transform + '.nearClipPlane'),
             'clipEnd': cmds.getAttr(cam_transform + '.farClipPlane'),
         })

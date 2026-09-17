@@ -219,7 +219,14 @@ def _gather_camera(cam_obj):
     return {
         'position': {'x': loc.x, 'y': loc.y, 'z': loc.z},
         'rotation': rot,
-        'fov':      math.degrees(cam_obj.data.angle),
+        # .angle is sensor_fit-dependent - with the common AUTO fit and a
+        # landscape render, it silently returns the HORIZONTAL fov (verified
+        # live: 39.6 deg vs .angle_y's 27.0 deg on a 1920x1080/50mm camera).
+        # Three.js's PerspectiveCamera.fov is always vertical, so sending
+        # .angle directly made every pushed camera's framing wrong even when
+        # position/rotation matched exactly - .angle_y is the unambiguous
+        # vertical fov regardless of sensor_fit.
+        'fov':      math.degrees(cam_obj.data.angle_y),
     }
 
 
