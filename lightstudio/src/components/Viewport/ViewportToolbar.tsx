@@ -46,9 +46,10 @@ export const ViewportToolbar: React.FC<ViewportToolbarProps> = ({
 
   const workspaceMode = useViewportModeStore((s) => s.mode);
   const setWorkspaceMode = useViewportModeStore((s) => s.setMode);
-  const handleWorkspaceToggle = useCallback(() => {
-    setWorkspaceMode(workspaceMode === '360' ? 'angleHunt' : '360');
-  }, [workspaceMode, setWorkspaceMode]);
+  const handleWorkspaceChange = useCallback(
+    (mode: string) => setWorkspaceMode(mode as '360' | 'angleHunt'),
+    [setWorkspaceMode],
+  );
 
   // Observe container size for resolution display
   useEffect(() => {
@@ -87,11 +88,11 @@ export const ViewportToolbar: React.FC<ViewportToolbarProps> = ({
     [sceneManagerRef]
   );
 
-  // Handle engine toggle
-  const handleEngineToggle = useCallback(() => {
-    const next = renderEngine === 'pbr' ? 'pathtracer' : 'pbr';
-    setRenderSettings({ engine: next });
-  }, [renderEngine, setRenderSettings]);
+  // Handle engine change
+  const handleEngineChange = useCallback(
+    (engine: string) => setRenderSettings({ engine: engine as 'pbr' | 'pathtracer' }),
+    [setRenderSettings],
+  );
 
   // Poll the path tracer's live sample count - it accumulates every rendered
   // frame inside RenderPipeline, not through a store, so there's nothing to
@@ -163,25 +164,23 @@ export const ViewportToolbar: React.FC<ViewportToolbarProps> = ({
           >
             WORKSPACE
           </span>
-          <button
-            className="btn-sm"
-            onClick={handleWorkspaceToggle}
-            style={{
-              fontSize: 10,
-              borderColor: workspaceMode === 'angleHunt' ? 'var(--accent)' : undefined,
-              color: workspaceMode === 'angleHunt' ? 'var(--accent)' : undefined,
-            }}
+          <select
+            className="field-select"
+            value={workspaceMode}
+            onChange={(e) => handleWorkspaceChange(e.target.value)}
+            style={{ width: 100, height: 22, fontSize: 10 }}
             title={
               workspaceMode === '360'
                 ? 'Free-orbit - edit the HDRI environment from any angle'
                 : 'Locked to one camera shot - position lights precisely against that exact angle'
             }
           >
-            {workspaceMode === '360' ? '360 Workspace' : 'Angle Hunt'}
-          </button>
+            <option value="360">360 Workspace</option>
+            <option value="angleHunt">Angle Hunt</option>
+          </select>
         </div>
 
-        {/* Engine toggle */}
+        {/* Engine */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
           <span
             style={{
@@ -194,17 +193,15 @@ export const ViewportToolbar: React.FC<ViewportToolbarProps> = ({
           >
             ENGINE
           </span>
-          <button
-            className="btn-sm"
-            onClick={handleEngineToggle}
-            style={{
-              fontSize: 10,
-              borderColor: renderEngine === 'pathtracer' ? 'var(--accent)' : undefined,
-              color: renderEngine === 'pathtracer' ? 'var(--accent)' : undefined,
-            }}
+          <select
+            className="field-select"
+            value={renderEngine}
+            onChange={(e) => handleEngineChange(e.target.value)}
+            style={{ width: 84, height: 22, fontSize: 10 }}
           >
-            {renderEngine === 'pbr' ? 'PBR' : 'Pathtracer'}
-          </button>
+            <option value="pbr">PBR</option>
+            <option value="pathtracer">Pathtracer</option>
+          </select>
           {renderEngine === 'pathtracer' && (
             <span
               style={{
