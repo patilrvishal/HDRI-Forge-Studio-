@@ -118,8 +118,8 @@ const SECTIONS: ManualSection[] = [
     category: 'Getting Started',
     icon: '\u{1F680}',
     content: [
-      { type: 'heading', data: 'Welcome to LightForge Studio' },
-      { type: 'text', data: 'LightForge Studio is a professional 3D lighting studio designed for automotive and product visualization. It provides a complete set of tools for placing, editing, and animating lights with real-time PBR preview. The workflow is centered around quickly setting up cinematic lighting rigs and exporting them as HDRIs or rendered images.' },
+      { type: 'heading', data: 'Welcome to HDRI Forge Studio' },
+      { type: 'text', data: 'HDRI Forge Studio is a professional 3D lighting studio designed for automotive and product visualization. It provides a complete set of tools for placing, editing, and animating lights with real-time PBR preview. The workflow is centered around quickly setting up cinematic lighting rigs and exporting them as HDRIs or rendered images.' },
       { type: 'heading', data: 'Basic Workflow' },
       { type: 'list', items: [
         'Load a 3D model (.glb / .gltf) via File > Open Scene or drag-and-drop onto the viewport',
@@ -140,7 +140,7 @@ const SECTIONS: ManualSection[] = [
     icon: '\u{1F4A1}',
     content: [
       { type: 'heading', data: 'Supported Light Types' },
-      { type: 'text', data: 'LightForge Studio supports all standard Three.js light types plus several specialized presets optimized for automotive and product photography:' },
+      { type: 'text', data: 'HDRI Forge Studio supports all standard Three.js light types plus several specialized presets optimized for automotive and product photography:' },
       { type: 'list', items: [
         'Point Light: Omnidirectional light that emanates from a single point in space. Use for fill and ambient effects.',
         'Spot Light: Directional cone of light with adjustable angle and penumbra. Ideal for dramatic key lights and spotlighting specific areas.',
@@ -162,7 +162,7 @@ const SECTIONS: ManualSection[] = [
     icon: '\u{1F3A8}',
     content: [
       { type: 'heading', data: 'PBR Material System' },
-      { type: 'text', data: 'LightForge Studio features a full PBR (Physically Based Rendering) material editor supporting both MeshStandardMaterial and MeshPhysicalMaterial. When you load a 3D model, all materials are extracted and listed in the "Mat Edit" tab of the right panel. Click on a mesh in the viewport or use the search bar to select a material.' },
+      { type: 'text', data: 'HDRI Forge Studio features a full PBR (Physically Based Rendering) material editor supporting both MeshStandardMaterial and MeshPhysicalMaterial. When you load a 3D model, all materials are extracted and listed in the "Mat Edit" tab of the right panel. Click on a mesh in the viewport or use the search bar to select a material.' },
       { type: 'heading', data: 'Standard Properties' },
       { type: 'text', data: 'Base Color, Emissive color and intensity, Roughness (0 = mirror-like, 1 = fully rough), Metalness (0 = dielectric/plastic, 1 = metal), Opacity and transparency, Normal/Bump/AO scale, and 8 texture map slots (Albedo, Normal, Roughness, Metalness, Emissive, AO, Bump, Alpha).' },
       { type: 'heading', data: 'Physical Material Properties' },
@@ -195,7 +195,7 @@ const SECTIONS: ManualSection[] = [
         'Blur: Softens the environment map for smoother, less contrasty reflections',
       ] },
       { type: 'heading', data: 'HDRI Export (Analytical)' },
-      { type: 'text', data: 'LightForge Studio can export your lighting setup as a true HDR environment map (.hdr or .exr format). Unlike simple screen captures, the export uses analytical radiance calculation: for every pixel, it computes the exact light energy arriving from each light source using physical math. This produces pixel values in the hundreds to thousands range, which is what real HDRIs contain. The exported HDRI can then be used in Blender, Maya, Substance Painter, or any other DCC application that supports IBL.' },
+      { type: 'text', data: 'HDRI Forge Studio can export your lighting setup as a true HDR environment map (.hdr or .exr format). Unlike simple screen captures, the export uses analytical radiance calculation: for every pixel, it computes the exact light energy arriving from each light source using physical math. This produces pixel values in the hundreds to thousands range, which is what real HDRIs contain. The exported HDRI can then be used in Blender, Maya, Substance Painter, or any other DCC application that supports IBL.' },
     ],
   },
   {
@@ -271,7 +271,7 @@ const SECTIONS: ManualSection[] = [
       { type: 'heading', data: 'Scene Hierarchy' },
       { type: 'text', data: 'The Scene tab in the left panel displays a tree view of all objects in the 3D scene - meshes, lights, cameras, groups, and helpers. Click the arrow to expand/collapse groups. Click an object to select it (shows position info at the bottom). Click the eye icon to toggle visibility. Use the search bar to filter objects by name.' },
       { type: 'heading', data: 'Scene Files (.lightscene)' },
-      { type: 'text', data: 'LightForge Studio uses .lightscene files to save and restore the complete studio state including: all lights with positions, colors, and properties; environment settings and HDRI references; material overrides and texture uploads; render settings, post-processing, and color grading; camera position and bookmarks; animation keyframes and timeline data; and viewport design panel state.' },
+      { type: 'text', data: 'HDRI Forge Studio uses .lightscene files to save and restore the complete studio state including: all lights with positions, colors, and properties; environment settings and HDRI references; material overrides and texture uploads; render settings, post-processing, and color grading; camera position and bookmarks; animation keyframes and timeline data; and viewport design panel state.' },
       { type: 'heading', data: 'Export Formats' },
       { type: 'list', items: [
         'PNG / JPEG: Standard image export with tone mapping applied',
@@ -291,7 +291,7 @@ const SECTIONS: ManualSection[] = [
       { type: 'text', data: 'Model appears dark: Check that the environment intensity is > 0 and that lights are positioned correctly. Try applying a 3-light cinematic preset from the Viewport Design Panel as a starting point.' },
       { type: 'text', data: 'HDRI not loading: Ensure the file is a valid .hdr format. Very large HDRIs (>8K) may take longer to process. Try a smaller resolution first.' },
       { type: 'text', data: 'Material changes not visible: Make sure the material is assigned to the mesh and the mesh is visible in the scene hierarchy. Check the Scene tab for hidden objects.' },
-      { type: 'text', data: 'Exported HDRI has max value = 1.0: This indicates a bug in the radiance calculation. A true HDRI should have max pixel values > 100. Check the console for "[LightForge HDRI] Max pixel value" output.' },
+      { type: 'text', data: 'Exported HDRI has max value = 1.0: This indicates a bug in the radiance calculation. A true HDRI should have max pixel values > 100. Check the console for "[HDRI Forge] Max pixel value" output.' },
       { type: 'tip', data: 'If the viewport becomes unresponsive, try pressing F to reset the camera, or use Window > Reset Layout to restore the default panel arrangement.' },
     ],
   },
@@ -362,7 +362,7 @@ const ManualWindow: React.FC<ManualWindowProps> = ({ onClose }) => {
           {/* Title */}
           <div style={{ padding: '12px 12px 8px', borderBottom: '1px solid var(--border)' }}>
             <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text)', letterSpacing: '0.3px' }}>
-              LightForge Manual
+              HDRI Forge Manual
             </div>
             <div style={{ fontSize: 9, color: 'var(--text-dim)', marginTop: 2 }}>
               v1.0.0

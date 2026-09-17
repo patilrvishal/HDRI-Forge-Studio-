@@ -1,5 +1,5 @@
 /**
- * HDRIExporter - Analytical HDRI generation for LightForge Studio.
+ * HDRIExporter - Analytical HDRI generation for HDRI Forge Studio.
  *
  * Generates true HDR (.hdr / .exr) equirectangular images from scene lights
  * using PURE MATHEMATICS - no CubeCamera, no proxy meshes, no WebGL rendering.
@@ -736,7 +736,7 @@ lights.forEach((l, i) => {
     // Log progress every 100 rows + yield to event loop
     if (y % 100 === 0) {
       const pct = Math.round((y / height) * 100);
-      console.log(`[LightForge HDRI] ${pct}% complete`);
+      console.log(`[HDRI Forge] ${pct}% complete`);
       await new Promise<void>((resolve) => setTimeout(resolve, 0));
     }
   }
@@ -750,14 +750,14 @@ lights.forEach((l, i) => {
     if (m > 0.001) nonBlackCount++;
   }
   const totalPixels = width * height;
-  console.log(`[LightForge HDRI] Max pixel value: ${maxVal.toFixed(1)}`);
-  console.log(`[LightForge HDRI] Non-black pixels: ${nonBlackCount} / ${totalPixels} (${((nonBlackCount / totalPixels) * 100).toFixed(1)}%)`);
-  console.log(`[LightForge HDRI] True HDR: ${maxVal > 1.0}`);
+  console.log(`[HDRI Forge] Max pixel value: ${maxVal.toFixed(1)}`);
+  console.log(`[HDRI Forge] Non-black pixels: ${nonBlackCount} / ${totalPixels} (${((nonBlackCount / totalPixels) * 100).toFixed(1)}%)`);
+  console.log(`[HDRI Forge] True HDR: ${maxVal > 1.0}`);
   if (maxVal <= 1.0) {
-    console.warn('[LightForge HDRI] WARNING: Max pixel value <= 1.0 - output is LDR, not HDR!');
+    console.warn('[HDRI Forge] WARNING: Max pixel value <= 1.0 - output is LDR, not HDR!');
   }
   if (nonBlackCount === 0) {
-    console.error('[LightForge HDRI] ERROR: All pixels are black! No lights found or all lights out of range.');
+    console.error('[HDRI Forge] ERROR: All pixels are black! No lights found or all lights out of range.');
   }
 
   return pixels;
@@ -1047,7 +1047,7 @@ function sRGBToLinear(c: number): number {
  *
  * Header format (exact):
  *   #?RADIANCE\n
- *   SOFTWARE=LightForge Studio\n
+ *   SOFTWARE=HDRI Forge Studio\n
  *   FORMAT=32-bit_rle_rgbe\n
  *   EXPOSURE=1.0\n
  *   \n
@@ -1067,7 +1067,7 @@ export function encodeHDR(
 ): ArrayBuffer {
   const headerText =
     '#?RADIANCE\n' +
-    'SOFTWARE=LightForge Studio\n' +
+    'SOFTWARE=HDRI Forge Studio\n' +
     'FORMAT=32-bit_rle_rgbe\n' +
     'EXPOSURE=1.0\n' +
     `\n-Y ${height} +X ${width}\n`;
@@ -1362,7 +1362,7 @@ export async function downloadHDRI(
   }
 
   console.log(
-    `[LightForge HDRI] Generating ${width}x${height} ${format.toUpperCase()} - ` +
+    `[HDRI Forge] Generating ${width}x${height} ${format.toUpperCase()} - ` +
     `${layers.length} env layer(s)`,
   );
 
@@ -1378,7 +1378,7 @@ export async function downloadHDRI(
     for (let i = 0; i < pixels.length; i++) {
       pixels[i] *= exposure;
     }
-    console.log(`[LightForge HDRI] Baked View Exposure ${exposure.toFixed(2)}x into exported data`);
+    console.log(`[HDRI Forge] Baked View Exposure ${exposure.toFixed(2)}x into exported data`);
   }
 
   const baseName = filename ?? `lightforge_hdri_${Date.now()}`;
@@ -1404,7 +1404,7 @@ export async function downloadHDRI(
     if (link.parentNode) link.parentNode.removeChild(link);
   }, 250);
 
-  console.log(`[LightForge HDRI] Export complete: ${baseName}${ext}`);
+  console.log(`[HDRI Forge] Export complete: ${baseName}${ext}`);
 }
 
 // --------- Environment texture loader ------------------------------------------------------------------------------------------------------------------------------------------
@@ -1530,7 +1530,7 @@ export async function loadActiveHDRILayers(globalIntensity = 1.0): Promise<EnvLa
     .assets.filter((a) => a.active && a.dataBase64);
 
   if (assets.length === 0) {
-    console.log('[LightForge HDRI] No active HDRI assets - exporting lights only');
+    console.log('[HDRI Forge] No active HDRI assets - exporting lights only');
     return [];
   }
 
@@ -1542,7 +1542,7 @@ export async function loadActiveHDRILayers(globalIntensity = 1.0): Promise<EnvLa
       const texture = await loadHDRITexture(buffer);
 
       if (!texture) {
-        console.warn(`[LightForge HDRI] Could not decode "${asset.name}" - skipping`);
+        console.warn(`[HDRI Forge] Could not decode "${asset.name}" - skipping`);
         continue;
       }
 
@@ -1559,14 +1559,14 @@ export async function loadActiveHDRILayers(globalIntensity = 1.0): Promise<EnvLa
       });
 
       console.log(
-        `[LightForge HDRI] Env layer "${asset.name}" - ` +
+        `[HDRI Forge] Env layer "${asset.name}" - ` +
         `${img?.width}x${img?.height}, ` +
         `type ${img?.data?.constructor?.name}, ` +
         `intensity ${(asset.intensity * globalIntensity).toFixed(2)}, ` +
         `rotation ${asset.rotation}deg`,
       );
     } catch (e) {
-      console.warn(`[LightForge HDRI] Error loading "${asset.name}":`, e);
+      console.warn(`[HDRI Forge] Error loading "${asset.name}":`, e);
     }
   }
 

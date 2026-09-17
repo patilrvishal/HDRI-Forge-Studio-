@@ -99,7 +99,7 @@ export interface SceneFile {
 
 export class SceneExporter {
   private static readonly FILE_VERSION = '1.0';
-  private static readonly APP_NAME = 'LightForge Studio';
+  private static readonly APP_NAME = 'HDRI Forge Studio';
   private static readonly APP_VERSION = '1.0.0';
   private static readonly FILE_EXTENSION = '.lightscene';
   private static readonly MIME_TYPE = 'application/json';

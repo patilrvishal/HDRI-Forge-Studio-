@@ -387,21 +387,16 @@ const NAV_ICONS: Record<string, () => React.ReactElement> = {
   Help: IconHelp,
 };
 
-/** Layered hexagon "forge" logo mark, matching the app's accent. */
+/** HDRI Forge Studio brand emblem. */
 function LogoMark() {
   return (
-    <svg width="30" height="30" viewBox="0 0 32 32" fill="none">
-      <path d="M16 2 28 9v14L16 30 4 23V9z" fill="url(#logoGrad)" opacity="0.9" />
-      <path d="M16 2 28 9v14L16 30 4 23V9z" stroke="var(--theme-accent-bright)" strokeWidth="1" opacity="0.6" />
-      <path d="M16 9l7 4v8l-7 4-7-4v-8z" stroke="#fff" strokeOpacity="0.85" strokeWidth="1.3" fill="none" />
-      <path d="M9 13l7 4 7-4M16 17v8" stroke="#fff" strokeOpacity="0.55" strokeWidth="1" />
-      <defs>
-        <linearGradient id="logoGrad" x1="4" y1="2" x2="28" y2="30" gradientUnits="userSpaceOnUse">
-          <stop stopColor="var(--theme-accent-bright)" />
-          <stop offset="1" stopColor="var(--theme-accent)" />
-        </linearGradient>
-      </defs>
-    </svg>
+    <img
+      src="/logo-mark.png"
+      alt="HDRI Forge Studio"
+      width={30}
+      height={30}
+      style={{ borderRadius: 6, display: 'block', objectFit: 'cover' }}
+    />
   );
 }
 

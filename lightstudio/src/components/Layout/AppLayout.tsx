@@ -782,7 +782,7 @@ export const AppLayout: React.FC = () => {
           </span>
         </div>
         <div style={{ display: 'flex', gap: 12 }}>
-          <span>LightForge Studio <span style={{ color: 'var(--accent)' }}>v2.0</span></span>
+          <span>HDRI Forge Studio <span style={{ color: 'var(--accent)' }}>v2.0</span></span>
           <span>Phase 12</span>
         </div>
       </div>
@@ -840,14 +840,21 @@ export const AppLayout: React.FC = () => {
             }}
             onClick={(e) => e.stopPropagation()}
           >
+            <img
+              src="/logo-mark.png"
+              alt="HDRI Forge Studio"
+              width={56}
+              height={56}
+              style={{ borderRadius: 10, display: 'block', margin: '0 auto 10px' }}
+            />
             <div style={{ fontSize: 16, fontWeight: 700, background: 'var(--neon-gradient)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent', marginBottom: 4 }}>
-              LightForge Studio
+              HDRI Forge Studio
             </div>
             <div style={{ fontSize: 11, color: 'var(--text-sec)', marginBottom: 8 }}>
-              3D Car Lighting Studio
+              HDRI Lighting & Angle Hunt Studio
             </div>
             <div style={{ fontSize: 10, color: 'var(--text-dim)' }}>
-              Version 1.0.0
+              Version 2.1.0
             </div>
             <button
               className="btn-primary"

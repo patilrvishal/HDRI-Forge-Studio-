@@ -1,5 +1,5 @@
 /**
- * Complete built-in light preset definitions for LightForge Studio.
+ * Complete built-in light preset definitions for HDRI Forge Studio.
  *
  * Categories:
  *   Studio   (6 presets)  — controlled studio environments
