@@ -111,13 +111,37 @@ export const CameraPanel: React.FC = () => {
                   </span>
                 )}
               </span>
-              <button
-                onClick={(e) => { e.stopPropagation(); removeCamera(c.id); }}
-                style={{
-                  fontSize: 12, lineHeight: 1, background: 'transparent', border: 'none',
-                  color: isActive ? '#fff' : 'var(--text-dim)', cursor: 'pointer', padding: '0 2px',
-                }}
-              >×</button>
+              <span style={{ display: 'flex', alignItems: 'center', gap: 2, flexShrink: 0 }}>
+                <button
+                  onClick={(e) => { e.stopPropagation(); updateCamera(c.id, { locked: !c.locked }); }}
+                  title={c.locked ? 'Locked in 360 Workspace - click to unlock' : 'Click to lock in 360 Workspace'}
+                  style={{
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    width: 18, height: 18, background: 'transparent', border: 'none',
+                    color: c.locked ? (isActive ? '#fff' : 'var(--accent)') : (isActive ? 'rgba(255,255,255,0.5)' : 'var(--text-dim)'),
+                    cursor: 'pointer', padding: 0,
+                  }}
+                >
+                  {c.locked ? (
+                    <svg width="11" height="11" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.3">
+                      <rect x="3" y="6.5" width="8" height="6" rx="1" />
+                      <path d="M4.5 6.5V4.2a2.5 2.5 0 015 0v2.3" strokeLinecap="round" />
+                    </svg>
+                  ) : (
+                    <svg width="11" height="11" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.3">
+                      <rect x="3" y="6.5" width="8" height="6" rx="1" />
+                      <path d="M4.5 6.5V4.2a2.5 2.5 0 014.9-.6" strokeLinecap="round" />
+                    </svg>
+                  )}
+                </button>
+                <button
+                  onClick={(e) => { e.stopPropagation(); removeCamera(c.id); }}
+                  style={{
+                    fontSize: 12, lineHeight: 1, background: 'transparent', border: 'none',
+                    color: isActive ? '#fff' : 'var(--text-dim)', cursor: 'pointer', padding: '0 2px',
+                  }}
+                >×</button>
+              </span>
             </div>
           );
         })}

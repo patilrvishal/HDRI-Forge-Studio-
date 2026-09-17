@@ -621,6 +621,7 @@ export class SceneManager {
           rotation: { x: number; y: number; z: number };
           targetId: string | null;
           fov: number;
+          locked?: boolean;
         };
       } };
     }).__cameraStore;
@@ -632,10 +633,15 @@ export class SceneManager {
       return false;
     }
 
-    if (this._viewportLocked) {
-      // No orbit pivot to resolve - OrbitControls is fully disabled, so
-      // nothing will ever read controls.target. Drive the transform straight
-      // through every frame.
+    if (this._viewportLocked || cam.locked) {
+      // Angle Hunt Mode always locks the active camera (_viewportLocked);
+      // in 360 Workspace, a camera locks only when the user has explicitly
+      // toggled its own per-camera lock (cam.locked, via the lock button
+      // next to CameraSwitcher) - otherwise 360 Workspace's default
+      // drag-adjustable behavior below applies. Either way: no orbit pivot
+      // to resolve - OrbitControls is fully disabled, so nothing will ever
+      // read controls.target. Drive the transform straight through every
+      // frame.
       this.controls.enabled = false;
       this.camera.position.set(cam.position.x, cam.position.y, cam.position.z);
       if (cam.fov !== this.camera.fov) {
