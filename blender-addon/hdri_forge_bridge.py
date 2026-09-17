@@ -223,6 +223,24 @@ def _gather_camera(cam_obj):
     }
 
 
+def _gather_all_or_selected_cameras(context):
+    # If any cameras are selected, push only those; otherwise push every
+    # camera in the scene - same selection-vs-all convention used elsewhere
+    # in this addon (e.g. mesh export only sends selected MESH objects).
+    selected_cams = [o for o in context.selected_objects if o.type == 'CAMERA']
+    cam_objs = selected_cams if selected_cams else [o for o in context.scene.objects if o.type == 'CAMERA']
+
+    result = []
+    for cam_obj in cam_objs:
+        entry = _gather_camera(cam_obj)
+        entry['id'] = cam_obj.name
+        entry['name'] = cam_obj.name
+        entry['clipStart'] = cam_obj.data.clip_start
+        entry['clipEnd'] = cam_obj.data.clip_end
+        result.append(entry)
+    return result
+
+
 def _gather_world(context):
     # The Studio only has an RGBELoader wired up (no EXR support yet, a
     # pre-existing gap unrelated to this bridge) - .hdr/.hdri environment
@@ -655,9 +673,10 @@ class HDRIBRIDGE_OT_push(bpy.types.Operator):
         if lights:
             payload['lights'] = lights
 
-        cam_obj = context.scene.camera
-        if cam_obj:
-            payload['camera'] = _gather_camera(cam_obj)
+        # Camera data is pushed exclusively via the dedicated "Push Camera(s)"
+        # button (HDRIBRIDGE_OT_push_cameras) - not bundled in here, so pushing
+        # mesh/lights never silently overwrites whatever camera(s) the Studio
+        # already has.
 
         world = _gather_world(context)
         if world:
@@ -678,6 +697,51 @@ class HDRIBRIDGE_OT_push(bpy.types.Operator):
             with urllib.request.urlopen(req, timeout=15) as resp:
                 resp.read()
             self.report({'INFO'}, f"Pushed to {_state['label'] or 'Studio'}: {list(payload.keys())}")
+        except urllib.error.URLError as e:
+            _state["url"] = None
+            _state["label"] = None
+            self.report({'ERROR'}, f"Studio unreachable: {e}")
+            return {'CANCELLED'}
+        except Exception as e:
+            self.report({'ERROR'}, str(e))
+            return {'CANCELLED'}
+
+        return {'FINISHED'}
+
+
+# ── Push operator (camera(s) only) ──────────────────────────────────────────
+class HDRIBRIDGE_OT_push_cameras(bpy.types.Operator):
+    bl_idname  = "hdribridge.push_cameras"
+    bl_label   = "Push Camera(s)"
+    bl_description = "Send scene cameras (or just the selected ones) to HDRI Forge Studio - updates only the camera list, nothing else"
+
+    def execute(self, context):
+        prefs = context.preferences.addons[__name__].preferences
+        if prefs.auto_detect:
+            probe_studio()
+        studio_url = get_studio_url(context)
+        if not studio_url:
+            self.report({'ERROR'}, "No HDRI Forge Studio found running - open the app or start the dev server")
+            return {'CANCELLED'}
+
+        cameras = _gather_all_or_selected_cameras(context)
+        if not cameras:
+            self.report({'WARNING'}, "No cameras in the scene")
+            return {'CANCELLED'}
+
+        payload = {'source': 'blender', 'cameras': cameras}
+
+        try:
+            data = json.dumps(payload).encode('utf-8')
+            req  = urllib.request.Request(
+                studio_url,
+                data    = data,
+                headers = {'Content-Type': 'application/json'},
+                method  = 'POST',
+            )
+            with urllib.request.urlopen(req, timeout=15) as resp:
+                resp.read()
+            self.report({'INFO'}, f"Pushed {len(cameras)} camera(s) to {_state['label'] or 'Studio'}")
         except urllib.error.URLError as e:
             _state["url"] = None
             _state["label"] = None
@@ -796,6 +860,13 @@ class HDRIBRIDGE_PT_panel(bpy.types.Panel):
         layout.label(text=f"Selected: {len(lights)} lights, {len(meshes)} meshes")
         layout.operator("hdribridge.push", icon='EXPORT')
 
+        layout.separator()
+        cams = [o for o in context.scene.objects if o.type == 'CAMERA']
+        sel_cams = [o for o in sel if o.type == 'CAMERA']
+        cam_label = f"{len(sel_cams)} selected" if sel_cams else f"all {len(cams)}"
+        layout.label(text=f"Cameras: {cam_label}")
+        layout.operator("hdribridge.push_cameras", icon='CAMERA_DATA')
+
 
 # ── Registration ───────────────────────────────────────────────────────────
 classes = [
@@ -803,6 +874,7 @@ classes = [
     HDRIBRIDGE_OT_refresh,
     HDRIBRIDGE_OT_refresh_maya,
     HDRIBRIDGE_OT_push,
+    HDRIBRIDGE_OT_push_cameras,
     HDRIBRIDGE_OT_push_to_maya,
     HDRIBRIDGE_PT_panel,
 ]

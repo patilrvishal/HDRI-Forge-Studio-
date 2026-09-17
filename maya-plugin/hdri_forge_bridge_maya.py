@@ -328,6 +328,45 @@ def _gather_camera():
     }
 
 
+def _gather_all_or_selected_cameras():
+    # If any cameras are selected, push only those; otherwise push every
+    # camera in the scene - same selection-vs-all convention used by the
+    # Blender addon's equivalent function.
+    selection = cmds.ls(selection=True, long=True) or []
+    selected_cam_transforms = [
+        n for n in selection
+        if cmds.listRelatives(n, shapes=True, type='camera', fullPath=True)
+    ]
+    if selected_cam_transforms:
+        cam_transforms = selected_cam_transforms
+    else:
+        all_cam_shapes = cmds.ls(type='camera', long=True) or []
+        cam_transforms = []
+        for shape in all_cam_shapes:
+            parents = cmds.listRelatives(shape, parent=True, fullPath=True)
+            if parents:
+                cam_transforms.append(parents[0])
+
+    result = []
+    for cam_transform in cam_transforms:
+        dag_path = _dag_path_for(cam_transform)
+        quat = _world_quaternion(dag_path)
+        try:
+            hfov = cmds.camera(cam_transform, query=True, horizontalFieldOfView=True)
+        except Exception:
+            hfov = 50.0
+        result.append({
+            'id': cam_transform,
+            'name': cam_transform.split('|')[-1],
+            'position': _world_translation(dag_path),
+            'rotation': quat_to_euler_deg(quat),
+            'fov': hfov,
+            'clipStart': cmds.getAttr(cam_transform + '.nearClipPlane'),
+            'clipEnd': cmds.getAttr(cam_transform + '.farClipPlane'),
+        })
+    return result
+
+
 # ─── Per-object OBJ import (direct-bridge mesh receiving) ──────────────────
 # Maya's own OBJ importer merges every object in a file into a single mesh
 # regardless of any option flag passed to it (verified empirically - 'mo=0',
@@ -702,9 +741,10 @@ def push_to_studio(*_args):
     if lights:
         payload['lights'] = lights
 
-    camera = _gather_camera()
-    if camera:
-        payload['camera'] = camera
+    # Camera data is pushed exclusively via the dedicated "Push Camera(s)"
+    # button (push_cameras_to_studio) - not bundled in here, so pushing
+    # mesh/lights never silently overwrites whatever camera(s) the Studio
+    # already has.
 
     world = _gather_world_arnold()
     if world:
@@ -717,7 +757,7 @@ def push_to_studio(*_args):
     if mesh_transforms:
         payload['mesh'] = _export_selected_meshes_obj(mesh_transforms)
 
-    if not (lights or camera or world or mesh_transforms):
+    if not (lights or world or mesh_transforms):
         cmds.warning("HDRI Forge Bridge: nothing selected to push")
         return
 
@@ -732,6 +772,40 @@ def push_to_studio(*_args):
         with urllib.request.urlopen(req, timeout=15) as resp:
             resp.read()
         print(f"[HDRI Forge Bridge] Pushed to {_state['label']}: {list(payload.keys())}")
+    except urllib.error.URLError as e:
+        _state["url"] = None
+        _state["label"] = None
+        cmds.warning(f"HDRI Forge Bridge: Studio unreachable: {e}")
+    except Exception as e:
+        cmds.warning(f"HDRI Forge Bridge: {e}")
+
+
+# ─── Build + send the payload (camera(s) only, to Studio) ──────────────────
+def push_cameras_to_studio(*_args):
+    probe_studio()
+    studio_url = _state["url"]
+    if not studio_url:
+        cmds.warning("HDRI Forge Bridge: no HDRI Forge Studio found running - open the app or start the dev server")
+        return
+
+    cameras = _gather_all_or_selected_cameras()
+    if not cameras:
+        cmds.warning("HDRI Forge Bridge: no cameras in the scene")
+        return
+
+    payload = {'source': 'maya', 'cameras': cameras}
+
+    try:
+        data = json.dumps(payload).encode('utf-8')
+        req = urllib.request.Request(
+            studio_url,
+            data=data,
+            headers={'Content-Type': 'application/json'},
+            method='POST',
+        )
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            resp.read()
+        print(f"[HDRI Forge Bridge] Pushed {len(cameras)} camera(s) to {_state['label']}")
     except urllib.error.URLError as e:
         _state["url"] = None
         _state["label"] = None
@@ -857,7 +931,7 @@ def show_ui(*_args):
     if cmds.window(WINDOW_NAME, exists=True):
         cmds.deleteUI(WINDOW_NAME)
 
-    window = cmds.window(WINDOW_NAME, title=PLUGIN_NAME, widthHeight=(320, 260), sizeable=False)
+    window = cmds.window(WINDOW_NAME, title=PLUGIN_NAME, widthHeight=(320, 300), sizeable=False)
     cmds.columnLayout(adjustableColumn=True, rowSpacing=6, columnAttach=('both', 12))
     cmds.separator(height=8, style='none')
 
@@ -872,6 +946,9 @@ def show_ui(*_args):
     cmds.separator(height=4, style='in')
     _ui["count_text"] = cmds.text(label="Selected: 0 lights, 0 meshes", align='left')
     cmds.button(label="Push to HDRI Forge Studio", height=32, command=push_to_studio)
+    cmds.separator(height=4, style='in')
+    cmds.text(label="Cameras: pushes selected, or all if none selected", align='left')
+    cmds.button(label="Push Camera(s)", height=28, command=push_cameras_to_studio)
     cmds.setParent('..')  # end studio_tab
 
     # ── Tab 2: Blender (direct connection) ──
