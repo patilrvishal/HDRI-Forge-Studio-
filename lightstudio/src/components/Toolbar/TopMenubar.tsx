@@ -395,7 +395,7 @@ function LogoMark() {
       alt="HDRI Forge Studio"
       width={30}
       height={30}
-      style={{ borderRadius: 6, display: 'block', objectFit: 'cover' }}
+      style={{ borderRadius: 6, display: 'block', objectFit: 'contain' }}
     />
   );
 }

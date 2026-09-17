@@ -46,7 +46,7 @@ export function SplashScreen({ onDone }: { onDone: () => void }) {
           alt="HDRI Forge Studio"
           width={128}
           height={128}
-          style={{ display: 'block', width: 128, height: 128, objectFit: 'cover' }}
+          style={{ display: 'block', width: 128, height: 128, objectFit: 'contain' }}
         />
         {/* shimmer sweep */}
         <div
