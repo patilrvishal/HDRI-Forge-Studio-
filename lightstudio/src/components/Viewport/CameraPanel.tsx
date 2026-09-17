@@ -8,6 +8,12 @@ interface TargetOption {
   label: string;
 }
 
+const SOURCE_LABEL: Record<SceneCamera['source'], string> = {
+  manual: '',
+  blender: 'Blender',
+  maya: 'Maya',
+};
+
 export const CameraPanel: React.FC = () => {
   const cameras = useCameraStore((s) => s.cameras);
   const activeCameraId = useCameraStore((s) => s.activeCameraId);
@@ -35,6 +41,23 @@ export const CameraPanel: React.FC = () => {
   );
 
   const num = (v: number) => (Number.isFinite(v) ? Math.round(v * 100) / 100 : 0);
+
+  // Toggling a camera's own last workspace membership off would leave it
+  // permanently unreachable from either mode's UI (no error, just an orphan
+  // in the store) - keep at least one checked.
+  const toggleWorkspace = useCallback(
+    (ws: '360' | 'angleHunt', checked: boolean) => {
+      if (!active) return;
+      const has = active.workspaces.includes(ws);
+      if (checked === has) return;
+      const next = checked
+        ? [...active.workspaces, ws]
+        : active.workspaces.filter((w) => w !== ws);
+      if (next.length === 0) return;
+      patch({ workspaces: next });
+    },
+    [active, patch],
+  );
 
   return (
     <div style={{ padding: 10, display: 'flex', flexDirection: 'column', gap: 10, overflowY: 'auto' }}>
@@ -71,8 +94,22 @@ export const CameraPanel: React.FC = () => {
                 border: '1px solid ' + (isActive ? 'var(--accent)' : 'var(--border)'),
               }}
             >
-              <span style={{ fontSize: 11, color: isActive ? '#fff' : 'var(--text-sec)' }}>
-                {c.name}
+              <span style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
+                <span style={{ fontSize: 11, color: isActive ? '#fff' : 'var(--text-sec)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {c.name}
+                </span>
+                {SOURCE_LABEL[c.source] && (
+                  <span
+                    style={{
+                      fontSize: 8, padding: '1px 5px', borderRadius: 3, flexShrink: 0,
+                      background: isActive ? 'rgba(255,255,255,0.2)' : 'var(--bg-panel)',
+                      color: isActive ? '#fff' : 'var(--text-dim)',
+                      border: '1px solid ' + (isActive ? 'rgba(255,255,255,0.3)' : 'var(--border)'),
+                    }}
+                  >
+                    {SOURCE_LABEL[c.source]}
+                  </span>
+                )}
               </span>
               <button
                 onClick={(e) => { e.stopPropagation(); removeCamera(c.id); }}
@@ -97,6 +134,30 @@ export const CameraPanel: React.FC = () => {
               color: 'var(--text-sec)',
             }}
           />
+
+          <div>
+            <div style={{ fontSize: 10, color: 'var(--text-dim)', marginBottom: 3 }}>
+              Usable in
+            </div>
+            <div style={{ display: 'flex', gap: 12 }}>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 10, color: 'var(--text-sec)', cursor: 'pointer' }}>
+                <input
+                  type="checkbox"
+                  checked={active.workspaces.includes('360')}
+                  onChange={(e) => toggleWorkspace('360', e.target.checked)}
+                />
+                360 Workspace
+              </label>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 10, color: 'var(--text-sec)', cursor: 'pointer' }}>
+                <input
+                  type="checkbox"
+                  checked={active.workspaces.includes('angleHunt')}
+                  onChange={(e) => toggleWorkspace('angleHunt', e.target.checked)}
+                />
+                Angle Hunt
+              </label>
+            </div>
+          </div>
 
           <div>
             <div style={{ fontSize: 10, color: 'var(--text-dim)', marginBottom: 3 }}>Target</div>
