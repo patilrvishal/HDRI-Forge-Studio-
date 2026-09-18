@@ -567,8 +567,23 @@ export const Viewport: React.FC<ViewportProps> = ({ sceneManagerRef, onScreensho
     if (!sm || !el) return;
 
     if (environment.presetId === '__custom__' && environment.hdri) {
+      // Guards against a stale-closure race: if this effect re-fires (rotation
+      // or showBackground changed again) before the previous loadHDRI() call
+      // resolves, the OLDER promise settling later must not stomp state with
+      // outdated data - including the path tracer's raw env below, which was
+      // the actual cause of the HDRI intermittently vanishing under path
+      // tracing. The raw-env computation used to live in a separate effect
+      // that read envLoader.getEquirectTexture() synchronously - since
+      // loadHDRI() is async, that effect very often ran BEFORE the real
+      // texture was ready (capturing null/stale data) with no guaranteed
+      // follow-up once loading actually finished, unless some unrelated
+      // re-render happened to trigger it again later. Notifying the path
+      // tracer directly here, exactly when the freshly-loaded texture
+      // becomes available, removes that race entirely.
+      let cancelled = false;
       el.loadHDRI(environment.hdri, sm.pmremGenerator)
         .then((envTexture) => {
+          if (cancelled) return;
           el.setEnvironmentTexture(sm.scene, envTexture, environment.intensity);
 
           // Rotate the HDRI natively (equirect textures are not re-baked)
@@ -578,12 +593,17 @@ export const Viewport: React.FC<ViewportProps> = ({ sceneManagerRef, onScreensho
 
           // Show the HDRI as a 360deg backplate in the viewport
           el.setBackgroundFromEnv(sm.scene, environment.showBackground);
+
+          renderPipelineRef.current?.markPathTracerDirty(el.getEquirectTexture());
         })
         .catch((e) => {
           // Do NOT fall back to a built-in preset - that silently replaces the
           // user's custom HDRI with studio-neutral.
           console.error('[LightForge] Custom HDRI load failed:', e);
         });
+      return () => {
+        cancelled = true;
+      };
     } else if (environment.presetId !== '__custom__') {
       // Not custom - clear any HDRI backplate, unless a gradient owns the bg
       if (!environment.gradientBackground?.enabled) {
@@ -598,6 +618,7 @@ export const Viewport: React.FC<ViewportProps> = ({ sceneManagerRef, onScreensho
     environment.showBackground,
     sceneManagerRef,
     envLoaderRef,
+    renderPipelineRef,
   ]);
 
   // Apply environment intensity WITHOUT reloading the texture.
@@ -679,7 +700,18 @@ export const Viewport: React.FC<ViewportProps> = ({ sceneManagerRef, onScreensho
       environment.gradientBackground?.enabled && bg instanceof THREE.CanvasTexture
         ? canvasTextureToDataTexture(bg)
         : null;
-    const rawEnv = envLoaderRef.current?.getEquirectTexture() ?? gradientRawEnv;
+    const equirectTex = envLoaderRef.current?.getEquirectTexture() ?? null;
+    // A custom HDRI is configured but its texture isn't loaded yet (the
+    // dedicated load-completion effect below notifies the path tracer itself
+    // once it's actually ready) - don't overwrite a previously-good raw env
+    // with null just because this effect happened to run mid-reload; that's
+    // exactly what made the environment intermittently vanish under path
+    // tracing. Only pass null through when there's genuinely no HDRI source
+    // configured at all.
+    if (environment.presetId === '__custom__' && environment.hdri && !equirectTex) {
+      return;
+    }
+    const rawEnv = equirectTex ?? gradientRawEnv;
     renderPipelineRef.current?.markPathTracerDirty(rawEnv);
   }, [lights, hdriShapes, environment.presetId, environment.rotation, environment.intensity, environment.hdri, environment.gradientBackground, environment.background, environment.showBackground, renderSettings.engine, envLoaderRef, sceneManagerRef]);
 
