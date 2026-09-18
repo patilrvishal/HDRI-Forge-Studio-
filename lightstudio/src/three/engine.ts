@@ -2439,15 +2439,37 @@ export function createGradientBackground(config: GradientBackgroundConfig): THRE
  *  `.data`, so handing it a raw CanvasTexture crashes with "Cannot read
  *  properties of undefined (reading 'length')". flipY is set to false to
  *  match the loaders' convention (row 0 = top of the equirect image), same
- *  row order getImageData() already returns. */
+ *  row order getImageData() already returns.
+ *
+ *  The data is manually decoded from sRGB to linear here, and the result
+ *  carries no colorSpace tag (it's already linear) - confirmed by reading
+ *  EquirectHdrInfoUniform's source that it does zero colorSpace-aware
+ *  decoding of the CPU-side `.data` array it's handed; it assumes whatever
+ *  it's given is already linear radiance, exactly like a real loaded HDR
+ *  file's raw float data is. Canvas getImageData() returns sRGB-encoded
+ *  bytes, so without this decode the path tracer's importance-sampling
+ *  table (and the actual light contribution computed from it) reads those
+ *  gamma-compressed values as if they were linear - substantially
+ *  overbright, especially in the midtones - which was blowing this app's
+ *  mirror-smooth clearcoat car paint to solid clipped white under path
+ *  tracing while the same material rendered correctly in PBR mode (PBR's
+ *  PMREM path decodes colorSpace correctly on the GPU sampler). */
 export function canvasTextureToDataTexture(canvasTex: THREE.CanvasTexture): THREE.DataTexture {
   const canvas = canvasTex.image as HTMLCanvasElement;
   const ctx = canvas.getContext('2d')!;
   const { width, height } = canvas;
   const imgData = ctx.getImageData(0, 0, width, height);
-  const dataTex = new THREE.DataTexture(imgData.data, width, height, THREE.RGBAFormat, THREE.UnsignedByteType);
+  const srgb = imgData.data;
+  const linear = new Float32Array(width * height * 4);
+  for (let i = 0; i < srgb.length; i += 4) {
+    for (let c = 0; c < 3; c++) {
+      const s = srgb[i + c] / 255;
+      linear[i + c] = s <= 0.04045 ? s / 12.92 : Math.pow((s + 0.055) / 1.055, 2.4);
+    }
+    linear[i + 3] = srgb[i + 3] / 255;
+  }
+  const dataTex = new THREE.DataTexture(linear, width, height, THREE.RGBAFormat, THREE.FloatType);
   dataTex.mapping = THREE.EquirectangularReflectionMapping;
-  dataTex.colorSpace = THREE.SRGBColorSpace;
   dataTex.flipY = false;
   dataTex.needsUpdate = true;
   return dataTex;
