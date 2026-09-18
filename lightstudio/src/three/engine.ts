@@ -1149,11 +1149,18 @@ export class RenderPipeline {
         this._pathTracer.minSamples = 1;
         this._pathTracer.renderDelay = 0;
         this._pathTracer.fadeDuration = 400;
-        // 8 bounces (up from 6) - car paint clearcoat and glass/chrome need
+        // 12 bounces (up from 6) - car paint clearcoat and glass/chrome need
         // more light transport depth than a matte product shot to resolve
         // multi-bounce reflections/refractions without going murky.
-        this._pathTracer.bounces = 8;
-        this._pathTracer.filterGlossyFactor = 0.5;
+        this._pathTracer.bounces = 12;
+        // 0.8 (up from 0.5) - sharp boundaries between the mirror-smooth
+        // clearcoat body paint and adjacent dark trim/glass (roofline,
+        // window surrounds, wheel arches) are a slow-to-converge case for
+        // unbiased path tracing: confirmed live that raising this cuts the
+        // colored noise at those edges noticeably faster for the same
+        // sample count, at an acceptable cost to sharp-reflection accuracy
+        // for a "final quality preview" mode.
+        this._pathTracer.filterGlossyFactor = 0.8;
         this._pathTracer.renderScale = 1;
         this._pathTracer.multipleImportanceSampling = true;
       }
