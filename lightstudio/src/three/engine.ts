@@ -1149,7 +1149,10 @@ export class RenderPipeline {
         this._pathTracer.minSamples = 1;
         this._pathTracer.renderDelay = 0;
         this._pathTracer.fadeDuration = 400;
-        this._pathTracer.bounces = 6;
+        // 8 bounces (up from 6) - car paint clearcoat and glass/chrome need
+        // more light transport depth than a matte product shot to resolve
+        // multi-bounce reflections/refractions without going murky.
+        this._pathTracer.bounces = 8;
         this._pathTracer.filterGlossyFactor = 0.5;
         this._pathTracer.renderScale = 1;
         this._pathTracer.multipleImportanceSampling = true;
@@ -1268,8 +1271,18 @@ export class RenderPipeline {
       // Path tracing does its own tone mapping internally via the material;
       // leave the renderer's tone mapping off so it isn't applied twice.
       this._sm.renderer.toneMapping = THREE.NoToneMapping;
-      if (!wasEnabled && !this._pathTracerReady && !this._pathTracerBuilding) {
-        void this._buildPathTracer();
+      if (!wasEnabled) {
+        if (!this._pathTracerReady && !this._pathTracerBuilding) {
+          void this._buildPathTracer();
+        } else if (this._pathTracerReady && !this._pathTracerBuilding) {
+          // The tracer was already built from a previous session in this
+          // mode, but the scene may have changed while path tracing was
+          // toggled off (markPathTracerDirty() is a no-op while disabled,
+          // by design, so edits made in PBR mode never set the dirty flag).
+          // Force a rebuild now instead of silently resuming the stale
+          // accumulated snapshot from the first build.
+          this._pathTracerDirty = true;
+        }
       }
     }
   }
@@ -2398,6 +2411,28 @@ export function createGradientBackground(config: GradientBackgroundConfig): THRE
   tex.colorSpace = THREE.SRGBColorSpace;
   tex.needsUpdate = true;
   return tex;
+}
+
+/** Converts a CanvasTexture (e.g. from createGradientBackground()) into a
+ *  DataTexture with a real CPU-side pixel array, matching what RGBELoader/
+ *  EXRLoader produce for a real HDRI file. three-gpu-pathtracer's
+ *  EquirectHdrInfoUniform reads `image.{width,height,data}` directly to
+ *  build its importance-sampling CDF tables - an HTMLCanvasElement has no
+ *  `.data`, so handing it a raw CanvasTexture crashes with "Cannot read
+ *  properties of undefined (reading 'length')". flipY is set to false to
+ *  match the loaders' convention (row 0 = top of the equirect image), same
+ *  row order getImageData() already returns. */
+export function canvasTextureToDataTexture(canvasTex: THREE.CanvasTexture): THREE.DataTexture {
+  const canvas = canvasTex.image as HTMLCanvasElement;
+  const ctx = canvas.getContext('2d')!;
+  const { width, height } = canvas;
+  const imgData = ctx.getImageData(0, 0, width, height);
+  const dataTex = new THREE.DataTexture(imgData.data, width, height, THREE.RGBAFormat, THREE.UnsignedByteType);
+  dataTex.mapping = THREE.EquirectangularReflectionMapping;
+  dataTex.colorSpace = THREE.SRGBColorSpace;
+  dataTex.flipY = false;
+  dataTex.needsUpdate = true;
+  return dataTex;
 }
 
 /**

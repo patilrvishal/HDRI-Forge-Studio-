@@ -4,7 +4,7 @@ import { useSceneStore } from '../../store/sceneStore';
 import { useLightsStore } from '../../store/lightsStore';
 import { useAnimationStore } from '../../store/animationStore';
 import { ThreeSceneProvider } from '../../hooks/useThreeScene';
-import { SceneManager, RenderPipeline, LightManager, ModelLoader } from '../../three/engine';
+import { SceneManager, RenderPipeline, LightManager, ModelLoader, canvasTextureToDataTexture } from '../../three/engine';
 import { ErikLoader } from '../../three/ErikLoader';
 import { animationEngine, AnimationEngine } from '../../three/AnimationEngine';
 import { EnvironmentLoader } from '../../three/EnvironmentLoader';
@@ -664,11 +664,24 @@ export const Viewport: React.FC<ViewportProps> = ({ sceneManagerRef, onScreensho
   // makes while in this mode, so RenderPipeline.render() rebuilds it on the
   // next frame instead. No-op when path tracing isn't active.
   useEffect(() => {
-    // Raw (pre-PMREM) equirect texture, only present for a real loaded HDRI
-    // file - see the _pathTracerRawEnv doc comment in RenderPipeline.
-    const rawEnv = envLoaderRef.current?.getEquirectTexture() ?? null;
+    // Raw (pre-PMREM) equirect texture for path-traced environment lighting -
+    // see the _pathTracerRawEnv doc comment in RenderPipeline. A real loaded
+    // HDRI file takes priority; otherwise, when Gradient Background is on,
+    // reuse the same raw equirect CanvasTexture createGradientBackground()
+    // already painted for the visible backdrop (setGradientBackground() sets
+    // it as scene.background) - it's already real per-pixel equirect data,
+    // not PMREM, so it's just as usable as a loaded HDRI for IBL. Without
+    // this, every gradient-background scene (the default look) traced with
+    // zero environment lighting - lights-only, no fill from the sky dome.
+    const sm = sceneManagerRef.current;
+    const bg = sm?.scene.background;
+    const gradientRawEnv =
+      environment.gradientBackground?.enabled && bg instanceof THREE.CanvasTexture
+        ? canvasTextureToDataTexture(bg)
+        : null;
+    const rawEnv = envLoaderRef.current?.getEquirectTexture() ?? gradientRawEnv;
     renderPipelineRef.current?.markPathTracerDirty(rawEnv);
-  }, [lights, hdriShapes, environment.presetId, environment.rotation, environment.intensity, environment.hdri, environment.gradientBackground, environment.background, environment.showBackground, renderSettings.engine, envLoaderRef]);
+  }, [lights, hdriShapes, environment.presetId, environment.rotation, environment.intensity, environment.hdri, environment.gradientBackground, environment.background, environment.showBackground, renderSettings.engine, envLoaderRef, sceneManagerRef]);
 
   // Restore model from scene file (triggered when _pendingModelDataBase64 is set)
   useEffect(() => {
