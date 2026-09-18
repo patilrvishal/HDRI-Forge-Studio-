@@ -1275,9 +1275,20 @@ export class RenderPipeline {
       // every re-fire, or every bloom-slider tweak would restart the BVH build.
       const wasEnabled = this._pathTracingEnabled;
       this._pathTracingEnabled = true;
-      // Path tracing does its own tone mapping internally via the material;
-      // leave the renderer's tone mapping off so it isn't applied twice.
-      this._sm.renderer.toneMapping = THREE.NoToneMapping;
+      // The path tracer's own blit-to-canvas material (ClampedInterpolationMaterial)
+      // only applies a tonemapping curve when renderer.toneMapping is set to
+      // something other than NoToneMapping - it reads the renderer's own mode,
+      // it doesn't apply a fixed curve "internally" regardless of it. Setting
+      // NoToneMapping here (the previous assumption was that path tracing always
+      // tonemaps itself) actually disabled tonemapping for path-traced output
+      // entirely: bright specular fireflies then clip per-channel with no
+      // highlight rolloff, and since red/blue accumulate slightly faster than
+      // green in noisy few-sample regions, that clipping reads as a persistent
+      // magenta/pink tint - most visible exactly where this app's very smooth
+      // clearcoat car paint sits right next to dark trim/glass. Applying the
+      // same tonemapping curve used in PBR mode instead compresses those
+      // outlier bright samples gracefully, same as it does for the rasterizer.
+      this._applyToneMapping(this._config.tonemapping);
       if (!wasEnabled) {
         if (!this._pathTracerReady && !this._pathTracerBuilding) {
           void this._buildPathTracer();
