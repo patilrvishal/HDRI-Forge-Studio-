@@ -1275,19 +1275,21 @@ export class RenderPipeline {
       // every re-fire, or every bloom-slider tweak would restart the BVH build.
       const wasEnabled = this._pathTracingEnabled;
       this._pathTracingEnabled = true;
-      // The path tracer's own blit-to-canvas material (ClampedInterpolationMaterial)
-      // only applies a tonemapping curve when renderer.toneMapping is set to
-      // something other than NoToneMapping - it reads the renderer's own mode,
-      // it doesn't apply a fixed curve "internally" regardless of it. Setting
-      // NoToneMapping here (the previous assumption was that path tracing always
-      // tonemaps itself) actually disabled tonemapping for path-traced output
-      // entirely: bright specular fireflies then clip per-channel with no
-      // highlight rolloff, and since red/blue accumulate slightly faster than
-      // green in noisy few-sample regions, that clipping reads as a persistent
-      // magenta/pink tint - most visible exactly where this app's very smooth
-      // clearcoat car paint sits right next to dark trim/glass. Applying the
-      // same tonemapping curve used in PBR mode instead compresses those
-      // outlier bright samples gracefully, same as it does for the rasterizer.
+      // Path-traced output needs SOME tonemapping curve or bright specular
+      // samples clip per-channel with no highlight rolloff (red/blue saturate
+      // before green in noisy regions -> persistent magenta/pink fringing).
+      // But ACES (the app default, fine for PBR) over-desaturates: because
+      // path tracing gathers the environment's bright small light sources far
+      // more accurately than PBR's blurred PMREM approximation, the metallic
+      // clearcoat car paint hits genuinely high radiance, and ACES pulls those
+      // bright saturated colors hard toward white - washing a vivid paint to
+      // pale white. Khronos "Neutral" tonemapping (built specifically for
+      // product/e-commerce 3D rendering) rolls off highlights gracefully like
+      // a filmic curve, so no fringing, while preserving material hue and
+      // saturation - keeping the paint its true colour. Applied only in
+      // path-trace mode; PBR keeps the user's chosen tonemapping. The
+      // _applyToneMapping() guard above forces Neutral whenever path tracing
+      // is enabled, so this call resolves to it regardless of the config.
       this._applyToneMapping(this._config.tonemapping);
       if (!wasEnabled) {
         if (!this._pathTracerReady && !this._pathTracerBuilding) {
@@ -1411,6 +1413,16 @@ export class RenderPipeline {
 
   private _applyToneMapping(mapping: 'aces' | 'reinhard' | 'linear'): void {
     const r = this._sm.renderer;
+    if (this._pathTracingEnabled) {
+      // Path tracing always uses the Khronos "Neutral" tonemap (see setEngine
+      // for why: ACES over-desaturates the accurately-lit metallic paint).
+      // Centralised here so it survives setToneMapping()/updateConfig() calls
+      // that fire right after setEngine() in the render-settings sync effect,
+      // which would otherwise stomp it back to the rasterizer's curve.
+      r.toneMapping = THREE.NeutralToneMapping;
+      r.toneMappingExposure = this._config.exposure;
+      return;
+    }
     switch (mapping) {
       case 'aces':
         r.toneMapping = THREE.ACESFilmicToneMapping;
