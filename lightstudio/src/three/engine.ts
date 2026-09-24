@@ -880,16 +880,20 @@ export class RenderPipeline {
   private _needsRebuild = false;
 
   // ------ Path-traced "final quality" preview (GPU path tracer, WebGL-based) ---------------
-  /** Max per-channel environment radiance (linear) the path tracer is allowed
-   *  to reflect. Path tracing samples the raw HDRI's true (often very high)
-   *  brightness, whereas PBR reflects a PMREM-prefiltered copy whose HDR peaks
-   *  are compressed far lower - which is why the same metallic paint stays
-   *  saturated in PBR but washes to a white patch under path tracing. Soft-
-   *  clamping the environment fed to the tracer to this ceiling brings its
-   *  bright reflections down to PBR's perceptual level, so the paint keeps its
-   *  colour, while leaving all normal-brightness detail untouched. Calibrated
-   *  against PBR at matched settings. */
-  private static readonly PT_ENV_CLAMP = 3.0;
+  /** Ceiling (linear) on the FINAL per-channel reflected environment radiance
+   *  under path tracing. Path tracing samples the raw HDRI's true (often huge -
+   *  15000+) peak brightness, whereas PBR reflects a PMREM-prefiltered copy
+   *  whose HDR peaks are compressed far lower - which is why the same metallic
+   *  paint stays saturated in PBR but washes toward white under path tracing.
+   *  Soft-clamping the environment to this ceiling brings direct reflections
+   *  down to PBR's perceptual level so the paint keeps its colour, while normal-
+   *  brightness detail is untouched. (Grazing-angle Fresnel still reflects near-
+   *  white on a mirror-finish surface - that is physically correct and also
+   *  happens to real glossy paint; softening it further is a material/roughness
+   *  choice, not something to bake into the renderer.) The clamp is applied in
+   *  final-radiance terms via markPathTracerDirty(), dividing by the current
+   *  environmentIntensity. Calibrated against PBR at matched settings. */
+  private static readonly PT_ENV_CLAMP = 1.5;
   /** Clamped copy of the environment owned by the pipeline (disposed on
    *  replacement); never the shared source texture from EnvironmentLoader. */
   private _pathTracerClampedEnv: THREE.DataTexture | null = null;
@@ -1078,7 +1082,15 @@ export class RenderPipeline {
       }
       if (rawEnvTexture) {
         try {
-          this._pathTracerClampedEnv = clampEquirectForPathTracer(rawEnvTexture, RenderPipeline.PT_ENV_CLAMP);
+          // PT_ENV_CLAMP is the ceiling in FINAL reflected-radiance terms.
+          // scene.environmentIntensity multiplies the sampled env afterward,
+          // so clamp the texels to (ceiling / intensity) - otherwise a high
+          // Global Intensity re-amplifies past the ceiling and the white
+          // patch returns. Rebuilt whenever intensity changes (it's a dep of
+          // the effect that calls this).
+          const envI = Math.max(this._sm.scene.environmentIntensity ?? 1, 0.001);
+          const maxVal = RenderPipeline.PT_ENV_CLAMP / envI;
+          this._pathTracerClampedEnv = clampEquirectForPathTracer(rawEnvTexture, maxVal);
           this._pathTracerRawEnv = this._pathTracerClampedEnv;
         } catch (e) {
           // If the texture data isn't in a form we can read (unexpected
