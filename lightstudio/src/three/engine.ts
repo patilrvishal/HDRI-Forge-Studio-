@@ -880,6 +880,19 @@ export class RenderPipeline {
   private _needsRebuild = false;
 
   // ------ Path-traced "final quality" preview (GPU path tracer, WebGL-based) ---------------
+  /** Max per-channel environment radiance (linear) the path tracer is allowed
+   *  to reflect. Path tracing samples the raw HDRI's true (often very high)
+   *  brightness, whereas PBR reflects a PMREM-prefiltered copy whose HDR peaks
+   *  are compressed far lower - which is why the same metallic paint stays
+   *  saturated in PBR but washes to a white patch under path tracing. Soft-
+   *  clamping the environment fed to the tracer to this ceiling brings its
+   *  bright reflections down to PBR's perceptual level, so the paint keeps its
+   *  colour, while leaving all normal-brightness detail untouched. Calibrated
+   *  against PBR at matched settings. */
+  private static readonly PT_ENV_CLAMP = 3.0;
+  /** Clamped copy of the environment owned by the pipeline (disposed on
+   *  replacement); never the shared source texture from EnvironmentLoader. */
+  private _pathTracerClampedEnv: THREE.DataTexture | null = null;
   private _pathTracer: WebGLPathTracer | null = null;
   /** Target state requested via setEngine - true while the user has the toggle on. */
   private _pathTracingEnabled = false;
@@ -1054,7 +1067,30 @@ export class RenderPipeline {
    *  `rawEnvTexture` (pass explicitly, even as null) updates the raw equirect
    *  HDRI used for path-traced environment lighting - see _pathTracerRawEnv. */
   markPathTracerDirty(rawEnvTexture?: THREE.Texture | null): void {
-    if (rawEnvTexture !== undefined) this._pathTracerRawEnv = rawEnvTexture;
+    if (rawEnvTexture !== undefined) {
+      // Build (and cache) a peak-clamped copy so the tracer reflects the
+      // environment at PBR's perceptual brightness instead of the raw HDRI's
+      // true peaks - see PT_ENV_CLAMP. Dispose the pipeline-owned previous
+      // clamp; never touch the shared source texture.
+      if (this._pathTracerClampedEnv) {
+        this._pathTracerClampedEnv.dispose();
+        this._pathTracerClampedEnv = null;
+      }
+      if (rawEnvTexture) {
+        try {
+          this._pathTracerClampedEnv = clampEquirectForPathTracer(rawEnvTexture, RenderPipeline.PT_ENV_CLAMP);
+          this._pathTracerRawEnv = this._pathTracerClampedEnv;
+        } catch (e) {
+          // If the texture data isn't in a form we can read (unexpected
+          // format), fall back to the unclamped source rather than losing the
+          // environment entirely.
+          console.warn('[HDRI Forge] Env clamp for path tracer failed, using raw env:', e);
+          this._pathTracerRawEnv = rawEnvTexture;
+        }
+      } else {
+        this._pathTracerRawEnv = null;
+      }
+    }
     if (this._pathTracingEnabled) this._pathTracerDirty = true;
   }
 
@@ -1393,6 +1429,11 @@ export class RenderPipeline {
       this._pathTracer.dispose();
       this._pathTracer = null;
     }
+    if (this._pathTracerClampedEnv) {
+      this._pathTracerClampedEnv.dispose();
+      this._pathTracerClampedEnv = null;
+    }
+    this._pathTracerRawEnv = null;
     this._pathTracingEnabled = false;
     this._pathTracerReady = false;
     this._pathTracerBuilding = false;
@@ -2485,6 +2526,49 @@ export function canvasTextureToDataTexture(canvasTex: THREE.CanvasTexture): THRE
   dataTex.flipY = false;
   dataTex.needsUpdate = true;
   return dataTex;
+}
+
+/** Produce a peak-clamped Float32 equirect copy for the path tracer, so its
+ *  bright reflections read at PBR's perceptual level instead of the raw HDRI's
+ *  true peaks (the cause of the "white patch" on mirror-finish paint - see
+ *  RenderPipeline.PT_ENV_CLAMP). Each RGB channel is soft-compressed with a
+ *  Reinhard curve that asymptotes to `maxVal`, so values already below the
+ *  ceiling are essentially untouched while very bright sky/light pixels roll
+ *  off smoothly rather than hard-clipping. Reads the source texture's CPU-side
+ *  pixel data, decoding half-float when needed; throws if the data isn't
+ *  readable (caller falls back to the raw texture). */
+export function clampEquirectForPathTracer(tex: THREE.Texture, maxVal: number): THREE.DataTexture {
+  const img = tex.image as { width: number; height: number; data: ArrayLike<number> };
+  if (!img || !img.data || !img.width || !img.height) {
+    throw new Error('environment texture has no readable pixel data');
+  }
+  const { width, height, data } = img;
+  const texelCount = width * height;
+  const channels = Math.round(data.length / texelCount);
+  if (channels < 3) throw new Error('environment texture has too few channels');
+
+  const isHalf = tex.type === THREE.HalfFloatType || (typeof (data as any).BYTES_PER_ELEMENT === 'number' && !(data instanceof Float32Array) && !(data instanceof Float64Array));
+  const decode = isHalf
+    ? (v: number) => THREE.DataUtils.fromHalfFloat(v)
+    : (v: number) => v;
+
+  const out = new Float32Array(texelCount * 4);
+  // Reinhard-style rolloff: approaches maxVal asymptotically, never exceeds it,
+  // and leaves values well below maxVal almost unchanged.
+  const soft = (c: number) => (c > 0 ? c / (1 + c / maxVal) : 0);
+  for (let i = 0; i < texelCount; i++) {
+    const si = i * channels;
+    const di = i * 4;
+    out[di + 0] = soft(decode(data[si + 0]));
+    out[di + 1] = soft(decode(data[si + 1]));
+    out[di + 2] = soft(decode(data[si + 2]));
+    out[di + 3] = 1;
+  }
+  const clamped = new THREE.DataTexture(out, width, height, THREE.RGBAFormat, THREE.FloatType);
+  clamped.mapping = THREE.EquirectangularReflectionMapping;
+  clamped.flipY = false;
+  clamped.needsUpdate = true;
+  return clamped;
 }
 
 /**
