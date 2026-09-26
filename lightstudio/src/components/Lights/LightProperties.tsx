@@ -9,6 +9,9 @@ import { Dropdown } from '../UI/Dropdown';
 import { ColorPicker } from '../UI/ColorPicker';
 import { sphericalToCartesian, cartesianToSpherical } from '../../utils/math';
 import { colorProfileToHex, hexToKelvin, kelvinToHex } from '../../utils/colorConversion';
+import { findObjectByKey } from '../../three/objectBinding';
+import { useObjectHdriStore } from '../../store/objectHdriStore';
+import { useSceneHierarchyStore } from '../../store/sceneHierarchyStore';
 
 /**
  * Collapsible inspector section with a chevron header — matches the reference
@@ -82,8 +85,56 @@ const FALLOFF_OPTIONS: Array<{ value: string; label: string }> = [
   { value: 'custom', label: 'Custom (1.5)' },
 ];
 
-export const LightProperties: React.FC = () => {
-  const selectedLightId = useLightsStore((s) => s.selectedLightId);
+/** Object lights (a light that IS a scene object): shown when a light has objectKey. */
+const LinkedObjectSection: React.FC<{ light: Light; onUpdate: (u: Partial<Light>) => void }> = ({ light, onUpdate }) => {
+  const removeLight = useLightsStore((s) => s.removeLight);
+  const scene = (window as unknown as { __lightforgeScene?: { scene: import('three').Scene } }).__lightforgeScene?.scene;
+  const obj = scene && light.objectKey ? findObjectByKey(scene, light.objectKey) : null;
+  return (
+    <CollapsibleSection title="Linked Object">
+      <div className="field-row" style={{ marginBottom: 6 }}>
+        <span className="field-label">Object</span>
+        <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: obj ? 'var(--accent-bright)' : 'var(--danger, #f87171)' }}>
+          {obj ? obj.name || obj.type : '(missing)'}
+        </span>
+      </div>
+      <Dropdown
+        label="Emits from"
+        value={light.objectSide ?? 'auto'}
+        options={[
+          { value: 'auto', label: 'Auto (faces the model)' },
+          { value: '+x', label: '+X face' },
+          { value: '-x', label: '-X face' },
+          { value: '+y', label: '+Y face' },
+          { value: '-y', label: '-Y face' },
+          { value: '+z', label: '+Z face' },
+          { value: '-z', label: '-Z face' },
+        ]}
+        onChange={(v) => onUpdate({ objectSide: v as Light['objectSide'] })}
+      />
+      <div style={{ display: 'flex', gap: 12, marginTop: 4, marginBottom: 4 }}>
+        <Toggle label="Object glows" checked={light.objectGlow !== false} onChange={(v) => onUpdate({ objectGlow: v })} variant="glossy" />
+      </div>
+      <div style={{ display: 'flex', gap: 6, marginTop: 4 }}>
+        <button
+          className="btn-sm"
+          disabled={!obj}
+          onClick={() => obj && useSceneHierarchyStore.getState().select(obj.uuid)}
+        >
+          Select object
+        </button>
+        <button className="btn-sm" onClick={() => removeLight(light.id)}>Stop using as light</button>
+      </div>
+      <div style={{ fontSize: 9, color: 'var(--text-dim)', marginTop: 6, lineHeight: 1.4 }}>
+        Position, direction and size follow the object. Move, rotate or scale it and the light follows.
+      </div>
+    </CollapsibleSection>
+  );
+};
+
+export const LightProperties: React.FC<{ lightId?: string }> = ({ lightId }) => {
+  const storeSelectedLightId = useLightsStore((s) => s.selectedLightId);
+  const selectedLightId = lightId ?? storeSelectedLightId;
   const lights = useLightsStore((s) => s.lights);
   const updateLight = useLightsStore((s) => s.updateLight);
   const updateLightTransform = useLightsStore((s) => s.updateLightTransform);
@@ -274,6 +325,7 @@ export const LightProperties: React.FC = () => {
     );
   }
 
+  const isObjectLight = !!light.objectKey;
   const isSpotLike = light.type === 'spot' || light.type === 'rim';
   const isAreaLike = light.type === 'area' || light.type === 'overhead';
   // Every type the engine builds as a PointLight or SpotLight (see
@@ -283,6 +335,7 @@ export const LightProperties: React.FC = () => {
 
   return (
     <div className="light-properties">
+      {isObjectLight && <LinkedObjectSection light={light} onUpdate={handleUpdate} />}
       {/* Header */}
       <CollapsibleSection title="Light Settings">
 
@@ -297,12 +350,14 @@ export const LightProperties: React.FC = () => {
         </div>
 
         {/* Type */}
-        <Dropdown
-          label="Type"
-          value={light.type}
-          options={LIGHT_TYPE_OPTIONS}
-          onChange={handleTypeChange}
-        />
+        {!isObjectLight && (
+          <Dropdown
+            label="Type"
+            value={light.type}
+            options={LIGHT_TYPE_OPTIONS}
+            onChange={handleTypeChange}
+          />
+        )}
 
         {/* Color Profile */}
         <Dropdown
@@ -400,6 +455,8 @@ export const LightProperties: React.FC = () => {
       {/* Area light dimensions */}
       {isAreaLike && (
         <CollapsibleSection title="Dimensions">
+          {!isObjectLight && (
+            <>
           <NumericInput
             label="Width"
             value={light.areaWidth}
@@ -432,6 +489,8 @@ export const LightProperties: React.FC = () => {
             step={0.1}
             onChange={handleAreaHeight}
           />
+</>
+          )}
           <Slider
             label="Edge Softness"
             value={light.edgeSoftness ?? 50}
@@ -440,6 +499,8 @@ export const LightProperties: React.FC = () => {
             step={1}
             onChange={(v) => handleUpdate({ edgeSoftness: v })}
           />
+          {!isObjectLight && (
+            <>
           <Slider
             label="Scale"
             value={areaScale}
@@ -449,6 +510,8 @@ export const LightProperties: React.FC = () => {
             onChange={handleAreaScale}
             unit="x"
           />
+            </>
+          )}
         </CollapsibleSection>
       )}
 
@@ -518,6 +581,8 @@ export const LightProperties: React.FC = () => {
         </CollapsibleSection>
       )}
 
+      {!isObjectLight && (
+        <>
       {/* Position: Spherical */}
       <CollapsibleSection
         title="Position"
@@ -659,6 +724,9 @@ export const LightProperties: React.FC = () => {
           </>
         )}
       </CollapsibleSection>
+
+        </>
+      )}
 
       {/* Collection assignment */}
       <CollapsibleSection title="Advanced Render Collection">

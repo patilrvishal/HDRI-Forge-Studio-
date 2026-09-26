@@ -1,5 +1,6 @@
 import React, { useState, useCallback, useRef, useMemo, useEffect } from 'react';
 import { useLightsStore } from '../../store/lightsStore';
+import { useSceneHierarchyStore } from '../../store/sceneHierarchyStore';
 import { useHDRIShapesStore } from '../../store/hdriShapesStore';
 import { useHDRIAssetStore } from '../../store/hdriAssetStore';
 import { useSceneStore } from '../../store/sceneStore';
@@ -203,14 +204,15 @@ export const LightListPanel: React.FC = () => {
   const selectLight = useCallback(
     (id: string | null) => {
       selectLightRaw(id);
-      if (id) { selectShapeRaw(null); selectHDRIAssetRaw(null); }
+      // A mesh selected in the hierarchy takes priority in the Properties panel, so release it.
+      if (id) { selectShapeRaw(null); selectHDRIAssetRaw(null); useSceneHierarchyStore.getState().select(null); }
     },
     [selectLightRaw, selectShapeRaw, selectHDRIAssetRaw],
   );
   const selectShape = useCallback(
     (id: string | null) => {
       selectShapeRaw(id);
-      if (id) { selectLightRaw(null); selectHDRIAssetRaw(null); }
+      if (id) { selectLightRaw(null); selectHDRIAssetRaw(null); useSceneHierarchyStore.getState().select(null); }
     },
     [selectShapeRaw, selectLightRaw, selectHDRIAssetRaw],
   );
@@ -607,7 +609,7 @@ export const LightListPanel: React.FC = () => {
                       ) : (
                         <span className="light-name-text">{light.name}</span>
                       )}
-                      <span className="light-type-label">{light.type}</span>
+                      <span className="light-type-label">{light.objectKey ? 'object light' : light.type}</span>
                     </div>
                     <div className="light-item-actions">
                       <button

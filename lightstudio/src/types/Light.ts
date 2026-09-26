@@ -80,6 +80,14 @@ export interface Light {
    *  area-type lights (area/overhead) - same control set as an HDRI Shape's
    *  drop shadow, applied as a darkening patch offset from the light. */
   dropShadow?: LightDropShadow;
+  /** When set, this light is an OBJECT LIGHT: it follows the scene object with this
+   *  key (see three/objectBinding.ts) - the object's face becomes the emitting
+   *  rectangle and the object glows. Position, rotation and size are derived. */
+  objectKey?: string;
+  /** Which face of the object emits ('auto' = the face pointing at the model). */
+  objectSide?: 'auto' | '+x' | '-x' | '+y' | '-y' | '+z' | '-z';
+  /** Make the object itself glow in the viewport / path tracer. Default true. */
+  objectGlow?: boolean;
 }
 
 export interface LightDropShadow {

@@ -25,6 +25,7 @@ import { CameraBookmarks } from './CameraBookmarks';
 import { ModelingOverlay } from '../Modeling/ModelingOverlay';
 import { ModelingController } from '../../modeling/ModelingController';
 import { setModelingController } from '../../modeling/bridge';
+import { useObjectHdriStore } from '../../store/objectHdriStore';
 import type { AnimatedProperty } from '../../types/Animation';
 import { MaterialManager } from '../../three/MaterialManager';
 import { useMaterialEditorStore } from '../../store/materialEditorStore';
@@ -98,6 +99,10 @@ export const Viewport: React.FC<ViewportProps> = ({ sceneManagerRef, onScreensho
     // Expose camera store so engine.applyActiveCamera() can read it each frame
     // without creating a circular import between engine.ts and the store.
     (window as unknown as { __cameraStore?: unknown }).__cameraStore = useCameraStore;
+    if (import.meta.env.DEV) {
+      (window as unknown as { __lightsStore?: unknown }).__lightsStore = useLightsStore;
+      (window as unknown as { __objectHdriStore?: unknown }).__objectHdriStore = useObjectHdriStore;
+    }
     // Expose the scene globally so panels outside ThreeSceneProvider
     // (e.g. the bottom HDRI preview dock) can reach it.
     (window as unknown as { __lightforgeScene?: unknown }).__lightforgeScene = sceneManager;
@@ -191,7 +196,7 @@ export const Viewport: React.FC<ViewportProps> = ({ sceneManagerRef, onScreensho
 
     // Blender-style modelling tools (primitives + Edit Mode). Path tracer is told to
     // rebuild whenever geometry or transforms change.
-    const modeling = new ModelingController(sceneManager, { onChanged: () => renderPipeline.markPathTracerDirty() });
+    const modeling = new ModelingController(sceneManager, { onChanged: () => { renderPipeline.markPathTracerDirty(); useObjectHdriStore.getState().touch(); } });
     setModelingController(modeling);
 
     // Phase 9: Apply default environment preset
@@ -363,6 +368,8 @@ export const Viewport: React.FC<ViewportProps> = ({ sceneManagerRef, onScreensho
       // supposedly locked. Mirroring engine.ts's own startRenderLoop() here
       // is what actually wires up both 360 Workspace's scripted-camera-is-
       // orbit-adjustable behavior AND Angle Hunt Mode's real lock.
+      // Object lights follow their objects (moved / resized / hidden) every frame.
+      lightManager.updateBound();
       const scriptedCam = sceneManager.applyActiveCamera();
       if (!scriptedCam) sceneManager.controls.update();
       try {
@@ -1036,6 +1043,9 @@ export const Viewport: React.FC<ViewportProps> = ({ sceneManagerRef, onScreensho
         areaHeight: l.areaHeight,
         edgeSoftness: l.edgeSoftness,
         dropShadow: l.dropShadow,
+        objectKey: l.objectKey,
+        objectSide: l.objectSide,
+        objectGlow: l.objectGlow,
       })),
       smForLights.scene
     );

@@ -35,6 +35,7 @@ import { useSceneStore } from '../store/sceneStore';
 import { RGBELoader } from 'three/addons/loaders/RGBELoader.js';
 import { EXRLoader } from 'three/addons/loaders/EXRLoader.js';
 import { isEXRBuffer } from '../utils/hdriFormat';
+import { HdriObjectCaster } from './HDRIObjects';
 
 // --------- Types ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 
@@ -622,6 +623,11 @@ lights.forEach((l, i) => {
   // multiply on the final summed radiance (so it darkens whatever's actually
   // there - env, other lights - the same way a real drop shadow layer would).
   const shadowPatches = buildLightShadowPatches(lights, capturePoint);
+
+  // Objects the user switched to 'Include in HDRI': ray-cast per pixel so their
+  // real silhouette is painted and lights behind them are occluded.
+  const objCaster = HdriObjectCaster.build(scene);
+  const lightDist = lights.map((l) => (l.type === 'directional' || l.type === 'hemisphere' ? Infinity : l.position.distanceTo(capturePoint)));
   // For each pixel, calculate analytical radiance
   for (let y = 0; y < height; y++) {
     // Pre-compute solid angle for this row
@@ -687,17 +693,32 @@ lights.forEach((l, i) => {
       // Every other light type has no physical footprint (a point/spot/
       // directional/hemisphere light is just a glow, not a card), so they
       // stay purely additive, same as before.
-      for (let i = 0; i < lights.length; i++) {
-        const c = evaluateLightRadiance(lights[i], dir, capturePoint);
-        if (c.coverage !== undefined) {
-          const alpha = Math.max(0, Math.min(1, c.coverage * (lights[i].opacity ?? 1)));
-          r = r * (1 - alpha) + c.r * alpha;
-          g = g * (1 - alpha) + c.g * alpha;
-          b = b * (1 - alpha) + c.b * alpha;
-        } else {
-          r += c.r;
-          g += c.g;
-          b += c.b;
+      const objHit = objCaster ? objCaster.cast(capturePoint, dir) : null;
+      // Pass 0: lights behind an included object (or every light when none is hit),
+      // pass 1: the object itself, pass 2: lights in front of it.
+      for (let pass = 0; pass < 3; pass++) {
+        if (pass === 1) {
+          if (objHit) {
+            r = r * (1 - objHit.alpha) + objHit.r * objHit.alpha;
+            g = g * (1 - objHit.alpha) + objHit.g * objHit.alpha;
+            b = b * (1 - objHit.alpha) + objHit.b * objHit.alpha;
+          }
+          continue;
+        }
+        if (pass === 2 && !objHit) break;
+        for (let i = 0; i < lights.length; i++) {
+          if (objHit && (lightDist[i] > objHit.dist) !== (pass === 0)) continue;
+          const c = evaluateLightRadiance(lights[i], dir, capturePoint);
+          if (c.coverage !== undefined) {
+            const alpha = Math.max(0, Math.min(1, c.coverage * (lights[i].opacity ?? 1)));
+            r = r * (1 - alpha) + c.r * alpha;
+            g = g * (1 - alpha) + c.g * alpha;
+            b = b * (1 - alpha) + c.b * alpha;
+          } else {
+            r += c.r;
+            g += c.g;
+            b += c.b;
+          }
         }
       }
 

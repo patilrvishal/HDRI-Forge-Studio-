@@ -3,6 +3,10 @@ import './modeling.css';
 import { useModelingStore, type Falloff, type MenuKind, type OpField, type PivotMode, type SnapTarget } from '../../store/modelingStore';
 import { getModelingController } from '../../modeling/bridge';
 import { MENUS, contextMenuFor, type MenuItem } from '../../modeling/menus';
+import { objectKey } from '../../three/objectBinding';
+import { useObjectHdriStore } from '../../store/objectHdriStore';
+import { useLightsStore } from '../../store/lightsStore';
+import { enableObjectLight, disableObjectLight, setIncludeInHdri } from '../../three/objectLightApi';
 
 const ctl = () => getModelingController();
 
@@ -365,6 +369,7 @@ function NPanel() {
                 <div className="mdl-field"><label>Metalness</label><input className="mdl-range" type="range" min={0} max={1} step={0.01} value={it.material.metalness} onChange={(e) => c?.setMaterial({ metalness: parseFloat(e.target.value) })} /></div>
                 <div className="mdl-field"><label>Clearcoat</label><input className="mdl-range" type="range" min={0} max={1} step={0.01} value={it.material.clearcoat} onChange={(e) => c?.setMaterial({ clearcoat: parseFloat(e.target.value) })} /></div>
                 <div className="mdl-field"><label>Emission</label><input className="mdl-color" type="color" value={it.material.emissive} onChange={(e) => c?.setMaterial({ emissive: e.target.value })} /></div>
+                <HdriLightQuick />
                 <div className="mdl-field"><label>Shading</label>
                   <select className="mdl-select" value={it.smooth ? 'smooth' : 'flat'} onChange={(e) => c?.toggleSmooth(e.target.value === 'smooth')}>
                     <option value="flat">Flat</option>
@@ -377,6 +382,35 @@ function NPanel() {
         )}
       </div>
     </div>
+  );
+}
+
+/** Quick HDRI include / use-as-light toggles for the active mesh. Full controls live in the Properties panel. */
+function HdriLightQuick() {
+  const c = ctl();
+  const obj = c?.active?.object;
+  const key = obj ? objectKey(obj) : '';
+  const included = useObjectHdriStore((s) => !!s.settings[key]?.include);
+  const light = useLightsStore((s) => s.lights.find((l) => l.objectKey === key));
+  if (!obj) return null;
+  return (
+    <>
+      <div className="mdl-h">HDRI &amp; Light</div>
+      <div className="mdl-field">
+        <label>Include in HDRI</label>
+        <input className="mdl-check" type="checkbox" checked={included} onChange={(e) => setIncludeInHdri(obj, e.target.checked)} />
+      </div>
+      <div className="mdl-field">
+        <label>Use as light</label>
+        <input className="mdl-check" type="checkbox" checked={!!light} onChange={(e) => (e.target.checked ? enableObjectLight(obj) : disableObjectLight(key))} />
+      </div>
+      {light && (
+        <div className="mdl-field">
+          <label>Brightness</label>
+          <input className="mdl-range" type="range" min={0} max={1000} step={1} value={light.brightness} onChange={(e) => useLightsStore.getState().updateLight(light.id, { brightness: parseFloat(e.target.value) })} />
+        </div>
+      )}
+    </>
   );
 }
 

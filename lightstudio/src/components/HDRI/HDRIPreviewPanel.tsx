@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import * as THREE from 'three';
 import { useLightsStore } from '../../store/lightsStore';
+import { useObjectHdriStore } from '../../store/objectHdriStore';
 import { cartesianToSpherical, sphericalToCartesian } from '../../utils/math';
 import { useSceneStore } from '../../store/sceneStore';
 import { useHDRIAssetStore } from '../../store/hdriAssetStore';
@@ -124,6 +125,7 @@ export const HDRIPreviewPanel: React.FC = () => {
     ((window as unknown as { __lightforgeScene?: { scene: THREE.Scene } }).__lightforgeScene) ?? null;
 
   const lights = useLightsStore((s) => s.lights);
+  const objectHdriVersion = useObjectHdriStore((s) => s.version);
   const selectedLightId = useLightsStore((s) => s.selectedLightId);
   const updateLightTransform = useLightsStore((s) => s.updateLightTransform);
   const updateLight = useLightsStore((s) => s.updateLight);
@@ -366,7 +368,7 @@ export const HDRIPreviewPanel: React.FC = () => {
     return () => {
       if (timerRef.current) window.clearTimeout(timerRef.current);
     };
-  }, [livePreview, lights, environment, hdriAssets, shapes, resIndex, renderPreview]);
+  }, [livePreview, lights, environment, hdriAssets, shapes, resIndex, renderPreview, objectHdriVersion]);
 
   /** One-off render on request (e.g. right after a Blender/Maya bridge push),
    *  regardless of the livePreview toggle - skips the initial mount so this

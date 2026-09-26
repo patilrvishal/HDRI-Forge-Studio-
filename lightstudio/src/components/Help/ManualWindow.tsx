@@ -277,6 +277,32 @@ const SECTIONS: ManualSection[] = [
     ],
   },
   {
+    id: 'object-lights',
+    title: 'Object Lights & HDRI Include',
+    category: 'Lights',
+    icon: '💡',
+    content: [
+      { type: 'heading', data: 'Use any object as a light' },
+      { type: 'text', data: 'Select a mesh (in the Scene hierarchy, or click a modelled shape) and open Properties. Under Light, switch on Use as light. The object starts to glow, lights the model, and an Object Light appears in the Lights list. The face that points at the model emits light; change it with Emits from. Move, rotate or scale the object and the light follows.' },
+      { type: 'list', items: [
+        'Full light controls: colour and profile (daylight, tungsten, fluorescent, custom), temperature, Brightness, Opacity, Edge Softness, Drop Shadow, Visible / Solo.',
+        'Object glows: turn off if you only want the light and not a glowing object.',
+        'Works for modelled shapes, imported model parts and whole groups. Imported parts keep their own material for other meshes; only the chosen object glows.',
+        'The light is exported into the HDRI like any area light, and in the path tracer the glowing surface lights the scene.',
+        'Stop using as light restores the object exactly as it was.',
+      ] },
+      { type: 'heading', data: 'Include or exclude an object in the HDRI' },
+      { type: 'text', data: 'Under HDRI Render, Include in HDRI paints the object into the exported HDRI and the HDRI preview as seen from the capture point, using its real silhouette. It also hides any light behind it, so a black object works as a flag / blocker. Excluded objects (the default) never appear in the HDRI.' },
+      { type: 'list', items: [
+        'Intensity: brightness of the object in the HDRI (1 = its own colour).',
+        'Opacity: 100% is solid, lower lets the background show through.',
+        'Colour: use the object material or a custom colour. Make blocker paints it solid black.',
+        'Settings are saved in the scene file.',
+      ] },
+      { type: 'tip', data: 'For a softbox: add a Plane (Shift+A), scale it, place it beside the model and switch on Use as light. Turn on Include in HDRI for a flag or card that should appear in the exported HDRI but is not a light.' },
+    ],
+  },
+  {
     id: 'shortcuts',
     title: 'Keyboard Shortcuts',
     category: 'Reference',

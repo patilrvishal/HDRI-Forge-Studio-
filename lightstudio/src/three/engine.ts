@@ -16,6 +16,8 @@ import type { GroundSettings } from '../types/Scene';
 import { paintGradientOntoContext } from './HDRIExporter';
 import { WebGLPathTracer } from 'three-gpu-pathtracer';
 import { LightProbeGenerator } from 'three/addons/lights/LightProbeGenerator.js';
+import { computeEmitterRect, findObjectByKey, type EmitterSide } from './objectBinding';
+import { ObjectEmitters } from './ObjectEmitters';
 
 let _rectAreaLibInitialized = false;
 function ensureRectAreaLib(): void {
@@ -545,7 +547,7 @@ export class SceneManager {
       // gizmo colors could bleed into the probe's irradiance estimate.
       const hidden: THREE.Object3D[] = [];
       this.scene.traverse((o) => {
-        if (o.visible && (o.userData?.isProxy || o.userData?.isHelper)) hidden.push(o);
+        if (o.visible && (o.userData?.isProxy || o.userData?.isHelper || o.userData?.hideInPathTracer)) hidden.push(o);
       });
       for (const o of hidden) o.visible = false;
 
@@ -1133,7 +1135,7 @@ export class RenderPipeline {
 
     const hidden: THREE.Object3D[] = [];
     scene.traverse((o) => {
-      if (o.visible && (o.userData?.isProxy || o.userData?.isHelper)) {
+      if (o.visible && (o.userData?.isProxy || o.userData?.isHelper || o.userData?.hideInPathTracer)) {
         hidden.push(o);
       }
     });
@@ -1589,6 +1591,10 @@ interface LightSyncEntry {
   areaHeight?: number;
   edgeSoftness?: number;
   dropShadow?: { enabled: boolean; angle: number; distance: number; intensity: number; softness: number };
+  // Object light: follows a scene object (see objectBinding.ts)
+  objectKey?: string;
+  objectSide?: string;
+  objectGlow?: boolean;
 }
 
 interface LightObjectEntry {
@@ -1602,6 +1608,10 @@ export class LightManager {
   private _entries: Map<string, LightObjectEntry> = new Map();
   private _helpers: Map<string, THREE.Object3D> = new Map();
   private _types: Map<string, string> = new Map();
+  private _emitters = new ObjectEmitters();
+  private _bound = new Map<string, { ld: LightSyncEntry; show: boolean }>();
+  private _objCache = new Map<string, THREE.Object3D>();
+  private _frame = 0;
 
   constructor(scene: THREE.Scene) {
     this._scene = scene;
@@ -1638,6 +1648,80 @@ export class LightManager {
 
       this._updateLight(ld, shouldShow);
     }
+
+    this._bound.clear();
+    for (const ld of lights) {
+      if (ld.objectKey) this._bound.set(ld.id, { ld, show: ld.visible && (hasSolo ? ld.solo : true) });
+    }
+    this._objCache.clear();
+    this.updateBound();
+  }
+
+  /**
+   * Object lights: keep each light glued to its object (position, facing, size)
+   * and make the object glow. Runs after every sync and once per frame so moving
+   * or resizing the object moves the light with it.
+   */
+  updateBound(): void {
+    this._frame++;
+    const active = new Set<string>();
+    for (const [id, b] of this._bound) {
+      const entry = this._entries.get(id);
+      const key = b.ld.objectKey!;
+      if (!entry) continue;
+      let obj = this._objCache.get(key) ?? null;
+      if (obj && !obj.parent) obj = null;
+      if (!obj && (this._frame % 20 === 0 || !this._objCache.has(key))) {
+        obj = findObjectByKey(this._scene, key);
+        if (obj) this._objCache.set(key, obj);
+        else this._objCache.delete(key);
+      }
+      const light = entry.object;
+      if (!obj) {
+        light.visible = false;
+        const hp = this._helpers.get(id);
+        if (hp) hp.visible = false;
+        continue;
+      }
+      const rect = computeEmitterRect(obj, new THREE.Vector3(0, 0, 0), (b.ld.objectSide ?? 'auto') as EmitterSide);
+      if (!rect) continue;
+      const show = b.show && obj.visible;
+      light.visible = show;
+      light.position.copy(rect.center);
+      light.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(rect.right, rect.up, rect.normal.clone().negate()));
+      if (light instanceof THREE.RectAreaLight) {
+        light.width = Math.max(0.01, rect.width);
+        light.height = Math.max(0.01, rect.height);
+      }
+      const glow = show && b.ld.objectGlow !== false;
+      // The path tracer lights from the glowing surface itself, so the analytic
+      // area light would count the same emitter twice.
+      light.userData.hideInPathTracer = glow;
+      const helper = this._helpers.get(id);
+      if (helper) {
+        helper.visible = show && b.ld.gearVisible;
+        helper.position.copy(light.position);
+        helper.quaternion.copy(light.quaternion);
+        const prev = helper.userData as { hw?: number; hh?: number };
+        const w = Math.max(0.01, rect.width);
+        const h = Math.max(0.01, rect.height);
+        if (prev.hw === undefined || Math.abs((prev.hw ?? 0) - w) > 1e-4 || Math.abs((prev.hh ?? 0) - h) > 1e-4) {
+          const line = helper.children[0] as THREE.LineLoop | undefined;
+          if (line && line.geometry) {
+            line.geometry.dispose();
+            line.geometry = this._areaRectGeometry(w, h);
+            prev.hw = w;
+            prev.hh = h;
+          }
+        }
+      }
+      if (glow) {
+        const intensity = (b.ld.brightness / 1000) * 10 * (b.ld.opacity / 100);
+        this._emitters.apply(obj, key, new THREE.Color(b.ld.color), intensity);
+        active.add(key);
+      }
+    }
+    this._emitters.keepOnly(active);
   }
 
   private _createLight(ld: LightSyncEntry): void {
@@ -2064,6 +2148,7 @@ export class LightManager {
 
     this._entries.delete(id);
     this._types.delete(id);
+    this._bound.delete(id);
 
     const helper = this._helpers.get(id);
     if (helper) {
@@ -2101,6 +2186,8 @@ export class LightManager {
     for (const id of ids) {
       this._removeLight(id);
     }
+    this._emitters.releaseAll();
+    this._bound.clear();
   }
 }
 

@@ -8,6 +8,7 @@ import { useCameraStore } from '../../store/cameraStore';
 import { useHistoryStore } from '../../store/historyStore';
 import { SceneExporter } from '../../three/SceneExporter';
 import { getModelingController } from '../../modeling/bridge';
+import { useObjectHdriStore } from '../../store/objectHdriStore';
 import { exportSceneAsHDR, exportSceneAsEXR } from '../../three/HDRIExporter';
 import type { SceneManager } from '../../three/engine';
 import { promptForCustomHDRI } from '../../utils/loadCustomHDRI';
@@ -59,6 +60,7 @@ const MENU_DEFINITIONS = (
         useSceneStore.getState().resetScene();
         useLightsStore.getState().clearAllLights();
         getModelingController()?.deserialize([]);
+        useObjectHdriStore.getState().clear();
         useSceneStore.getState().setCamera([5, 3, 5], [0, 0, 0]);
         if (sceneManagerRef?.current) {
           sceneManagerRef.current.setCameraState([5, 3, 5], [0, 0, 0], 45);

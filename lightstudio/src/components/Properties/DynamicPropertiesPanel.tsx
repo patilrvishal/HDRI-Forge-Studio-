@@ -8,6 +8,7 @@ import { useHDRIAssetStore } from '../../store/hdriAssetStore';
 import { LightProperties } from '../Lights/LightProperties';
 import { HDRIShapeProperties } from '../Lights/HDRIShapeProperties';
 import { CustomHDRIProperties } from '../Environment/CustomHDRIProperties';
+import { ObjectHdriLightSection } from './ObjectHdriLightSection';
 
 /* ═══════════════════════════════════════════════════════════════════
    Utility: find a Three.js object by UUID in the scene
@@ -427,6 +428,9 @@ const MeshProperties: React.FC<{
         {/* Transform */}
         <TransformSection obj={obj} onChange={() => setTick((n) => n + 1)} />
 
+        {/* HDRI include/exclude + object as light */}
+        <ObjectHdriLightSection obj={obj} />
+
         {/* Object Info */}
         <CollapsibleSection title="Object Info" defaultOpen={true} icon={
           <svg width="10" height="10" viewBox="0 0 16 16" fill="none" stroke="var(--text-dim)" strokeWidth="1.2">
@@ -545,6 +549,8 @@ const GenericProperties: React.FC<{
 
         {/* Transform */}
         <TransformSection obj={obj} onChange={() => setTick((n) => n + 1)} />
+
+        {nodeType === 'group' && !isColl && <ObjectHdriLightSection obj={obj} />}
 
         {/* Object Info */}
         <CollapsibleSection title="Object Info" defaultOpen={true} icon={
