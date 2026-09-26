@@ -1127,6 +1127,7 @@ export class RenderPipeline {
    *  the gizmo root found via getHelper(). */
   private _withPathTracerEnv<T>(fn: () => T): T {
     const scene = this._sm.scene;
+    floatifyColorAttributes(scene);
     const savedEnv = scene.environment;
     scene.environment = this._pathTracerRawEnv;
 
@@ -1438,8 +1439,13 @@ export class RenderPipeline {
    *  when explicitly leaving path-tracing mode for good. */
   disposePathTracer(): void {
     if (this._pathTracer) {
-      this._pathTracer.dispose();
+      // three-gpu-pathtracer 0.0.22's dispose() references a non-existent
+      // _renderQuad and always throws, so dispose its real members directly.
+      const pt = this._pathTracer as any;
       this._pathTracer = null;
+      pt._quad?.dispose?.();
+      pt._quad?.material?.dispose?.();
+      pt._pathTracer?.dispose?.();
     }
     if (this._pathTracerClampedEnv) {
       this._pathTracerClampedEnv.dispose();
@@ -2664,4 +2670,27 @@ export function createLimboBackground(): THREE.Texture {
   tex.colorSpace = THREE.SRGBColorSpace;
   tex.needsUpdate = true;
   return tex;
+}
+/** GLBs often store vertex colours as normalized Uint8/Uint16. three.js
+ *  normalizes those on the GPU, but three-gpu-pathtracer copies the raw
+ *  integer values (255 instead of 1.0) and multiplies albedo by them - car
+ *  paint came out ~255x too bright and clipped to pale pink/white. Convert
+ *  to Float32 (visually identical for the rasteriser) before tracing. */
+export function floatifyColorAttributes(root: THREE.Object3D): void {
+  root.traverse((o) => {
+    const mesh = o as THREE.Mesh;
+    if (!mesh.isMesh) return;
+    const geo = mesh.geometry;
+    const attr = geo?.attributes?.color as THREE.BufferAttribute | undefined;
+    if (!attr || attr.array instanceof Float32Array) return;
+    const size = attr.itemSize;
+    const out = new Float32Array(attr.count * size);
+    for (let i = 0; i < attr.count; i++) {
+      out[i * size] = attr.getX(i);
+      out[i * size + 1] = attr.getY(i);
+      out[i * size + 2] = attr.getZ(i);
+      if (size > 3) out[i * size + 3] = attr.getW(i);
+    }
+    geo.setAttribute('color', new THREE.BufferAttribute(out, size));
+  });
 }
