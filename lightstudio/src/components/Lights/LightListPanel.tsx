@@ -1,4 +1,5 @@
 import React, { useState, useCallback, useRef, useMemo, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { useLightsStore } from '../../store/lightsStore';
 import { useSceneHierarchyStore } from '../../store/sceneHierarchyStore';
 import { useHDRIShapesStore } from '../../store/hdriShapesStore';
@@ -315,11 +316,13 @@ export const LightListPanel: React.FC = () => {
   // entries before).
   const [addMenuAnchor, setAddMenuAnchor] = useState<{ left: number; top: number; maxHeight: number } | null>(null);
   const addMenuRef = useRef<HTMLDivElement>(null);
+  const addPopupRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (!addMenuOpen) return;
     const onDocClick = (e: MouseEvent) => {
-      if (addMenuRef.current && !addMenuRef.current.contains(e.target as Node)) {
+      const inside = (addMenuRef.current?.contains(e.target as Node) ?? false) || (addPopupRef.current?.contains(e.target as Node) ?? false);
+      if (!inside) {
         setAddMenuOpen(false);
         setAddMenuSub('root');
       }
@@ -691,8 +694,9 @@ export const LightListPanel: React.FC = () => {
           </button>
         </div>
 
-        {addMenuOpen && addMenuAnchor && (
+        {addMenuOpen && addMenuAnchor && createPortal(
           <div
+            ref={addPopupRef}
             className="context-menu"
             style={{ left: addMenuAnchor.left, top: addMenuAnchor.top, minWidth: 170, maxHeight: addMenuAnchor.maxHeight, overflowY: 'auto' }}
             onClick={(e) => e.stopPropagation()}
@@ -739,12 +743,13 @@ export const LightListPanel: React.FC = () => {
                 ))}
               </>
             )}
-          </div>
+          </div>,
+          document.body,
         )}
       </div>
 
       {/* Light context menu */}
-      {contextMenu && (
+      {contextMenu && createPortal(
         <div className="context-menu" style={{ left: contextMenu.x, top: contextMenu.y }}>
           <div className="context-menu-item" onClick={() => {
             const light = lights.find((l) => l.id === contextMenu.lightId);
@@ -769,11 +774,12 @@ export const LightListPanel: React.FC = () => {
             </svg>
             Delete
           </div>
-        </div>
+        </div>,
+        document.body,
       )}
 
       {/* Shape context menu */}
-      {shapeContextMenu && (
+      {shapeContextMenu && createPortal(
         <div className="context-menu" style={{ left: shapeContextMenu.x, top: shapeContextMenu.y }}>
           <div className="context-menu-item" onClick={() => { duplicateShape(shapeContextMenu.shapeId); setShapeContextMenu(null); }}>
             <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round">
@@ -789,7 +795,8 @@ export const LightListPanel: React.FC = () => {
             </svg>
             Delete
           </div>
-        </div>
+        </div>,
+        document.body,
       )}
     </div>
   );
