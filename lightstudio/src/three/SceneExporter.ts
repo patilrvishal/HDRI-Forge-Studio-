@@ -8,6 +8,8 @@ import { getRawModelDataBase64 } from '../store/modelDataStore';
 import { getRawHDRIDataBase64 } from '../store/hdriDataStore';
 import type { AnimationState } from '../types/Animation';
 import type { SceneState } from '../types/Scene';
+import { getModelingController } from '../modeling/bridge';
+import type { EditableObjectJSON } from '../modeling/EditableObject';
 
 // ── Scene file schema ───────────────────────────────────────────────────────
 
@@ -93,6 +95,8 @@ export interface SceneFile {
   materials: unknown[] | null;
   // ── HDRI Assets ──────────────────────────────────────────────────────────
   hdriAssets: unknown[] | null;
+  // ── Meshes built with the modelling tools (primitives + edit mode) ────────
+  modeling?: EditableObjectJSON[];
 }
 
 // ── SceneExporter ──────────────────────────────────────────────────────────
@@ -164,6 +168,7 @@ export class SceneExporter {
       })),
       materials: useMaterialEditorStore.getState().exportMaterials(),
       hdriAssets: useHDRIAssetStore.getState().exportAssets(),
+      modeling: getModelingController()?.serialize() ?? [],
     };
   }
 
@@ -287,6 +292,9 @@ export class SceneExporter {
           'custom.hdr',
         );
       }
+
+      // ── Restore modelled meshes ──────────────────────────────────────────
+      getModelingController()?.deserialize(data.modeling ?? []);
 
       return null;
     } catch (err) {

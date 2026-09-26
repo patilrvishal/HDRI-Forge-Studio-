@@ -22,6 +22,9 @@ import { GizmoManager, type GizmoMode } from '../../three/GizmoManager';
 import { solveLightPaint, smoothNormalAt, computeLightDistance, pickLightForReflection, type PaintMode } from '../../three/LightPaint';
 import { cartesianToSpherical } from '../../utils/math';
 import { CameraBookmarks } from './CameraBookmarks';
+import { ModelingOverlay } from '../Modeling/ModelingOverlay';
+import { ModelingController } from '../../modeling/ModelingController';
+import { setModelingController } from '../../modeling/bridge';
 import type { AnimatedProperty } from '../../types/Animation';
 import { MaterialManager } from '../../three/MaterialManager';
 import { useMaterialEditorStore } from '../../store/materialEditorStore';
@@ -185,6 +188,11 @@ export const Viewport: React.FC<ViewportProps> = ({ sceneManagerRef, onScreensho
     const renderPipeline = new RenderPipeline(sceneManager);
     renderPipelineRef.current = renderPipeline;
     renderPipeline.build();
+
+    // Blender-style modelling tools (primitives + Edit Mode). Path tracer is told to
+    // rebuild whenever geometry or transforms change.
+    const modeling = new ModelingController(sceneManager, { onChanged: () => renderPipeline.markPathTracerDirty() });
+    setModelingController(modeling);
 
     // Phase 9: Apply default environment preset
     const defaultPreset = getHDRIPresetById(useSceneStore.getState().environment.presetId);
@@ -377,6 +385,8 @@ export const Viewport: React.FC<ViewportProps> = ({ sceneManagerRef, onScreensho
 
     return () => {
       observer.disconnect();
+      modeling.dispose();
+      setModelingController(null);
       sceneManager.stopRenderLoop();
       renderPipeline.disposePathTracer();
       renderPipeline.dispose();
@@ -1514,6 +1524,8 @@ export const Viewport: React.FC<ViewportProps> = ({ sceneManagerRef, onScreensho
           {/* Raw position/target/fov snapshots, unrelated to cameraStore - would
               silently do nothing useful against a locked Angle Hunt camera. */}
           {workspaceMode === '360' && <CameraBookmarks sceneManagerRef={sceneManagerRef} />}
+
+          <ModelingOverlay />
 
           {activeTool === 'measure' && (
             <div

@@ -7,6 +7,7 @@ import { useHDRIShapesStore } from '../../store/hdriShapesStore';
 import { useCameraStore } from '../../store/cameraStore';
 import { useHistoryStore } from '../../store/historyStore';
 import { SceneExporter } from '../../three/SceneExporter';
+import { getModelingController } from '../../modeling/bridge';
 import { exportSceneAsHDR, exportSceneAsEXR } from '../../three/HDRIExporter';
 import type { SceneManager } from '../../three/engine';
 import { promptForCustomHDRI } from '../../utils/loadCustomHDRI';
@@ -57,6 +58,7 @@ const MENU_DEFINITIONS = (
         if (!ok) return;
         useSceneStore.getState().resetScene();
         useLightsStore.getState().clearAllLights();
+        getModelingController()?.deserialize([]);
         useSceneStore.getState().setCamera([5, 3, 5], [0, 0, 0]);
         if (sceneManagerRef?.current) {
           sceneManagerRef.current.setCameraState([5, 3, 5], [0, 0, 0], 45);
@@ -196,6 +198,20 @@ const MENU_DEFINITIONS = (
     },
   },
   Create: {
+    mesh: {
+      label: 'Mesh',
+      submenu: {
+        plane: { label: 'Plane', action: () => getModelingController()?.addPrimitive('plane') },
+        cube: { label: 'Cube', action: () => getModelingController()?.addPrimitive('cube') },
+        circle: { label: 'Circle', action: () => getModelingController()?.addPrimitive('circle') },
+        uvsphere: { label: 'UV Sphere', action: () => getModelingController()?.addPrimitive('uvsphere') },
+        icosphere: { label: 'Ico Sphere', action: () => getModelingController()?.addPrimitive('icosphere') },
+        cylinder: { label: 'Cylinder', action: () => getModelingController()?.addPrimitive('cylinder') },
+        cone: { label: 'Cone', action: () => getModelingController()?.addPrimitive('cone') },
+        torus: { label: 'Torus', action: () => getModelingController()?.addPrimitive('torus') },
+        grid: { label: 'Grid', action: () => getModelingController()?.addPrimitive('grid') },
+      },
+    },
     lights: {
       label: 'Lights',
       submenu: {

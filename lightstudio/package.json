@@ -11,7 +11,8 @@
     "preview": "vite preview",
     "tauri": "tauri",
     "desktop:dev": "tauri dev",
-    "desktop:build": "tauri build"
+    "desktop:build": "tauri build",
+    "test:modeling": "esbuild tests/modeling/parity.test.ts --bundle --platform=node --format=esm --outfile=.modtest.mjs --log-level=error && node .modtest.mjs && esbuild tests/modeling/positions.test.ts --bundle --platform=node --format=esm --outfile=.modpos.mjs --log-level=error && node .modpos.mjs tests/modeling/blender_reference_positions.json"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.11.1",
