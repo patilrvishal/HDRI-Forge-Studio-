@@ -1,7 +1,6 @@
 import * as THREE from 'three';
 import { EXRLoader } from 'three/addons/loaders/EXRLoader.js';
 import { encodeEXRRGBA } from '../../src/appearance/exr';
-import { encodeEXR } from '../../src/three/HDRIExporter';
 
 const W = 5, H = 3;
 const px = new Float32Array(W * H * 4);
@@ -24,6 +23,5 @@ function check(name: string, buf: ArrayBuffer) {
   return bad;
 }
 let fails = 0;
-try { fails += check('rgba', encodeEXRRGBA(px, W, H, true)); } catch (e) { console.log('rgba threw', (e as Error).message); fails++; }
-try { fails += check('existing encodeEXR', encodeEXR(px, W, H)); } catch (e) { console.log('existing threw', (e as Error).message); fails++; }
+try { fails += check('rgba', encodeEXRRGBA(px, W, H, true)); fails += check('rgb only', encodeEXRRGBA(px, W, H, false)); } catch (e) { console.log('rgba threw', (e as Error).message); fails++; }
 process.exit(fails ? 1 : 0);
