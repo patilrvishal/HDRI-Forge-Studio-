@@ -3,6 +3,9 @@ import * as THREE from 'three';
 import { useSceneStore } from '../../store/sceneStore';
 import { useLightsStore } from '../../store/lightsStore';
 import { useAppearanceStore } from '../../appearance/appearanceStore';
+import { useHDRIAssetStore } from '../../store/hdriAssetStore';
+import { paintSunToDirection } from '../../hdriedit/paintSun';
+import { PaintModeBar } from './PaintModeBar';
 import { useAnimationStore } from '../../store/animationStore';
 import { ThreeSceneProvider } from '../../hooks/useThreeScene';
 import { SceneManager, RenderPipeline, LightManager, ModelLoader, canvasTextureToDataTexture } from '../../three/engine';
@@ -84,6 +87,7 @@ export const Viewport: React.FC<ViewportProps> = ({ sceneManagerRef, onScreensho
   const lights = useLightsStore((s) => s.lights);
   const appearanceImagesVersion = useAppearanceStore((s) => s.imagesVersion);
   const appearanceAudition = useAppearanceStore((s) => s.audition);
+  const hasSkyAsset = useHDRIAssetStore((s) => s.assets.some((a) => a.kind === 'sky'));
   const selectedLightId = useLightsStore((s) => s.selectedLightId);
   const updateLight = useLightsStore((s) => s.updateLight);
 
@@ -1085,7 +1089,7 @@ export const Viewport: React.FC<ViewportProps> = ({ sceneManagerRef, onScreensho
     const sm = sceneManagerRef.current;
     const lightId = useLightsStore.getState().selectedLightId;
     const shapeId = useHDRIShapesStore.getState().selectedShapeId;
-    if (!container || !sm || (!lightId && !shapeId)) return;
+    if (!container || !sm || (!lightId && !shapeId && paintMode !== 'sun')) return;
 
     const rect = container.getBoundingClientRect();
     const mouse = new THREE.Vector2(
@@ -1109,6 +1113,18 @@ export const Viewport: React.FC<ViewportProps> = ({ sceneManagerRef, onScreensho
     });
 
     const hits = raycaster.intersectObjects(meshes, false);
+
+    // LightPaint the Sun: reflect the view ray off the clicked point and put the sky's sun
+    // along that direction, so its reflection appears exactly where you clicked.
+    if (paintMode === 'sun') {
+      const hit = hits[0];
+      if (!hit) return;
+      const N = smoothNormalAt(hit);
+      const incident = hit.point.clone().sub(sm.camera.position).normalize();
+      const R = incident.clone().sub(N.clone().multiplyScalar(2 * incident.dot(N))).normalize();
+      paintSunToDirection(R);
+      return;
+    }
 
     // An HDRI shape has no 3D position - it only lives on the equirect map -
     // so instead of solving for where a light must sit, mirror the camera's
@@ -1253,6 +1269,7 @@ export const Viewport: React.FC<ViewportProps> = ({ sceneManagerRef, onScreensho
 
     const down = (e: PointerEvent) => {
       if (e.button !== 0) return;
+      if ((e.target as HTMLElement | null)?.closest?.('[data-paint-ui]')) return; // clicks on the mode bar
       paintingRef.current = true;
       paintBoundsRef.current = null;
       sm.controls.enabled = false;
@@ -1449,7 +1466,7 @@ export const Viewport: React.FC<ViewportProps> = ({ sceneManagerRef, onScreensho
         mode={gizmoMode}
         onModeChange={setGizmoMode}
         scaleAllowed={scaleAllowed}
-        disabled={!selectedLightId && !hdriSelectedShapeId}
+        disabled={!selectedLightId && !hdriSelectedShapeId && !hasSkyAsset}
         transformDisabled={!selectedLightId}
         paintActive={paintActive}
         onPaintToggle={() => { setPaintActive((p) => !p); setGizmoMode(null); }}
@@ -1485,6 +1502,7 @@ export const Viewport: React.FC<ViewportProps> = ({ sceneManagerRef, onScreensho
           onDragOver={handleDragOver}
           onDrop={handleDrop}
         >
+          {paintActive && <PaintModeBar mode={paintMode} onMode={setPaintMode} />}
           {isDragging && (
             <div className="drop-overlay">
               <span>Drop .glb or .erik file to load model</span>

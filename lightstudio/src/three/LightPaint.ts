@@ -1,6 +1,6 @@
 ﻿import * as THREE from 'three';
 
-export type PaintMode = 'reflection' | 'illumination' | 'shade' | 'rim' | 'shadow';
+export type PaintMode = 'reflection' | 'illumination' | 'shade' | 'rim' | 'shadow' | 'sun';
 
 export const PAINT_MODES: Array<{ id: PaintMode; label: string; hint: string }> = [
   { id: 'reflection', label: 'Reflection', hint: 'Light appears in the reflection at the clicked point. Best for chrome and car paint.' },
@@ -8,6 +8,7 @@ export const PAINT_MODES: Array<{ id: PaintMode; label: string; hint: string }> 
   { id: 'shade', label: 'Shade', hint: 'Light moves to the opposite side, putting the clicked point in shadow.' },
   { id: 'rim', label: 'Rim', hint: 'Ignores the model. Places the light behind the scene along the camera ray.' },
   { id: 'shadow', label: 'Shadow', hint: 'Pivots the light so its shadow falls on the clicked point.' },
+  { id: 'sun', label: 'Sun', hint: 'Places the sun of a Sky (procedural sky or a light with Sky content) so its reflection lands on the clicked point.' },
 ];
 
 export interface PaintResult {
