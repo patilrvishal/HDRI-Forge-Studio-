@@ -421,11 +421,14 @@ export function applyEdits(base: FloatImage, layers: EditLayer[] | undefined, ct
 
 // ── procedural sky ──────────────────────────────────────────────────────────
 
-/** Render a Preetham procedural sky as an equirectangular float image (alpha = 1). */
+/** Render a Hosek-Wilkie procedural sky as an equirectangular float image (alpha = 1). */
 export function renderSky(p: SkyEnvParams, w: number, h: number): Float32Array {
   const out = new Float32Array(w * h * 4);
   const t = dirTables(w, h);
-  const st = skyState(Math.max(1.7, p.turbidity), p.altitude);
+  // Ground albedo is a real physical input to the sky model itself now (see
+  // evaluate.ts's skySampler for the same change) - it shapes the whole sky's
+  // color/brightness, not just an ad-hoc near-horizon brightness lift.
+  const st = skyState(Math.max(1, p.turbidity), p.altitude, p.albedo);
   const alt = p.altitude * D2R, az = p.azimuth * D2R;
   const sd: [number, number, number] = [Math.cos(alt) * Math.cos(az), Math.sin(alt), Math.cos(alt) * Math.sin(az)];
   // A disc smaller than a pixel would vanish or alias, so keep at least ~1 pixel of radius and
@@ -451,8 +454,7 @@ export function renderSky(p: SkyEnvParams, w: number, h: number): Float32Array {
       if (dy >= 0) {
         if (p.skyVisible) {
           skyRadiance(st, Math.acos(Math.max(0, Math.min(1, dy))), gamma, rgb);
-          const lift = 1 + p.albedo * 0.35 * (1 - dy);
-          r = rgb[0] * lift; g = rgb[1] * lift; b = rgb[2] * lift;
+          r = rgb[0]; g = rgb[1]; b = rgb[2];
         }
         if (p.discVisible && gamma < R * 1.6) {
           const u = clamp01(gamma / R);

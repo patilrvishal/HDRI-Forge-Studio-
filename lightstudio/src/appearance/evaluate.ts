@@ -520,7 +520,11 @@ function scrimSampler(p: ScrimParams, aspect: number): Sampler {
 // ── Sky ─────────────────────────────────────────────────────────────────────
 
 function skySampler(p: SkyParams, aspect: number): Sampler {
-  const st = skyState(Math.max(1.7, p.turbidity), p.altitude);
+  // Ground albedo is now a real physical input to the sky model itself
+  // (Hosek-Wilkie blends between two full datasets fitted at albedo 0 and 1),
+  // not an ad-hoc post-multiply - it changes the whole sky's color/brightness
+  // distribution the way real ground reflectance does, not just the horizon.
+  const st = skyState(Math.max(1, p.turbidity), p.altitude, p.albedo);
   const sunAlt = p.altitude * D2R, sunAz = p.azimuth * D2R;
   const sd: [number, number, number] = [Math.cos(sunAlt) * Math.sin(sunAz), Math.sin(sunAlt), Math.cos(sunAlt) * Math.cos(sunAz)];
   const skyAlpha = sortStops(p.skyAlpha);
@@ -531,7 +535,6 @@ function skySampler(p: SkyParams, aspect: number): Sampler {
   // energy at the real size is kept for any size (bigger disc = dimmer)
   const peak = (60000 * (SUN_RADIUS * SUN_RADIUS)) / (R * R) * Math.max(0, p.energyBoost);
   const rgb: RGB = [0, 0, 0];
-  const albedoLift = 1 + p.albedo * 0.35;
   void aspect;
   return (x, y, o) => {
     const az = x * Math.PI;
@@ -542,9 +545,7 @@ function skySampler(p: SkyParams, aspect: number): Sampler {
     let r = 0, g = 0, b = 0;
     if (p.skyVisible) {
       skyRadiance(st, Math.PI / 2 - alt, gamma, rgb);
-      // ground bounce brightens the low sky
-      const lift = lerp(albedoLift, 1, clamp(alt / (Math.PI / 2)));
-      r = rgb[0] * lift; g = rgb[1] * lift; b = rgb[2] * lift;
+      r = rgb[0]; g = rgb[1]; b = rgb[2];
     }
     if (p.discVisible && gamma < R * 1.6) {
       const t = clamp(gamma / R);
