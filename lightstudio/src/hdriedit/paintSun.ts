@@ -75,10 +75,9 @@ export function paintSunToDirection(dir: THREE.Vector3): 'light' | 'sky' | null 
   const hs = useHDRIAssetStore.getState();
   const asset = hs.assets.find((a) => a.id === hs.selectedAssetId && a.kind === 'sky') ?? hs.assets.find((a) => a.kind === 'sky');
   if (asset?.sky) {
-    let az = Math.atan2(d.z, d.x) * R2D;
-    if (az < 0) az += 360;
-    const el = Math.asin(Math.max(-1, Math.min(1, d.y))) * R2D;
-    hs.updateAsset(asset.id, { sky: { ...asset.sky, sunAzimuth: az, sunElevation: el } });
+    const az = Math.atan2(d.z, d.x) * R2D; // -180..180
+    const el = Math.max(0, Math.min(90, Math.asin(Math.max(-1, Math.min(1, d.y))) * R2D));
+    hs.updateAsset(asset.id, { sky: { ...asset.sky, azimuth: az, altitude: el } });
     return 'sky';
   }
   return null;

@@ -117,13 +117,21 @@ const layer = (kind: Parameters<typeof newEditLayer>[0], f?: (l: EditLayer) => v
 {
   const sky = renderSky(defaultSky(), W, H);
   ok(sky.every(Number.isFinite), 'sky finite');
-  const sun = defaultSky(); const [su, sv] = (() => { const el = sun.sunElevation * Math.PI / 180, az = sun.sunAzimuth * Math.PI / 180; const th = az; const ph = Math.PI / 2 - el; return [th / (2 * Math.PI) + 0.5, ph / Math.PI]; })();
-  ok(px(sky, ((su % 1) + 1) % 1, sv) > 100, `sun is where azimuth/elevation say (${px(sky, ((su % 1) + 1) % 1, sv).toFixed(0)})`);
+  const s0 = defaultSky();
+  const su = ((s0.azimuth * Math.PI) / 180) / (2 * Math.PI) + 0.5, sv = (90 - s0.altitude) / 180;
+  let peak = 0;
+  for (let dy = -2; dy <= 2; dy++) for (let dx = -2; dx <= 2; dx++) peak = Math.max(peak, sky[(Math.floor(sv * H + dy) * W + Math.floor(su * W + dx)) * 4]);
+  ok(peak > 100, `sun is where azimuth/altitude say (peak ${peak.toFixed(0)})`);
   ok(px(sky, 0.5, 0.05, 2) > px(sky, 0.5, 0.05, 0) * 0.8, 'sky is bluish overhead');
   ok(px(sky, 0.3, 0.95) < px(sky, 0.3, 0.2), 'ground is darker than sky');
-  const big = renderSky({ ...defaultSky(), sunSize: 3 }, W, H), std = renderSky(defaultSky(), W, H);
-  ok(Math.abs(sphericalFlux({ data: big, width: W, height: H }) / sphericalFlux({ data: std, width: W, height: H }) - 1) < 0.15, 'a bigger sun keeps the sky energy');
-  void uvToDir;
+  const big = renderSky({ ...s0, discSize: 12 }, 1024, 512), std = renderSky(s0, 1024, 512);
+  ok(Math.abs(sphericalFlux({ data: big, width: 1024, height: 512 }) / sphericalFlux({ data: std, width: 1024, height: 512 }) - 1) < 0.2, 'a bigger disc keeps the sun energy');
+  const hazy = renderSky({ ...s0, turbidity: 9, discVisible: false }, W, H), clear = renderSky({ ...s0, turbidity: 2, discVisible: false }, W, H);
+  ok(px(hazy, 0.5, 0.45) !== px(clear, 0.5, 0.45), 'turbidity changes the sky');
+  const noDisc = renderSky({ ...s0, discVisible: false }, W, H);
+  ok(noDisc[(Math.floor(sv * H) * W + Math.floor(su * W)) * 4] < 50, 'disc visibility off removes the sun');
+  const noSky = renderSky({ ...s0, skyVisible: false }, W, H);
+  ok(noSky[(Math.floor(0.1 * H) * W + 10) * 4] === 0, 'sky visibility off removes the sky');
 }
 
 console.log(fails ? `FAILED ${fails}` : 'hdriedit OK');

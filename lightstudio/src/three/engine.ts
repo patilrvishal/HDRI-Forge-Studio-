@@ -1608,6 +1608,8 @@ interface LightSyncEntry {
   compositeBlend?: string;
   /** Position in the light list: lights at the top render over the ones below. */
   layerIndex?: number;
+  blendMode?: string;
+  blendInvert?: boolean;
 }
 
 interface LightObjectEntry {
@@ -1828,6 +1830,8 @@ export class LightManager {
     lightObj.userData.compositeFilters = ld.compositeFilters;
     lightObj.userData.compositeBlend = ld.compositeBlend;
     lightObj.userData.layerIndex = ld.layerIndex;
+    lightObj.userData.blendMode = ld.blendMode;
+    lightObj.userData.blendInvert = ld.blendInvert;
     lightObj.position.set(px, py, pz);
     lightObj.visible = shouldShow;
 

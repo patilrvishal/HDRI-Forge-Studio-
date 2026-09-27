@@ -144,35 +144,34 @@ export function newEditLayer(kind: EditKind, region?: Partial<EditRegion>): Edit
   };
 }
 
-/** Procedural sky as an HDRI source (no file). */
+/** Procedural sky as an HDRI source (Preetham sky; control names follow HDR Light Studio's Sky content). */
 export interface SkyEnvParams {
-  sunAzimuth: number;
-  sunElevation: number;
-  /** Multiplier on the real sun's angular size (0.53 degrees). */
-  sunSize: number;
-  /** Sun radiance at real size; bigger/smaller suns keep the same energy. */
-  sunIntensity: number;
-  sunColor: string;
+  /** 0-90 degrees: sun height above the horizon. */
+  altitude: number;
+  /** -180..180 degrees: position of the sun around the horizon. */
+  azimuth: number;
+  /** 0-10: particles in the air (dust, moisture). 0 = clear, 10 = hazy. */
   turbidity: number;
-  zenithColor: string;
-  horizonColor: string;
-  groundColor: string;
-  horizonSoftness: number;
-  falloff: number;
-  intensity: number;
+  /** 0-1: how much light the ground reflects back up into the sky. */
+  albedo: number;
+  /** Multiplier on the sun's angular size; the sun keeps its energy, so bigger = dimmer per pixel. */
+  discSize: number;
+  discVisible: boolean;
+  /** Softness of the disc edge (ramp centre to edge). */
+  discFalloff: { pos: number; value: number }[];
+  /** Brightens the sun only. */
+  energyBoost: number;
+  skyVisible: boolean;
 }
 
 export const defaultSky = (): SkyEnvParams => ({
-  sunAzimuth: 200,
-  sunElevation: 40,
-  sunSize: 1,
-  sunIntensity: 30000,
-  sunColor: '#fff4e0',
+  altitude: 40,
+  azimuth: 20,
   turbidity: 3,
-  zenithColor: '#3d74c8',
-  horizonColor: '#bcd4f0',
-  groundColor: '#4a4238',
-  horizonSoftness: 0.04,
-  falloff: 0.7,
-  intensity: 1,
+  albedo: 0.3,
+  discSize: 1,
+  discVisible: true,
+  discFalloff: [{ pos: 0, value: 1 }, { pos: 1, value: 0.6 }],
+  energyBoost: 1,
+  skyVisible: true,
 });

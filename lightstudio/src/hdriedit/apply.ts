@@ -9,6 +9,7 @@
 import { applyFilters, blurPremultiplied, rowSolidAngle, type FloatImage } from '../filters/filters';
 import { gradeRGB, hexToLinear, type RGB } from '../appearance/evaluate';
 import { defaultGlobals } from '../appearance/types';
+import { skyRadiance, skyState, SUN_RADIUS } from '../appearance/preetham';
 import type { EditLayer, EditRegion, SkyEnvParams } from './types';
 
 export interface EditContext {
@@ -420,39 +421,51 @@ export function applyEdits(base: FloatImage, layers: EditLayer[] | undefined, ct
 
 // ── procedural sky ──────────────────────────────────────────────────────────
 
-const SUN_REAL_RADIUS = 0.2657 * D2R;
-
-/** Render a procedural sky as an equirectangular float image (alpha = 1). */
+/** Render a Preetham procedural sky as an equirectangular float image (alpha = 1). */
 export function renderSky(p: SkyEnvParams, w: number, h: number): Float32Array {
   const out = new Float32Array(w * h * 4);
   const t = dirTables(w, h);
-  const zen = hexToLinear(p.zenithColor), hor = hexToLinear(p.horizonColor), gnd = hexToLinear(p.groundColor), sun = hexToLinear(p.sunColor);
-  // sun direction: azimuth 0 = the +X axis (u = 0.5), increasing toward +Z
-  const el = p.sunElevation * D2R, az = p.sunAzimuth * D2R;
-  const sd: [number, number, number] = [Math.cos(el) * Math.cos(az), Math.sin(el), Math.cos(el) * Math.sin(az)];
-  // A disc smaller than a pixel would vanish or alias, so keep at least ~1 pixel of radius
-  // and raise/lower its brightness so the sun still carries exactly the same energy.
-  const R = Math.max(SUN_REAL_RADIUS * Math.max(0.05, p.sunSize), (2 * Math.PI) / w);
-  // energy at real size = intensity * solid angle; other sizes keep that energy
-  const omegaReal = Math.PI * SUN_REAL_RADIUS * SUN_REAL_RADIUS;
-  const peak = (p.sunIntensity * omegaReal) / (Math.PI * R * R);
-  const haze = Math.min(1, Math.max(0, (p.turbidity - 1) / 9));
-  const soft = Math.max(1e-3, p.horizonSoftness);
-  const fall = Math.max(0.1, p.falloff);
+  const st = skyState(Math.max(1.7, p.turbidity), p.altitude);
+  const alt = p.altitude * D2R, az = p.azimuth * D2R;
+  const sd: [number, number, number] = [Math.cos(alt) * Math.cos(az), Math.sin(alt), Math.cos(alt) * Math.sin(az)];
+  // A disc smaller than a pixel would vanish or alias, so keep at least ~1 pixel of radius and
+  // raise/lower its brightness so the sun still carries exactly the same energy.
+  const R = Math.max(SUN_RADIUS * Math.max(0.05, p.discSize), (2 * Math.PI) / w);
+  const peak = (60000 * SUN_RADIUS * SUN_RADIUS) / (R * R) * Math.max(0, p.energyBoost);
+  const rgb: [number, number, number] = [0, 0, 0];
+  const horizonRgb: [number, number, number] = [0, 0, 0];
+  skyRadiance(st, Math.PI / 2 - 0.01, Math.PI / 2, horizonRgb);
+  const ground = clamp01(p.albedo);
+  const falls = [...p.discFalloff].sort((a, b) => a.pos - b.pos);
+  const fall = (x: number) => {
+    if (falls.length === 0) return 1;
+    if (x <= falls[0].pos) return falls[0].value;
+    for (let i = 1; i < falls.length; i++) if (x <= falls[i].pos) { const a = falls[i - 1], b = falls[i]; return lerp(a.value, b.value, (x - a.pos) / (b.pos - a.pos || 1e-6)); }
+    return falls[falls.length - 1].value;
+  };
   for (let y = 0; y < h; y++) {
     for (let x = 0; x < w; x++) {
       const dx = t.sinP[y] * t.cosT[x], dy = t.cosP[y], dz = t.sinP[y] * t.sinT[x];
-      const up = smooth((dy + soft) / (2 * soft));
-      const tt = Math.pow(Math.max(0, dy), fall);
-      const skyMix = Math.min(1, tt * (1 - haze * 0.4));
-      let r = lerp(hor[0], zen[0], skyMix), g = lerp(hor[1], zen[1], skyMix), b = lerp(hor[2], zen[2], skyMix);
-      const ang = Math.acos(Math.max(-1, Math.min(1, dx * sd[0] + dy * sd[1] + dz * sd[2])));
-      const disc = 1 - smooth((ang - R * 0.9) / (R * 0.2));
-      const glow = Math.exp(-Math.pow(ang / (0.12 + haze * 0.35), 2)) * 0.6 * (0.3 + haze);
-      const s = disc * peak + glow;
-      r += s * sun[0]; g += s * sun[1]; b += s * sun[2];
+      const gamma = Math.acos(Math.max(-1, Math.min(1, dx * sd[0] + dy * sd[1] + dz * sd[2])));
+      let r = 0, g = 0, b = 0;
+      if (dy >= 0) {
+        if (p.skyVisible) {
+          skyRadiance(st, Math.acos(Math.max(0, Math.min(1, dy))), gamma, rgb);
+          const lift = 1 + p.albedo * 0.35 * (1 - dy);
+          r = rgb[0] * lift; g = rgb[1] * lift; b = rgb[2] * lift;
+        }
+        if (p.discVisible && gamma < R * 1.6) {
+          const u = clamp01(gamma / R);
+          const f = fall(u) * (gamma <= R ? 1 : Math.max(0, 1 - (gamma - R) / (R * 0.6)));
+          r += peak * f; g += peak * f * 0.94; b += peak * f * 0.85;
+        }
+      } else {
+        // below the horizon: the ground reflects part of the horizon light
+        const k = ground * 0.5 * (p.skyVisible ? 1 : 0);
+        r = horizonRgb[0] * k; g = horizonRgb[1] * k; b = horizonRgb[2] * k;
+      }
       const o = (y * w + x) * 4;
-      out[o] = lerp(gnd[0], r, up) * p.intensity; out[o + 1] = lerp(gnd[1], g, up) * p.intensity; out[o + 2] = lerp(gnd[2], b, up) * p.intensity; out[o + 3] = 1;
+      out[o] = r; out[o + 1] = g; out[o + 2] = b; out[o + 3] = 1;
     }
   }
   return out;

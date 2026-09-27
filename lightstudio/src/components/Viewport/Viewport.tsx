@@ -1053,6 +1053,8 @@ export const Viewport: React.FC<ViewportProps> = ({ sceneManagerRef, onScreensho
         compositeFilters: comp?.enabled && (comp.filters.some((f) => f.enabled) || (comp.blend ?? 'normal') !== 'normal') ? comp.filters : undefined,
         compositeBlend: comp?.enabled ? comp.blend : undefined,
         layerIndex,
+        blendMode: l.blendMode,
+        blendInvert: l.blendInvert,
         solo: l.solo,
         falloff: l.falloff,
         gearVisible: l.gearVisible,

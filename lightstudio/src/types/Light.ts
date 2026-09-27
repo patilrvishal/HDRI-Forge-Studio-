@@ -95,6 +95,10 @@ export interface Light {
   appearance?: LightAppearance;
   /** HDR Textured Area Light settings (area-type lights only). */
   areaTex?: TexturedAreaSettings;
+  /** How the light is blended over the map beneath it in the HDRI (default normal). */
+  blendMode?: import('../appearance/types').AppearanceBlend;
+  /** Invert the light's colours before blending. */
+  blendInvert?: boolean;
 }
 
 /**

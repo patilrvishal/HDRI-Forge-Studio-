@@ -77,6 +77,8 @@ interface ExtractedLight {
   compositeBlend?: AppearanceBlend;
   /** Light list position (0 = top): top lights are painted over the ones below. */
   layerIndex?: number;
+  blendMode?: AppearanceBlend;
+  blendInvert?: boolean;
 }
 
 /** Bilinear sample of a light appearance texture at (u,v) in 0..1, v=0 at the top. */
@@ -765,9 +767,18 @@ lights.forEach((l, i) => {
           const c = evaluateLightRadiance(lights[i], dir, capturePoint);
           if (c.coverage !== undefined) {
             const alpha = Math.max(0, Math.min(1, c.coverage * (lights[i].opacity ?? 1)));
-            r = r * (1 - alpha) + c.r * alpha;
-            g = g * (1 - alpha) + c.g * alpha;
-            b = b * (1 - alpha) + c.b * alpha;
+            const bm = lights[i].blendMode ?? 'normal';
+            let cr = c.r, cg = c.g, cb = c.b;
+            if (lights[i].blendInvert) { cr = Math.max(0, 1 - cr); cg = Math.max(0, 1 - cg); cb = Math.max(0, 1 - cb); }
+            if (bm === 'normal') {
+              r = r * (1 - alpha) + cr * alpha;
+              g = g * (1 - alpha) + cg * alpha;
+              b = b * (1 - alpha) + cb * alpha;
+            } else {
+              r += (blendValue(bm, r, cr) - r) * alpha;
+              g += (blendValue(bm, g, cg) - g) * alpha;
+              b += (blendValue(bm, b, cb) - b) * alpha;
+            }
           } else {
             r += c.r;
             g += c.g;
@@ -910,7 +921,7 @@ lights.forEach((l, i) => {
  */
 function extractLightsFromScene(scene: THREE.Scene, includeAreaMode = false): ExtractedLight[] {
   const lights: ExtractedLight[] = [];
-  let tag: { compositeId?: string; compositeFilters?: FilterSpec[]; compositeBlend?: AppearanceBlend; layerIndex?: number } = {};
+  let tag: { compositeId?: string; compositeFilters?: FilterSpec[]; compositeBlend?: AppearanceBlend; layerIndex?: number; blendMode?: AppearanceBlend; blendInvert?: boolean } = {};
   const push = (l: ExtractedLight) => { lights.push({ ...l, ...tag }); };
   const worldPos = new THREE.Vector3();
   const worldQuat = new THREE.Quaternion();
@@ -924,7 +935,7 @@ function extractLightsFromScene(scene: THREE.Scene, includeAreaMode = false): Ex
     // Skip AmbientLight - no position/direction, adds uniform light to all pixels
     if (child instanceof THREE.AmbientLight) return;
 
-    tag = { compositeId: child.userData.compositeId, compositeFilters: child.userData.compositeFilters as FilterSpec[] | undefined, compositeBlend: child.userData.compositeBlend as AppearanceBlend | undefined, layerIndex: child.userData.layerIndex as number | undefined };
+    tag = { compositeId: child.userData.compositeId, compositeFilters: child.userData.compositeFilters as FilterSpec[] | undefined, compositeBlend: child.userData.compositeBlend as AppearanceBlend | undefined, layerIndex: child.userData.layerIndex as number | undefined, blendMode: child.userData.blendMode as AppearanceBlend | undefined, blendInvert: child.userData.blendInvert as boolean | undefined };
     child.getWorldPosition(worldPos);
 
     // ------ PointLight ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------

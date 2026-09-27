@@ -14,6 +14,8 @@ import { useObjectHdriStore } from '../../store/objectHdriStore';
 import { useSceneHierarchyStore } from '../../store/sceneHierarchyStore';
 import { LightAppearanceSection } from '../Appearance/LightAppearanceSection';
 import { CompositeSection } from './CompositeSection';
+import { BLEND_LABELS } from '../../appearance/types';
+import { BLEND_MODE_LIST } from '../../appearance/presets';
 import { scaledLightPatch } from '../../three/lightScale';
 
 /**
@@ -528,6 +530,17 @@ export const LightProperties: React.FC<{ lightId?: string }> = ({ lightId }) => 
         </CollapsibleSection>
       )}
 
+      {isAreaLike && (
+        <CollapsibleSection title="Blend" defaultOpen={false}>
+          <Dropdown
+            label="Blend mode"
+            value={light.blendMode ?? 'normal'}
+            options={BLEND_MODE_LIST.map((b) => ({ value: b, label: BLEND_LABELS[b] }))}
+            onChange={(v) => handleUpdate({ blendMode: v as Light['blendMode'] })}
+          />
+          <Toggle label="Invert" checked={!!light.blendInvert} variant="glossy" onChange={(v) => handleUpdate({ blendInvert: v })} />
+        </CollapsibleSection>
+      )}
       {isAreaLike && <LightAppearanceSection light={light} onUpdate={handleUpdate} />}
 
       {/* Drop shadow - same control set as an HDRI Shape's, baked into the

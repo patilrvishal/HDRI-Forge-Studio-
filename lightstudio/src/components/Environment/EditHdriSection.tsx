@@ -245,19 +245,16 @@ const SkyControls: React.FC<{ sky: SkyEnvParams; onChange: (s: SkyEnvParams) => 
   const set = (patch: Partial<SkyEnvParams>) => onChange({ ...sky, ...patch });
   return (
     <div>
-      <Slider label="Sun azimuth" value={sky.sunAzimuth} min={0} max={360} step={1} unit="°" onChange={(v) => set({ sunAzimuth: v })} />
-      <Slider label="Sun elevation" value={sky.sunElevation} min={-30} max={90} step={0.5} unit="°" onChange={(v) => set({ sunElevation: v })} />
-      <Slider label="Sun size" value={sky.sunSize} min={0.2} max={12} step={0.05} unit="x" onChange={(v) => set({ sunSize: v })} />
-      <Slider label="Sun intensity" value={sky.sunIntensity} min={0} max={200000} step={100} onChange={(v) => set({ sunIntensity: v })} />
-      <ColorPicker label="Sun colour" color={sky.sunColor} onChange={(v) => set({ sunColor: v })} />
-      <Slider label="Turbidity" value={sky.turbidity} min={1} max={10} step={0.1} onChange={(v) => set({ turbidity: v })} />
-      <ColorPicker label="Zenith" color={sky.zenithColor} onChange={(v) => set({ zenithColor: v })} />
-      <ColorPicker label="Horizon" color={sky.horizonColor} onChange={(v) => set({ horizonColor: v })} />
-      <ColorPicker label="Ground" color={sky.groundColor} onChange={(v) => set({ groundColor: v })} />
-      <Slider label="Horizon softness" value={sky.horizonSoftness} min={0.005} max={0.5} step={0.005} onChange={(v) => set({ horizonSoftness: v })} />
-      <Slider label="Sky falloff" value={sky.falloff} min={0.1} max={4} step={0.05} onChange={(v) => set({ falloff: v })} />
-      <Slider label="Sky brightness" value={sky.intensity} min={0} max={10} step={0.01} onChange={(v) => set({ intensity: v })} />
-      <div style={{ fontSize: 9, color: 'var(--text-dim)' }}>A larger or smaller sun keeps the same energy, so changing its size softens or sharpens shadows without changing exposure.</div>
+      <Slider label="Altitude" value={sky.altitude} min={0} max={90} step={0.5} unit="°" onChange={(v) => set({ altitude: v })} />
+      <Slider label="Azimuth" value={sky.azimuth} min={-180} max={180} step={1} unit="°" onChange={(v) => set({ azimuth: v })} />
+      <Slider label="Turbidity" value={sky.turbidity} min={0} max={10} step={0.1} onChange={(v) => set({ turbidity: v })} />
+      <Slider label="Albedo" value={sky.albedo} min={0} max={1} step={0.01} onChange={(v) => set({ albedo: v })} />
+      <Slider label="Disc size" value={sky.discSize} min={0.1} max={30} step={0.05} unit="x" onChange={(v) => set({ discSize: v })} />
+      <Toggle label="Disc visibility" checked={sky.discVisible} variant="glossy" onChange={(v) => set({ discVisible: v })} />
+      <Slider label="Disc falloff" value={sky.discFalloff[sky.discFalloff.length - 1]?.value ?? 0.6} min={0} max={1} step={0.01} onChange={(v) => set({ discFalloff: [{ pos: 0, value: 1 }, { pos: 1, value: v }] })} />
+      <Slider label="Energy boost" value={sky.energyBoost} min={0} max={20} step={0.05} onChange={(v) => set({ energyBoost: v })} />
+      <Toggle label="Sky visibility" checked={sky.skyVisible} variant="glossy" onChange={(v) => set({ skyVisible: v })} />
+      <div style={{ fontSize: 9, color: 'var(--text-dim)' }}>A larger or smaller disc keeps the sun's energy, so changing its size softens or sharpens shadows without changing exposure. Use LightPaint (Sun mode) to place the sun on the model.</div>
     </div>
   );
 };

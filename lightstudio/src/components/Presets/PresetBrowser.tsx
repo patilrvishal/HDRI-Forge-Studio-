@@ -66,6 +66,17 @@ export const PresetBrowser: React.FC<PresetBrowserProps> = ({ onGenerateThumbnai
   const saveCurrentAsLook = useLooksStore((s) => s.saveCurrentAsLook);
   const applyLook = useLooksStore((s) => s.applyLook);
   const deleteLook = useLooksStore((s) => s.deleteLook);
+  // Looks in tree order: every Look is followed by its children.
+  const orderedLooks = useMemo(() => {
+    const out: typeof looks = [];
+    const walk = (parent: string | null) => {
+      for (const l of looks.filter((x) => (x.parentId ?? null) === parent)) { out.push(l); walk(l.id); }
+    };
+    walk(null);
+    // Looks whose parent no longer exists still show up
+    for (const l of looks) if (!out.includes(l)) out.push(l);
+    return out;
+  }, [looks]);
   const [browserMode, setBrowserMode] = useState<'presets' | 'looks'>('presets');
   // A/B compare: each slot holds a Look id (or null = not set). Clicking
   // "Compare" applies whichever slot ISN'T currently shown, so repeated
@@ -535,7 +546,7 @@ export const PresetBrowser: React.FC<PresetBrowserProps> = ({ onGenerateThumbnai
               <div className="preset-empty">No Looks saved yet — set up your lighting, then Save below</div>
             ) : (
               <div className="preset-grid" style={{ '--preset-thumb-size': `${thumbSize}px` } as React.CSSProperties}>
-                {looks.map((look) => (
+                {orderedLooks.map((look) => (
                   <div
                     key={look.id}
                     className="preset-card"
@@ -566,6 +577,11 @@ export const PresetBrowser: React.FC<PresetBrowserProps> = ({ onGenerateThumbnai
                       </button>
                     </div>
                     <div className="pc-name">{look.name}</div>
+                    {look.parentId && (
+                      <div style={{ fontSize: 8, color: 'var(--accent-bright, #4af)', textAlign: 'center' }}>
+                        ↳ child of {looks.find((p) => p.id === look.parentId)?.name ?? '…'}
+                      </div>
+                    )}
                     <div style={{ fontSize: 8, color: 'var(--text-dim)', padding: '0 4px 3px', textAlign: 'center' }}>
                       {look.lights.length} light{look.lights.length !== 1 ? 's' : ''}
                       {look.hdriShapes.length > 0 ? ` · ${look.hdriShapes.length} shape${look.hdriShapes.length !== 1 ? 's' : ''}` : ''}
@@ -573,6 +589,7 @@ export const PresetBrowser: React.FC<PresetBrowserProps> = ({ onGenerateThumbnai
                     </div>
                     <div style={{ display: 'flex', gap: 3, justifyContent: 'center', padding: '0 2px 3px' }} onClick={(e) => e.stopPropagation()}>
                       <button className="btn-sm" style={{ fontSize: 8, padding: '1px 4px' }} title="Overwrite this Look with the scene as it is now" onClick={async () => { await useLooksStore.getState().updateLookFromCurrent(look.id); showToast(`Updated "${look.name}"`); }}>Update</button>
+                      <button className="btn-sm" style={{ fontSize: 8, padding: '1px 4px' }} title="Save the current scene as a child of this Look: it inherits this Look's lights and adds to them" onClick={async () => { const n = await useUIStore.getState().requestPrompt('Name of the child Look', look.name + ' - variation'); if (n && n.trim()) { const c = await useLooksStore.getState().saveCurrentAsLook(n.trim(), look.id); showToast(`Saved child Look "${c.name}"`); } }}>Child</button>
                       <button className="btn-sm" style={{ fontSize: 8, padding: '1px 4px' }} title="Duplicate this Look" onClick={async () => { const c = await useLooksStore.getState().duplicateLook(look.id); if (c) showToast(`Duplicated as "${c.name}"`); }}>Duplicate</button>
                       <button className="btn-sm" style={{ fontSize: 8, padding: '1px 4px' }} title="Rename this Look" onClick={async () => { const n = await useUIStore.getState().requestPrompt('Rename Look', look.name); if (n && n.trim()) useLooksStore.getState().renameLook(look.id, n.trim()); }}>Rename</button>
                     </div>

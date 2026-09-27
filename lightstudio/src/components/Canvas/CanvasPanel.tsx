@@ -55,7 +55,7 @@ export const CanvasPanel: React.FC = () => {
   const [bake, setBake] = useState<Float32Array | null>(null);
   const [tick, setTick] = useState(0);
   const [status, setStatus] = useState('');
-  const dragRef = useRef<null | { kind: 'move' | 'corner' | 'curve'; id: string; corner?: [number, number]; pts?: { x: number; y: number }[] }>(null);
+  const dragRef = useRef<null | { kind: 'move' | 'corner' | 'curve'; id: string; corner?: [number, number]; pts?: { x: number; y: number }[]; u0?: number; v0?: number; lu?: number; lv?: number }>(null);
   const curveRef = useRef<{ x: number; y: number }[]>([]);
   const bakeGen = useRef(0);
 
@@ -174,7 +174,9 @@ export const CanvasPanel: React.FC = () => {
     const hit = pickLight(u, v);
     if (hit) {
       useLightsStore.getState().selectLight(hit.id);
-      dragRef.current = { kind: hit.corner ? 'corner' : 'move', id: hit.id, corner: hit.corner };
+      const fr = getScene() ? collectLightFrames(getScene()!).get(hit.id) : null;
+      const [lu, lv] = fr ? dirToUv(fr.pos) : [u, v];
+      dragRef.current = { kind: hit.corner ? 'corner' : 'move', id: hit.id, corner: hit.corner, u0: u, v0: v, lu, lv };
     } else {
       dragRef.current = null;
     }
@@ -193,7 +195,17 @@ export const CanvasPanel: React.FC = () => {
     const st = useLightsStore.getState();
     const l = st.lights.find((x) => x.id === d.id);
     if (!l) return;
-    const dir = uvToDir(u, v);
+    // Modifier keys as in HDR Light Studio: Shift = horizontal lock, Ctrl = vertical lock, Alt = fine adjust.
+    let tu = u, tv = v;
+    if (d.kind === 'move' && d.u0 !== undefined && d.lu !== undefined) {
+      const k = e.altKey ? 0.25 : 1;
+      let du = (u - d.u0) * k, dv = (v - (d.v0 ?? v)) * k;
+      if (e.shiftKey) dv = 0;
+      if (e.ctrlKey) du = 0;
+      tu = ((d.lu + du) % 1 + 1) % 1;
+      tv = Math.min(0.999, Math.max(0.001, (d.lv ?? v) + dv));
+    }
+    const dir = uvToDir(tu, tv);
     if (d.kind === 'move') {
       const R = Math.hypot(l.transform.position.x, l.transform.position.y, l.transform.position.z) || 5;
       const p = dir.clone().multiplyScalar(R);
@@ -293,7 +305,7 @@ export const CanvasPanel: React.FC = () => {
           </button>
         ))}
         <span style={{ fontSize: 10, color: 'var(--text-dim)' }}>
-          Drag a light to move it · drag a corner to resize · <b>Shift</b> = keep total energy · wheel scales the selected light
+          Drag a light to move it (<b>Shift</b> horizontal lock · <b>Ctrl</b> vertical lock · <b>Alt</b> fine) · drag a corner to resize (<b>Shift</b> = keep total energy) · wheel scales the selected light
         </span>
         {status && <span style={{ fontSize: 10, color: 'var(--text-sec)' }}>{status}</span>}
       </div>

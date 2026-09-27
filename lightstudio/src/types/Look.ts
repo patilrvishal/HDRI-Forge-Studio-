@@ -33,6 +33,8 @@ export interface LookSnapshot {
   collections: LightCollection[];
   hdri: { id: string; edits?: EditLayer[]; sky?: SkyEnvParams; intensity: number; rotation: number; opacity: number; contrast: number; gamma: number; saturation: number; active: boolean }[];
   objectHdri: Record<string, ObjectHdriSettings>;
+  /** Child Looks: ids of parent lights this Look removes. */
+  removedLightIds?: string[];
 }
 
 export interface Look {
@@ -45,4 +47,6 @@ export interface Look {
   camera: LookCamera | null;
   /** Full-fidelity capture (appearances, composites, HDRI edits, object settings). Older Looks lack it. */
   snapshot?: LookSnapshot;
+  /** Looks form a tree: a child adds to (and can change) the lighting of its parent. */
+  parentId?: string | null;
 }
