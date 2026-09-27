@@ -295,3 +295,10 @@ export const history = {
   resume: () => useHistoryStore.getState().resume(),
   clear: () => useHistoryStore.getState().clear(),
 };
+// Lets the modelling controller decide whether its own undo entry is newer than the app's.
+if (typeof window !== 'undefined') {
+  (window as unknown as { __historyNewest?: () => number }).__historyNewest = () => {
+    const st = useHistoryStore.getState().undoStack;
+    return st.length ? st[st.length - 1].snapshot.timestamp : 0;
+  };
+}

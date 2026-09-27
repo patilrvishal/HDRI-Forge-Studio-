@@ -20,6 +20,21 @@ export interface SceneCamera {
   dofFocusDistance: number;
   dofFStop: number;
   dofBlades: number;
+  /** Where this camera came from - purely informational (a badge in
+   *  CameraPanel), never gates behavior. */
+  source: 'manual' | 'blender' | 'maya';
+  /** Which workspace(s) this camera shows up in - a camera defaults to both,
+   *  so a pushed or manually-created camera is immediately usable in 360
+   *  Workspace and Angle Hunt Mode; the user narrows it via CameraPanel to
+   *  "swap" a camera between workspaces. */
+  workspaces: ('360' | 'angleHunt')[];
+  /** When true, orbit-drag can't touch this camera even in 360 Workspace
+   *  (Angle Hunt Mode already always locks the active camera regardless of
+   *  this flag). Off by default so 360 Workspace's existing "active camera
+   *  is drag-adjustable" behavior is unchanged until the user explicitly
+   *  locks a specific camera via the lock button next to the camera
+   *  switcher. */
+  locked: boolean;
 }
 
 interface CameraState {
@@ -65,6 +80,9 @@ export const useCameraStore = create<CameraState>((set, get) => ({
       dofFocusDistance: fromView?.dofFocusDistance ?? 10,
       dofFStop: fromView?.dofFStop ?? 2.8,
       dofBlades: fromView?.dofBlades ?? 6,
+      source: fromView?.source ?? 'manual',
+      workspaces: fromView?.workspaces ?? ['360', 'angleHunt'],
+      locked: fromView?.locked ?? false,
     };
     set((s) => ({ cameras: [...s.cameras, cam], activeCameraId: id }));
     return id;

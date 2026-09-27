@@ -2,9 +2,15 @@ import React, { useRef, useEffect, useState, useCallback } from 'react';
 import * as THREE from 'three';
 import { useSceneStore } from '../../store/sceneStore';
 import { useLightsStore } from '../../store/lightsStore';
+import { useAppearanceStore } from '../../appearance/appearanceStore';
+import { useHDRIAssetStore } from '../../store/hdriAssetStore';
+import { paintSunToDirection } from '../../hdriedit/paintSun';
+import { PaintModeBar } from './PaintModeBar';
+import { scaledLightPatch } from '../../three/lightScale';
+import { applyComposite } from '../../three/composite';
 import { useAnimationStore } from '../../store/animationStore';
 import { ThreeSceneProvider } from '../../hooks/useThreeScene';
-import { SceneManager, RenderPipeline, LightManager, ModelLoader } from '../../three/engine';
+import { SceneManager, RenderPipeline, LightManager, ModelLoader, canvasTextureToDataTexture } from '../../three/engine';
 import { ErikLoader } from '../../three/ErikLoader';
 import { animationEngine, AnimationEngine } from '../../three/AnimationEngine';
 import { EnvironmentLoader } from '../../three/EnvironmentLoader';
@@ -14,16 +20,23 @@ import { hdriBase64ToArrayBuffer, setRawHDRIData } from '../../store/hdriDataSto
 import { ViewportToolbar } from './ViewportToolbar';
 import { GizmoToolbar } from './GizmoToolbar';
 import { useCameraStore } from '../../store/cameraStore';
+import { useViewportModeStore } from '../../store/viewportModeStore';
 import { CameraSwitcher } from './CameraSwitcher';
 import { ViewportPropertiesPanel } from './ViewportPropertiesPanel';
 import { CameraPanel } from './CameraPanel';
 import { GizmoManager, type GizmoMode } from '../../three/GizmoManager';
-import { solveLightPaint, smoothNormalAt, computeLightDistance, type PaintMode } from '../../three/LightPaint';
+import { solveLightPaint, smoothNormalAt, computeLightDistance, pickLightForReflection, solveCurvePointPaint, type PaintMode } from '../../three/LightPaint';
+import { useCurvePaintStore } from '../../store/curvePaintStore';
 import { cartesianToSpherical } from '../../utils/math';
 import { CameraBookmarks } from './CameraBookmarks';
+import { ModelingOverlay } from '../Modeling/ModelingOverlay';
+import { ModelingController } from '../../modeling/ModelingController';
+import { setModelingController } from '../../modeling/bridge';
+import { useObjectHdriStore } from '../../store/objectHdriStore';
 import type { AnimatedProperty } from '../../types/Animation';
 import { MaterialManager } from '../../three/MaterialManager';
 import { useMaterialEditorStore } from '../../store/materialEditorStore';
+import type { PBRMaterialState } from '../../types/MaterialEditor';
 import { useUIStore } from '../../store/uiStore';
 import { useHDRIShapesStore } from '../../store/hdriShapesStore';
 import { compositeShapesCanvas } from '../../three/HDRIShapesLayer';
@@ -32,6 +45,43 @@ interface ViewportProps {
   sceneManagerRef: React.MutableRefObject<SceneManager | null>;
   onScreenshot: (dataUrl: string) => void;
   onReady?: (renderPipeline: RenderPipeline | null, materialManager: MaterialManager | null) => void;
+}
+
+/**
+ * A primitive/duplicate/split created by the modelling tools gets its own
+ * real THREE.MeshPhysicalMaterial (see EditableObject's constructor), but
+ * extractMaterials() only ever runs once, right after a GLB/.erik model
+ * loads - so those meshes never got an entry in the Material Editor store,
+ * and the main Material tab (not the modelling system's own little N-panel)
+ * silently showed nothing for them. Called on every modelling change; cheap
+ * (a handful of objects at most) and additive - only registers materials
+ * this store doesn't already know about (so it never disturbs anything
+ * already tracked), then focuses the Material tab on whichever shape was
+ * just created.
+ */
+function syncModelingMaterials(modeling: ModelingController, materialManager: MaterialManager): void {
+  const store = useMaterialEditorStore.getState();
+  const trackedNames = new Set(store.materials.map((m) => m.name));
+  const additions: PBRMaterialState[] = [];
+  let index = store.materials.length;
+
+  for (const obj of modeling.objects.values()) {
+    const mat = obj.object.material;
+    if (Array.isArray(mat) || !mat.name || trackedNames.has(mat.name)) continue;
+    const state = materialManager.registerAdHocMaterial(obj.object, index++);
+    if (state) {
+      additions.push(state);
+      trackedNames.add(state.name);
+    }
+  }
+
+  if (additions.length === 0) return;
+  useMaterialEditorStore.getState().addMaterials(additions);
+  // Jump the Material tab to the just-created shape's new material, the same
+  // way most 3D tools focus a newly added object's properties - this only
+  // ever runs on a FRESH addition (an already-tracked material is skipped
+  // above), never on an unrelated change to something else already selected.
+  useMaterialEditorStore.getState().selectMaterial(additions[additions.length - 1].id);
 }
 
 export const Viewport: React.FC<ViewportProps> = ({ sceneManagerRef, onScreenshot, onReady }) => {
@@ -45,6 +95,7 @@ export const Viewport: React.FC<ViewportProps> = ({ sceneManagerRef, onScreensho
   const materialManagerRef = useRef<MaterialManager | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const animAccumulatorRef = useRef(0);
+  const giAccumulatorRef = useRef(0);
   const mouseDownPos = useRef<{ x: number; y: number } | null>(null);
 
   const [isDragging, setIsDragging] = useState(false);
@@ -59,7 +110,7 @@ export const Viewport: React.FC<ViewportProps> = ({ sceneManagerRef, onScreensho
   const hdriShapes = useHDRIShapesStore((s) => s.shapes);
   const hdriLivePreview = useHDRIShapesStore((s) => s.livePreview);
   const hdriSelectedShapeId = useHDRIShapesStore((s) => s.selectedShapeId);
-  const updateHDRIShape = useHDRIShapesStore((s) => s.updateShape);
+  const moveHDRIShapeAndGroup = useHDRIShapesStore((s) => s.moveShapeAndGroup);
   const renderSettings = useSceneStore((s) => s.renderSettings);
   const setModel = useSceneStore((s) => s.setModel);
   const setExposure = useSceneStore((s) => s.setExposure);
@@ -75,8 +126,23 @@ export const Viewport: React.FC<ViewportProps> = ({ sceneManagerRef, onScreensho
   const backplateOpacity = useSceneStore((s) => s.environment.backplateOpacity);
 
   const lights = useLightsStore((s) => s.lights);
+  const collections = useLightsStore((s) => s.collections);
+  const appearanceImagesVersion = useAppearanceStore((s) => s.imagesVersion);
+  const appearanceAudition = useAppearanceStore((s) => s.audition);
+  const shiftHeldRef = useRef(false);
+  useEffect(() => {
+    const dn = (e: KeyboardEvent) => { if (e.key === 'Shift') shiftHeldRef.current = true; };
+    const up = (e: KeyboardEvent) => { if (e.key === 'Shift') shiftHeldRef.current = false; };
+    window.addEventListener('keydown', dn);
+    window.addEventListener('keyup', up);
+    return () => { window.removeEventListener('keydown', dn); window.removeEventListener('keyup', up); };
+  }, []);
+  const hasSkyAsset = useHDRIAssetStore((s) => s.assets.some((a) => a.kind === 'sky'));
   const selectedLightId = useLightsStore((s) => s.selectedLightId);
   const updateLight = useLightsStore((s) => s.updateLight);
+
+  const workspaceMode = useViewportModeStore((s) => s.mode);
+  const activeCameraId = useCameraStore((s) => s.activeCameraId);
 
   // Animation store selectors (non-reactive - read inside the loop via getState)
   // We only use isPlaying for the dependency to know if animation is active
@@ -90,6 +156,10 @@ export const Viewport: React.FC<ViewportProps> = ({ sceneManagerRef, onScreensho
     // Expose camera store so engine.applyActiveCamera() can read it each frame
     // without creating a circular import between engine.ts and the store.
     (window as unknown as { __cameraStore?: unknown }).__cameraStore = useCameraStore;
+    if (import.meta.env.DEV) {
+      (window as unknown as { __lightsStore?: unknown }).__lightsStore = useLightsStore;
+      (window as unknown as { __objectHdriStore?: unknown }).__objectHdriStore = useObjectHdriStore;
+    }
     // Expose the scene globally so panels outside ThreeSceneProvider
     // (e.g. the bottom HDRI preview dock) can reach it.
     (window as unknown as { __lightforgeScene?: unknown }).__lightforgeScene = sceneManager;
@@ -100,6 +170,7 @@ export const Viewport: React.FC<ViewportProps> = ({ sceneManagerRef, onScreensho
 
     const modelLoader = new ModelLoader(sceneManager.scene);
     modelLoaderRef.current = modelLoader;
+    if (import.meta.env.DEV) (window as unknown as { __modelLoader?: unknown }).__modelLoader = modelLoader;
 
     const erikLoader = new ErikLoader(sceneManager.scene, sceneManager.renderer);
     erikLoaderRef.current = erikLoader;
@@ -107,6 +178,7 @@ export const Viewport: React.FC<ViewportProps> = ({ sceneManagerRef, onScreensho
     // Material Manager
     const materialManager = new MaterialManager();
     materialManagerRef.current = materialManager;
+    if (import.meta.env.DEV) (window as unknown as { __materialManager?: unknown }).__materialManager = materialManager;
 
     // Phase 9: Environment loader
     const envLoader = new EnvironmentLoader();
@@ -180,6 +252,17 @@ export const Viewport: React.FC<ViewportProps> = ({ sceneManagerRef, onScreensho
     const renderPipeline = new RenderPipeline(sceneManager);
     renderPipelineRef.current = renderPipeline;
     renderPipeline.build();
+
+    // Blender-style modelling tools (primitives + Edit Mode). Path tracer is told to
+    // rebuild whenever geometry or transforms change.
+    const modeling = new ModelingController(sceneManager, {
+      onChanged: () => {
+        renderPipeline.markPathTracerDirty();
+        useObjectHdriStore.getState().touch();
+        syncModelingMaterials(modeling, materialManager);
+      },
+    });
+    setModelingController(modeling);
 
     // Phase 9: Apply default environment preset
     const defaultPreset = getHDRIPresetById(useSceneStore.getState().environment.presetId);
@@ -316,13 +399,44 @@ export const Viewport: React.FC<ViewportProps> = ({ sceneManagerRef, onScreensho
           console.warn('[LightForge] CubeCamera update failed, disabling reflections:', e);
           if (sceneManager._floorCubeCamera) {
             sceneManager.scene.remove(sceneManager._floorCubeCamera);
-            sceneManager._floorCubeCamera.dispose();
+            (sceneManager._floorCubeCamera as unknown as { dispose?: () => void }).dispose?.();
             sceneManager._floorCubeCamera = null;
           }
         }
       }
 
-      sceneManager.controls.update();
+      // ------ Global illumination: periodic light-probe re-bake ---------------------------------------------------
+      // Throttled (not every frame) - bakeLightProbe() does a synchronous
+      // GPU readback (see LightProbeGenerator), and a probe only needs to
+      // track slow-changing bounce lighting, not track every frame like a
+      // reflection would.
+      if (sceneManager._giEnabled) {
+        giAccumulatorRef.current += delta;
+        if (giAccumulatorRef.current >= 1) {
+          giAccumulatorRef.current = 0;
+          sceneManager.bakeLightProbe();
+        }
+      } else {
+        giAccumulatorRef.current = 0;
+      }
+
+      // Drive the viewport from the active scripted camera (cameraStore), if
+      // any - this is what applyActiveCamera() has always been for, but this
+      // loop is the app's real render loop (SceneManager.startRenderLoop()
+      // is never called), so calling controls.update() unconditionally here
+      // meant applyActiveCamera() never actually ran: an active camera
+      // changed the view once (via the "sync render settings" style effects
+      // elsewhere) but nothing reasserted it frame-to-frame, so orbit-drag
+      // just freely spun the live camera with no lock and no write-back ever
+      // engaging - confirmed live via a drag test that silently moved an
+      // "active" camera's stored position/rotation with Angle Hunt Mode
+      // supposedly locked. Mirroring engine.ts's own startRenderLoop() here
+      // is what actually wires up both 360 Workspace's scripted-camera-is-
+      // orbit-adjustable behavior AND Angle Hunt Mode's real lock.
+      // Object lights follow their objects (moved / resized / hidden) every frame.
+      lightManager.updateBound();
+      const scriptedCam = sceneManager.applyActiveCamera();
+      if (!scriptedCam) sceneManager.controls.update();
       try {
         renderPipeline.render();
       } catch (e) {
@@ -343,7 +457,10 @@ export const Viewport: React.FC<ViewportProps> = ({ sceneManagerRef, onScreensho
 
     return () => {
       observer.disconnect();
+      modeling.dispose();
+      setModelingController(null);
       sceneManager.stopRenderLoop();
+      renderPipeline.disposePathTracer();
       renderPipeline.dispose();
       modelLoader.dispose();
       erikLoader.dispose();
@@ -366,7 +483,11 @@ export const Viewport: React.FC<ViewportProps> = ({ sceneManagerRef, onScreensho
     sceneManagerRef.current?.setGrid(showGrid);
   }, [showGrid, sceneManagerRef]);
 
-  // Backplate: render as scene.background when set
+  // Backplate: render as scene.background when set. Composited onto a
+  // solid-color canvas rather than assigned as scene.background directly -
+  // Three.js's scene.background holds a single Color OR Texture, it can't
+  // blend a texture at partial alpha over a color by itself, so the opacity
+  // slider needs this canvas pre-composite to do anything at all.
   const backplateTextureRef = useRef<THREE.Texture | null>(null);
 
   useEffect(() => {
@@ -374,21 +495,35 @@ export const Viewport: React.FC<ViewportProps> = ({ sceneManagerRef, onScreensho
     if (!sm) return;
 
     if (backplate) {
-      // Load backplate as texture for background
       if (backplateTextureRef.current) {
         backplateTextureRef.current.dispose();
         backplateTextureRef.current = null;
       }
-      const loader = new THREE.TextureLoader();
-      loader.load(backplate, (tex) => {
+
+      const img = new Image();
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        canvas.width = img.naturalWidth || 1;
+        canvas.height = img.naturalHeight || 1;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) return;
+
+        // Solid backdrop the photo fades toward as opacity drops - the same
+        // color "Show BG" uses, so dialing opacity down reads as fading to
+        // the scene's own background color, not to black.
+        ctx.fillStyle = useSceneStore.getState().environment.background;
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.globalAlpha = Math.max(0, Math.min(1, backplateOpacity));
+        ctx.drawImage(img, 0, 0);
+
+        const tex = new THREE.CanvasTexture(canvas);
         tex.colorSpace = THREE.SRGBColorSpace;
         tex.minFilter = THREE.LinearFilter;
         tex.magFilter = THREE.LinearFilter;
         backplateTextureRef.current = tex;
-        if (backplateOpacity >= 0.99) {
-          sm.scene.background = tex;
-        }
-      });
+        sm.scene.background = tex;
+      };
+      img.src = backplate;
     } else {
       if (backplateTextureRef.current) {
         backplateTextureRef.current.dispose();
@@ -514,8 +649,23 @@ export const Viewport: React.FC<ViewportProps> = ({ sceneManagerRef, onScreensho
     if (!sm || !el) return;
 
     if (environment.presetId === '__custom__' && environment.hdri) {
+      // Guards against a stale-closure race: if this effect re-fires (rotation
+      // or showBackground changed again) before the previous loadHDRI() call
+      // resolves, the OLDER promise settling later must not stomp state with
+      // outdated data - including the path tracer's raw env below, which was
+      // the actual cause of the HDRI intermittently vanishing under path
+      // tracing. The raw-env computation used to live in a separate effect
+      // that read envLoader.getEquirectTexture() synchronously - since
+      // loadHDRI() is async, that effect very often ran BEFORE the real
+      // texture was ready (capturing null/stale data) with no guaranteed
+      // follow-up once loading actually finished, unless some unrelated
+      // re-render happened to trigger it again later. Notifying the path
+      // tracer directly here, exactly when the freshly-loaded texture
+      // becomes available, removes that race entirely.
+      let cancelled = false;
       el.loadHDRI(environment.hdri, sm.pmremGenerator)
         .then((envTexture) => {
+          if (cancelled) return;
           el.setEnvironmentTexture(sm.scene, envTexture, environment.intensity);
 
           // Rotate the HDRI natively (equirect textures are not re-baked)
@@ -525,12 +675,17 @@ export const Viewport: React.FC<ViewportProps> = ({ sceneManagerRef, onScreensho
 
           // Show the HDRI as a 360deg backplate in the viewport
           el.setBackgroundFromEnv(sm.scene, environment.showBackground);
+
+          renderPipelineRef.current?.markPathTracerDirty(el.getEquirectTexture());
         })
         .catch((e) => {
           // Do NOT fall back to a built-in preset - that silently replaces the
           // user's custom HDRI with studio-neutral.
           console.error('[LightForge] Custom HDRI load failed:', e);
         });
+      return () => {
+        cancelled = true;
+      };
     } else if (environment.presetId !== '__custom__') {
       // Not custom - clear any HDRI backplate, unless a gradient owns the bg
       if (!environment.gradientBackground?.enabled) {
@@ -545,6 +700,7 @@ export const Viewport: React.FC<ViewportProps> = ({ sceneManagerRef, onScreensho
     environment.showBackground,
     sceneManagerRef,
     envLoaderRef,
+    renderPipelineRef,
   ]);
 
   // Apply environment intensity WITHOUT reloading the texture.
@@ -603,6 +759,43 @@ export const Viewport: React.FC<ViewportProps> = ({ sceneManagerRef, onScreensho
     sm.scene.backgroundRotation = new THREE.Euler(0, 0, 0);
     sm.scene.environmentRotation = new THREE.Euler(0, 0, 0);
   }, [hdriShapes, hdriLivePreview, environment.gradientBackground, environment.intensity, environment.presetId, sceneManagerRef, envLoaderRef]);
+
+  // Path-traced preview mode holds a snapshot of the scene (geometry, lights,
+  // materials, environment) the moment it's built - editing anything after
+  // that wouldn't show up until the mode is toggled off and back on. Flag
+  // the snapshot stale on the changes a lighting-studio session actually
+  // makes while in this mode, so RenderPipeline.render() rebuilds it on the
+  // next frame instead. No-op when path tracing isn't active.
+  useEffect(() => {
+    // Raw (pre-PMREM) equirect texture for path-traced environment lighting -
+    // see the _pathTracerRawEnv doc comment in RenderPipeline. A real loaded
+    // HDRI file takes priority; otherwise, when Gradient Background is on,
+    // reuse the same raw equirect CanvasTexture createGradientBackground()
+    // already painted for the visible backdrop (setGradientBackground() sets
+    // it as scene.background) - it's already real per-pixel equirect data,
+    // not PMREM, so it's just as usable as a loaded HDRI for IBL. Without
+    // this, every gradient-background scene (the default look) traced with
+    // zero environment lighting - lights-only, no fill from the sky dome.
+    const sm = sceneManagerRef.current;
+    const bg = sm?.scene.background;
+    const gradientRawEnv =
+      environment.gradientBackground?.enabled && bg instanceof THREE.CanvasTexture
+        ? canvasTextureToDataTexture(bg)
+        : null;
+    const equirectTex = envLoaderRef.current?.getEquirectTexture() ?? null;
+    // A custom HDRI is configured but its texture isn't loaded yet (the
+    // dedicated load-completion effect below notifies the path tracer itself
+    // once it's actually ready) - don't overwrite a previously-good raw env
+    // with null just because this effect happened to run mid-reload; that's
+    // exactly what made the environment intermittently vanish under path
+    // tracing. Only pass null through when there's genuinely no HDRI source
+    // configured at all.
+    if (environment.presetId === '__custom__' && environment.hdri && !equirectTex) {
+      return;
+    }
+    const rawEnv = equirectTex ?? gradientRawEnv;
+    renderPipelineRef.current?.markPathTracerDirty(rawEnv);
+  }, [lights, hdriShapes, environment.presetId, environment.rotation, environment.intensity, environment.hdri, environment.gradientBackground, environment.background, environment.showBackground, renderSettings.engine, envLoaderRef, sceneManagerRef]);
 
   // Restore model from scene file (triggered when _pendingModelDataBase64 is set)
   useEffect(() => {
@@ -667,6 +860,14 @@ export const Viewport: React.FC<ViewportProps> = ({ sceneManagerRef, onScreensho
     clearPendingHDRIData();
   }, [pendingHDRIData, sceneManagerRef, envLoaderRef, clearPendingHDRIData]);
 
+  // Angle Hunt Mode: lock the viewport to the active camera once one exists.
+  // With no active camera yet, stay free-look so switching into the mode
+  // doesn't strand the user in a frozen empty view before they've picked or
+  // pushed a shot.
+  useEffect(() => {
+    sceneManagerRef.current?.setViewportLocked(workspaceMode === 'angleHunt' && !!activeCameraId);
+  }, [workspaceMode, activeCameraId, sceneManagerRef]);
+
   // Sync render settings
   useEffect(() => {
     const rp = renderPipelineRef.current;
@@ -699,10 +900,15 @@ export const Viewport: React.FC<ViewportProps> = ({ sceneManagerRef, onScreensho
         renderSettings.colorGrading.contrast,
         renderSettings.colorGrading.saturation
       );
+      const sm = sceneManagerRef.current;
+      if (sm) {
+        sm.setGIEnabled(renderSettings.gi.enabled);
+        sm.setGIIntensity(renderSettings.gi.intensity);
+      }
     } catch (e) {
       console.error('[LightForge] Failed to sync render settings:', e);
     }
-  }, [renderSettings, renderPipelineRef]);
+  }, [renderSettings, renderPipelineRef, sceneManagerRef]);
 
   // -- Transform gizmo --------------------------------------------------------
   const gizmoRef = useRef<GizmoManager | null>(null);
@@ -742,10 +948,8 @@ export const Viewport: React.FC<ViewportProps> = ({ sceneManagerRef, onScreensho
           });
 
           if (l.type === 'area' || l.type === 'overhead') {
-            st.updateLight(lightId, {
-              areaWidth: Math.max(0.1, (l.areaWidth ?? 2) * data.scale.x),
-              areaHeight: Math.max(0.1, (l.areaHeight ?? 2) * data.scale.y),
-            });
+            // Shift while scaling = Energy-Conserving Light Scaling (total output stays constant)
+            st.updateLight(lightId, scaledLightPatch(l, (l.areaWidth ?? 2) * data.scale.x, (l.areaHeight ?? 2) * data.scale.y, shiftHeldRef.current && (data.scale.x !== 1 || data.scale.y !== 1)));
           }
         },
       },
@@ -884,17 +1088,23 @@ export const Viewport: React.FC<ViewportProps> = ({ sceneManagerRef, onScreensho
     if (!smForLights) return;
 
     lightManagerRef.current?.syncLights(
-      lights.map((l) => ({
+      lights.map((l, layerIndex) => { const comp = collections.find((c) => c.id === l.collectionId)?.composite; const adj = applyComposite(l, comp); return {
         id: l.id,
         type: l.type,
         color: l.color,
-        brightness: l.brightness,
-        opacity: l.opacity,
-        visible: l.visible,
+        brightness: adj.brightness,
+        opacity: adj.opacity,
+        visible: adj.visible,
+        compositeId: comp?.enabled ? l.collectionId ?? undefined : undefined,
+        compositeFilters: comp?.enabled && (comp.filters.some((f) => f.enabled) || (comp.blend ?? 'normal') !== 'normal') ? comp.filters : undefined,
+        compositeBlend: comp?.enabled ? comp.blend : undefined,
+        layerIndex,
+        blendMode: l.blendMode,
+        blendInvert: l.blendInvert,
         solo: l.solo,
         falloff: l.falloff,
         gearVisible: l.gearVisible,
-        transform: l.transform,
+        transform: comp?.enabled ? { ...l.transform, spherical: adj.spherical, position: adj.position } : l.transform,
         spotAngle: l.spotAngle,
         spotPenumbra: l.spotPenumbra,
         spotDecay: 2,
@@ -902,10 +1112,15 @@ export const Viewport: React.FC<ViewportProps> = ({ sceneManagerRef, onScreensho
         areaHeight: l.areaHeight,
         edgeSoftness: l.edgeSoftness,
         dropShadow: l.dropShadow,
-      })),
-      smForLights.scene
+        objectKey: l.objectKey,
+        objectSide: l.objectSide,
+        objectGlow: l.objectGlow,
+        appearance: appearanceAudition && appearanceAudition.lightId === l.id ? appearanceAudition.appearance : l.appearance,
+        areaTex: l.areaTex,
+      }; }),
     );
-  }, [lights, lightManagerRef, sceneManagerRef]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lights, collections, appearanceImagesVersion, appearanceAudition, lightManagerRef, sceneManagerRef]);
 
   // Sync turntable state to SceneManager
   useEffect(() => {
@@ -934,7 +1149,7 @@ export const Viewport: React.FC<ViewportProps> = ({ sceneManagerRef, onScreensho
     const sm = sceneManagerRef.current;
     const lightId = useLightsStore.getState().selectedLightId;
     const shapeId = useHDRIShapesStore.getState().selectedShapeId;
-    if (!container || !sm || (!lightId && !shapeId)) return;
+    if (!container || !sm || (!lightId && !shapeId && paintMode !== 'sun')) return;
 
     const rect = container.getBoundingClientRect();
     const mouse = new THREE.Vector2(
@@ -958,6 +1173,54 @@ export const Viewport: React.FC<ViewportProps> = ({ sceneManagerRef, onScreensho
     });
 
     const hits = raycaster.intersectObjects(meshes, false);
+
+    // LightPaint the Sun: reflect the view ray off the clicked point and put the sky's sun
+    // along that direction, so its reflection appears exactly where you clicked.
+    if (paintMode === 'sun') {
+      const hit = hits[0];
+      if (!hit) return;
+      const N = smoothNormalAt(hit);
+      const incident = hit.point.clone().sub(sm.camera.position).normalize();
+      const R = incident.clone().sub(N.clone().multiplyScalar(2 * incident.dot(N))).normalize();
+      paintSunToDirection(R);
+      return;
+    }
+
+    // LightPaint a single Lumi-Curve point: reflect the view ray off the clicked
+    // surface and intersect it with the SELECTED LIGHT'S OWN rectangle plane, so
+    // just that one point's content-space (x,y) moves - the light itself stays put.
+    const armedIdx = useCurvePaintStore.getState().armedPointIndex;
+    if (armedIdx !== null && lightId) {
+      const st = useLightsStore.getState();
+      const l = st.lights.find((x) => x.id === lightId);
+      const content = l?.appearance?.master?.content;
+      if (l && content?.type === 'lumicurve' && content.p.points[armedIdx]) {
+        const hit = hits[0];
+        if (!hit) return;
+        const N = smoothNormalAt(hit);
+        let lightObj: THREE.Object3D | null = null;
+        sm.scene.traverse((obj) => {
+          if (lightObj) return;
+          if (obj.userData?.lightId === lightId && obj instanceof THREE.Light) lightObj = obj;
+        });
+        if (!lightObj) return;
+        const worldPos = new THREE.Vector3();
+        const worldQuat = new THREE.Quaternion();
+        (lightObj as THREE.Object3D).getWorldPosition(worldPos);
+        (lightObj as THREE.Object3D).getWorldQuaternion(worldQuat);
+        const width = l.areaWidth ?? 2, height = l.areaHeight ?? 2;
+        const res = solveCurvePointPaint(hit.point.clone(), N, sm.camera, worldPos, worldQuat, width, height);
+        if (!res) return;
+        const nextPoints = content.p.points.map((pt, i) => (i === armedIdx ? { ...pt, x: res.x, y: res.y } : pt));
+        st.updateLight(lightId, {
+          appearance: {
+            ...l.appearance!,
+            master: { ...l.appearance!.master, content: { ...content, p: { ...content.p, points: nextPoints } } },
+          },
+        } as never);
+      }
+      return;
+    }
 
     // An HDRI shape has no 3D position - it only lives on the equirect map -
     // so instead of solving for where a light must sit, mirror the camera's
@@ -984,7 +1247,7 @@ export const Viewport: React.FC<ViewportProps> = ({ sceneManagerRef, onScreensho
       u = ((u % 1) + 1) % 1;
       const v = Math.acos(Math.max(-1, Math.min(1, R.y))) / Math.PI;
 
-      updateHDRIShape(shapeId, { u, v });
+      moveHDRIShapeAndGroup(shapeId, u, v);
       return;
     }
 
@@ -1028,7 +1291,7 @@ export const Viewport: React.FC<ViewportProps> = ({ sceneManagerRef, onScreensho
     if (!l) return;
 
     const sph = cartesianToSpherical(lp.x, lp.y, lp.z);
-    st.updateLightTransform(lightId, {
+    st.updateLightTransform(l.id, {
       position: { x: lp.x, y: lp.y, z: lp.z },
       spherical: { lat: sph.lat, lng: sph.lng, radius: sph.radius, height: sph.height },
       // Leave rotation.enabled alone. Forcing it true makes engine.ts abandon
@@ -1044,7 +1307,55 @@ export const Viewport: React.FC<ViewportProps> = ({ sceneManagerRef, onScreensho
       aimTarget: { x: P.x, y: P.y, z: P.z },
       rotation: { ...l.transform.rotation, enabled: false },
     } as never);
-  }, [paintMode, distanceScale, containerRef, sceneManagerRef, updateHDRIShape]);
+  }, [paintMode, distanceScale, containerRef, sceneManagerRef, moveHDRIShapeAndGroup]);
+
+  // Right-click a reflection to select the light producing it - HDR Light
+  // Studio's other half of LightPaint. Read-only: no light gets moved, this
+  // only changes the selection so the right panel jumps to that light.
+  const pickReflectionAt = useCallback((clientX: number, clientY: number) => {
+    const container = containerRef.current;
+    const sm = sceneManagerRef.current;
+    if (!container || !sm) return;
+
+    const rect = container.getBoundingClientRect();
+    const mouse = new THREE.Vector2(
+      ((clientX - rect.left) / rect.width) * 2 - 1,
+      -((clientY - rect.top) / rect.height) * 2 + 1,
+    );
+
+    const raycaster = new THREE.Raycaster();
+    raycaster.setFromCamera(mouse, sm.camera);
+
+    const meshes: THREE.Mesh[] = [];
+    sm.scene.traverse((obj) => {
+      if (
+        obj instanceof THREE.Mesh &&
+        !obj.userData?.isHelper &&
+        !obj.userData?.isProxy &&
+        obj.name !== '__floor__'
+      ) {
+        meshes.push(obj);
+      }
+    });
+
+    const hit = raycaster.intersectObjects(meshes, false)[0];
+    if (!hit) return;
+
+    const P = hit.point.clone();
+    const N = smoothNormalAt(hit);
+
+    const candidates = useLightsStore.getState().lights
+      .filter((l) => l.visible)
+      .map((l) => ({
+        id: l.id,
+        position: new THREE.Vector3(l.transform.position.x, l.transform.position.y, l.transform.position.z),
+      }));
+
+    const pickedId = pickLightForReflection(P, N, sm.camera, candidates);
+    if (pickedId) {
+      useLightsStore.getState().selectLight(pickedId);
+    }
+  }, [containerRef, sceneManagerRef]);
 
   // Pointer handling lives on the container so no JSX surgery is needed.
   useEffect(() => {
@@ -1054,10 +1365,15 @@ export const Viewport: React.FC<ViewportProps> = ({ sceneManagerRef, onScreensho
 
     const down = (e: PointerEvent) => {
       if (e.button !== 0) return;
+      if ((e.target as HTMLElement | null)?.closest?.('[data-paint-ui]')) return; // clicks on the mode bar
       paintingRef.current = true;
       paintBoundsRef.current = null;
       sm.controls.enabled = false;
       paintAt(e.clientX, e.clientY);
+    };
+    const context = (e: MouseEvent) => {
+      e.preventDefault();
+      pickReflectionAt(e.clientX, e.clientY);
     };
     const move = (e: PointerEvent) => {
       if (!paintingRef.current) return;
@@ -1088,16 +1404,18 @@ export const Viewport: React.FC<ViewportProps> = ({ sceneManagerRef, onScreensho
     container.addEventListener('pointerdown', down);
     window.addEventListener('pointermove', move);
     window.addEventListener('pointerup', up);
+    container.addEventListener('contextmenu', context);
     container.style.cursor = 'crosshair';
 
     return () => {
       container.removeEventListener('pointerdown', down);
       window.removeEventListener('pointermove', move);
       window.removeEventListener('pointerup', up);
+      container.removeEventListener('contextmenu', context);
       container.style.cursor = '';
       sm.controls.enabled = true;
     };
-  }, [paintActive, paintAt, containerRef, sceneManagerRef]);
+  }, [paintActive, paintAt, pickReflectionAt, containerRef, sceneManagerRef]);
 
   // Click-to-select material from viewport
   const handleViewportClick = useCallback((event: React.MouseEvent) => {
@@ -1244,7 +1562,7 @@ export const Viewport: React.FC<ViewportProps> = ({ sceneManagerRef, onScreensho
         mode={gizmoMode}
         onModeChange={setGizmoMode}
         scaleAllowed={scaleAllowed}
-        disabled={!selectedLightId && !hdriSelectedShapeId}
+        disabled={!selectedLightId && !hdriSelectedShapeId && !hasSkyAsset}
         transformDisabled={!selectedLightId}
         paintActive={paintActive}
         onPaintToggle={() => { setPaintActive((p) => !p); setGizmoMode(null); }}
@@ -1252,6 +1570,7 @@ export const Viewport: React.FC<ViewportProps> = ({ sceneManagerRef, onScreensho
       <div style={{ display: 'flex', flexDirection: 'column', width: '100%', height: '100%' }}>
         <ViewportToolbar
           sceneManagerRef={sceneManagerRef}
+          renderPipelineRef={renderPipelineRef}
           onScreenshot={handleScreenshot}
           onLoadModel={handleOpenFilePicker}
         />
@@ -1279,6 +1598,7 @@ export const Viewport: React.FC<ViewportProps> = ({ sceneManagerRef, onScreensho
           onDragOver={handleDragOver}
           onDrop={handleDrop}
         >
+          {paintActive && <PaintModeBar mode={paintMode} onMode={setPaintMode} />}
           {isDragging && (
             <div className="drop-overlay">
               <span>Drop .glb or .erik file to load model</span>
@@ -1332,7 +1652,11 @@ export const Viewport: React.FC<ViewportProps> = ({ sceneManagerRef, onScreensho
             onChange={handleFileInput}
           />
 
-          <CameraBookmarks sceneManagerRef={sceneManagerRef} />
+          {/* Raw position/target/fov snapshots, unrelated to cameraStore - would
+              silently do nothing useful against a locked Angle Hunt camera. */}
+          {workspaceMode === '360' && <CameraBookmarks sceneManagerRef={sceneManagerRef} />}
+
+          <ModelingOverlay />
 
           {activeTool === 'measure' && (
             <div

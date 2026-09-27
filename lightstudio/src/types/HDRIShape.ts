@@ -68,6 +68,28 @@ export interface HDRIShape {
    *  painted onto the map just before the shape itself, so it peeks out
    *  from behind it in the offset direction. */
   dropShadow: HDRIShapeDropShadow;
+  /** If set, this shape belongs to an HDRIShapeGroup (see hdriShapesStore) -
+   *  HDR Light Studio's "Composite Lights". Dragging any member moves every
+   *  other member by the same delta, and the group's own visible/locked
+   *  toggles cascade onto every member, so a whole rig (e.g. a 3-shape rim
+   *  light) can be grabbed, hidden, or locked as one unit. */
+  groupId?: string;
+}
+
+/**
+ * A named collection of HDRIShapes that move together - see the groupId
+ * note on HDRIShape above. Deliberately holds no visible/locked/position
+ * fields of its own: those are always derived from (and cascaded onto) the
+ * member shapes, so there's no separate group state that can drift out of
+ * sync with what the members actually show.
+ */
+export interface HDRIShapeGroup {
+  id: string;
+  name: string;
+}
+
+export function createDefaultHDRIShapeGroup(name: string): HDRIShapeGroup {
+  return { id: `hdrigroup_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`, name };
 }
 
 export interface HDRIShapeDropShadow {

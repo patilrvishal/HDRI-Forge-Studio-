@@ -1,8 +1,11 @@
 import React, { useRef, useEffect, useCallback } from 'react';
 import type { LightType } from '../../types/Light';
+import type { LightAppearance } from '../../appearance/types';
+import { renderTexture } from '../../appearance/textures';
+import { drawTextureToCanvas } from '../../appearance/preview';
 
 interface LightProfileGridProps {
-  lights: Array<{ id: string; type: string; color: string; name: string }>;
+  lights: Array<{ id: string; type: string; color: string; name: string; appearance?: LightAppearance; aspect?: number }>;
   selectedLightId: string | null;
   onSelectLight: (id: string) => void;
 }
@@ -15,6 +18,25 @@ function hexToRgba(hex: string, alpha: number): string {
   const g = parseInt(h.substring(2, 4), 16);
   const b = parseInt(h.substring(4, 6), 16);
   return `rgba(${r},${g},${b},${alpha})`;
+}
+
+/** The light's real appearance as the profile thumbnail (letterboxed into the 48px tile). */
+function renderAppearanceThumb(canvas: HTMLCanvasElement, app: LightAppearance, aspect: number): void {
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return;
+  const S = 48;
+  ctx.fillStyle = '#0d0d0f';
+  ctx.fillRect(0, 0, S, S);
+  try {
+    const tex = renderTexture(app, aspect, 64);
+    const off = document.createElement('canvas');
+    drawTextureToCanvas(off, tex);
+    const k = Math.min((S - 4) / off.width, (S - 4) / off.height);
+    const w = off.width * k, h = off.height * k;
+    ctx.drawImage(off, (S - w) / 2, (S - h) / 2, w, h);
+  } catch {
+    /* fall back to the blank tile */
+  }
 }
 
 function renderLightThumb(canvas: HTMLCanvasElement, type: string, color: string): void {
@@ -335,7 +357,7 @@ export const LightProfileGrid: React.FC<LightProfileGridProps> = ({
   const containerRef = useRef<HTMLDivElement>(null);
   const canvasRefs = useRef<Map<string, HTMLCanvasElement>>(new Map());
   // Track previously rendered data to avoid redundant redraws
-  const renderedData = useRef<Map<string, { type: string; color: string }>>(new Map());
+  const renderedData = useRef<Map<string, { type: string; color: string; sig: string }>>(new Map());
 
   // Stable callback
   const stableSelect = useCallback((id: string) => {
@@ -346,14 +368,16 @@ export const LightProfileGrid: React.FC<LightProfileGridProps> = ({
   useEffect(() => {
     lights.forEach((light) => {
       const prev = renderedData.current.get(light.id);
-      if (prev && prev.type === light.type && prev.color === light.color) {
+      const sig = light.appearance ? JSON.stringify([light.appearance, light.aspect]) : '';
+      if (prev && prev.type === light.type && prev.color === light.color && prev.sig === sig) {
         return; // No change, skip re-render
       }
 
       const canvas = canvasRefs.current.get(light.id);
       if (canvas) {
-        renderLightThumb(canvas, light.type, light.color);
-        renderedData.current.set(light.id, { type: light.type, color: light.color });
+        if (light.appearance) renderAppearanceThumb(canvas, light.appearance, light.aspect ?? 1);
+        else renderLightThumb(canvas, light.type, light.color);
+        renderedData.current.set(light.id, { type: light.type, color: light.color, sig });
       }
     });
 

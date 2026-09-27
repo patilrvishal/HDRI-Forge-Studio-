@@ -9,6 +9,14 @@ import { Dropdown } from '../UI/Dropdown';
 import { ColorPicker } from '../UI/ColorPicker';
 import { sphericalToCartesian, cartesianToSpherical } from '../../utils/math';
 import { colorProfileToHex, hexToKelvin, kelvinToHex } from '../../utils/colorConversion';
+import { findObjectByKey } from '../../three/objectBinding';
+import { useObjectHdriStore } from '../../store/objectHdriStore';
+import { useSceneHierarchyStore } from '../../store/sceneHierarchyStore';
+import { LightAppearanceSection } from '../Appearance/LightAppearanceSection';
+import { CompositeSection } from './CompositeSection';
+import { BLEND_LABELS } from '../../appearance/types';
+import { BLEND_MODE_LIST } from '../../appearance/presets';
+import { scaledLightPatch } from '../../three/lightScale';
 
 /**
  * Collapsible inspector section with a chevron header — matches the reference
@@ -82,8 +90,56 @@ const FALLOFF_OPTIONS: Array<{ value: string; label: string }> = [
   { value: 'custom', label: 'Custom (1.5)' },
 ];
 
-export const LightProperties: React.FC = () => {
-  const selectedLightId = useLightsStore((s) => s.selectedLightId);
+/** Object lights (a light that IS a scene object): shown when a light has objectKey. */
+const LinkedObjectSection: React.FC<{ light: Light; onUpdate: (u: Partial<Light>) => void }> = ({ light, onUpdate }) => {
+  const removeLight = useLightsStore((s) => s.removeLight);
+  const scene = (window as unknown as { __lightforgeScene?: { scene: import('three').Scene } }).__lightforgeScene?.scene;
+  const obj = scene && light.objectKey ? findObjectByKey(scene, light.objectKey) : null;
+  return (
+    <CollapsibleSection title="Linked Object">
+      <div className="field-row" style={{ marginBottom: 6 }}>
+        <span className="field-label">Object</span>
+        <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: obj ? 'var(--accent-bright)' : 'var(--danger, #f87171)' }}>
+          {obj ? obj.name || obj.type : '(missing)'}
+        </span>
+      </div>
+      <Dropdown
+        label="Emits from"
+        value={light.objectSide ?? 'auto'}
+        options={[
+          { value: 'auto', label: 'Auto (faces the model)' },
+          { value: '+x', label: '+X face' },
+          { value: '-x', label: '-X face' },
+          { value: '+y', label: '+Y face' },
+          { value: '-y', label: '-Y face' },
+          { value: '+z', label: '+Z face' },
+          { value: '-z', label: '-Z face' },
+        ]}
+        onChange={(v) => onUpdate({ objectSide: v as Light['objectSide'] })}
+      />
+      <div style={{ display: 'flex', gap: 12, marginTop: 4, marginBottom: 4 }}>
+        <Toggle label="Object glows" checked={light.objectGlow !== false} onChange={(v) => onUpdate({ objectGlow: v })} variant="glossy" />
+      </div>
+      <div style={{ display: 'flex', gap: 6, marginTop: 4 }}>
+        <button
+          className="btn-sm"
+          disabled={!obj}
+          onClick={() => obj && useSceneHierarchyStore.getState().select(obj.uuid)}
+        >
+          Select object
+        </button>
+        <button className="btn-sm" onClick={() => removeLight(light.id)}>Stop using as light</button>
+      </div>
+      <div style={{ fontSize: 9, color: 'var(--text-dim)', marginTop: 6, lineHeight: 1.4 }}>
+        Position, direction and size follow the object. Move, rotate or scale it and the light follows.
+      </div>
+    </CollapsibleSection>
+  );
+};
+
+export const LightProperties: React.FC<{ lightId?: string }> = ({ lightId }) => {
+  const storeSelectedLightId = useLightsStore((s) => s.selectedLightId);
+  const selectedLightId = lightId ?? storeSelectedLightId;
   const lights = useLightsStore((s) => s.lights);
   const updateLight = useLightsStore((s) => s.updateLight);
   const updateLightTransform = useLightsStore((s) => s.updateLightTransform);
@@ -133,13 +189,24 @@ export const LightProperties: React.FC = () => {
   // whenever a different light is selected. Without this the slider snaps back
   // to 1 on every drag and the dimensions compound (1.5x then 1.5x = 2.25x).
   const [areaScale, setAreaScale] = useState(1);
-  const areaBaseRef = useRef<{ w: number; h: number }>({ w: 2, h: 2 });
+  const areaBaseRef = useRef<{ w: number; h: number; b: number }>({ w: 2, h: 2, b: 100 });
+  // Energy-Conserving Light Scaling: resizing keeps the light's total output constant.
+  const [keepEnergy, setKeepEnergy] = useState(false);
+  const shiftDown = useRef(false);
+  useEffect(() => {
+    const dn = (e: KeyboardEvent) => { if (e.key === 'Shift') shiftDown.current = true; };
+    const up = (e: KeyboardEvent) => { if (e.key === 'Shift') shiftDown.current = false; };
+    window.addEventListener('keydown', dn);
+    window.addEventListener('keyup', up);
+    return () => { window.removeEventListener('keydown', dn); window.removeEventListener('keyup', up); };
+  }, []);
 
   useEffect(() => {
     if (!light) return;
     areaBaseRef.current = {
       w: light.areaWidth ?? 2,
       h: light.areaHeight ?? 2,
+      b: light.brightness,
     };
     setAreaScale(1);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -157,17 +224,15 @@ export const LightProperties: React.FC = () => {
     (scale: number) => {
       const base = areaBaseRef.current;
       setAreaScale(scale);
-      handleUpdate({
-        areaWidth: Math.min(20, Math.max(0.1, base.w * scale)),
-        areaHeight: Math.min(20, Math.max(0.1, base.h * scale)),
-      });
+      if (!light) return;
+      handleUpdate(scaledLightPatch({ ...light, areaWidth: base.w, areaHeight: base.h, brightness: base.b }, base.w * scale, base.h * scale, keepEnergy || shiftDown.current));
     },
-    [handleUpdate],
+    [handleUpdate, light, keepEnergy],
   );
 
   const handleAreaWidth = useCallback(
     (v: number) => {
-      areaBaseRef.current = { w: v, h: light?.areaHeight ?? 2 };
+      areaBaseRef.current = { w: v, h: light?.areaHeight ?? 2, b: light?.brightness ?? 100 };
       setAreaScale(1);
       handleUpdate({ areaWidth: v });
     },
@@ -176,7 +241,7 @@ export const LightProperties: React.FC = () => {
 
   const handleAreaHeight = useCallback(
     (v: number) => {
-      areaBaseRef.current = { w: light?.areaWidth ?? 2, h: v };
+      areaBaseRef.current = { w: light?.areaWidth ?? 2, h: v, b: light?.brightness ?? 100 };
       setAreaScale(1);
       handleUpdate({ areaHeight: v });
     },
@@ -274,6 +339,7 @@ export const LightProperties: React.FC = () => {
     );
   }
 
+  const isObjectLight = !!light.objectKey;
   const isSpotLike = light.type === 'spot' || light.type === 'rim';
   const isAreaLike = light.type === 'area' || light.type === 'overhead';
   // Every type the engine builds as a PointLight or SpotLight (see
@@ -283,6 +349,7 @@ export const LightProperties: React.FC = () => {
 
   return (
     <div className="light-properties">
+      {isObjectLight && <LinkedObjectSection light={light} onUpdate={handleUpdate} />}
       {/* Header */}
       <CollapsibleSection title="Light Settings">
 
@@ -297,12 +364,14 @@ export const LightProperties: React.FC = () => {
         </div>
 
         {/* Type */}
-        <Dropdown
-          label="Type"
-          value={light.type}
-          options={LIGHT_TYPE_OPTIONS}
-          onChange={handleTypeChange}
-        />
+        {!isObjectLight && (
+          <Dropdown
+            label="Type"
+            value={light.type}
+            options={LIGHT_TYPE_OPTIONS}
+            onChange={handleTypeChange}
+          />
+        )}
 
         {/* Color Profile */}
         <Dropdown
@@ -400,6 +469,8 @@ export const LightProperties: React.FC = () => {
       {/* Area light dimensions */}
       {isAreaLike && (
         <CollapsibleSection title="Dimensions">
+          {!isObjectLight && (
+            <>
           <NumericInput
             label="Width"
             value={light.areaWidth}
@@ -432,6 +503,8 @@ export const LightProperties: React.FC = () => {
             step={0.1}
             onChange={handleAreaHeight}
           />
+</>
+          )}
           <Slider
             label="Edge Softness"
             value={light.edgeSoftness ?? 50}
@@ -440,6 +513,8 @@ export const LightProperties: React.FC = () => {
             step={1}
             onChange={(v) => handleUpdate({ edgeSoftness: v })}
           />
+          {!isObjectLight && (
+            <>
           <Slider
             label="Scale"
             value={areaScale}
@@ -449,8 +524,24 @@ export const LightProperties: React.FC = () => {
             onChange={handleAreaScale}
             unit="x"
           />
+          <Toggle label="Keep energy (or hold Shift)" checked={keepEnergy} variant="glossy" onChange={setKeepEnergy} />
+            </>
+          )}
         </CollapsibleSection>
       )}
+
+      {isAreaLike && (
+        <CollapsibleSection title="Blend" defaultOpen={false}>
+          <Dropdown
+            label="Blend mode"
+            value={light.blendMode ?? 'normal'}
+            options={BLEND_MODE_LIST.map((b) => ({ value: b, label: BLEND_LABELS[b] }))}
+            onChange={(v) => handleUpdate({ blendMode: v as Light['blendMode'] })}
+          />
+          <Toggle label="Invert" checked={!!light.blendInvert} variant="glossy" onChange={(v) => handleUpdate({ blendInvert: v })} />
+        </CollapsibleSection>
+      )}
+      {isAreaLike && <LightAppearanceSection light={light} onUpdate={handleUpdate} />}
 
       {/* Drop shadow - same control set as an HDRI Shape's, baked into the
           HDRI Preview/export as a darkening patch offset from the light. */}
@@ -518,6 +609,8 @@ export const LightProperties: React.FC = () => {
         </CollapsibleSection>
       )}
 
+      {!isObjectLight && (
+        <>
       {/* Position: Spherical */}
       <CollapsibleSection
         title="Position"
@@ -660,21 +753,10 @@ export const LightProperties: React.FC = () => {
         )}
       </CollapsibleSection>
 
-      {/* Collection assignment */}
-      <CollapsibleSection title="Advanced Render Collection">
-        <Dropdown
-          label="Group"
-          value={light.collectionId ?? '__none__'}
-          options={[
-            { value: '__none__', label: 'None' },
-            { value: 'default', label: 'Default' },
-            { value: 'key', label: 'Key Lights' },
-            { value: 'fill', label: 'Fill Lights' },
-            { value: 'rim', label: 'Rim Lights' },
-          ]}
-          onChange={(v) => handleUpdate({ collectionId: v === '__none__' ? null : v })}
-        />
-      </CollapsibleSection>
+        </>
+      )}
+
+      <CompositeSection light={light} onUpdate={handleUpdate} />
     </div>
   );
 };
