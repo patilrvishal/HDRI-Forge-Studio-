@@ -305,6 +305,16 @@ def _gather_lights(selection):
             if maya_type == 'spotLight':
                 cone_deg = cmds.getAttr(shape + '.coneAngle')
                 entry['spot_size'] = math.radians(cone_deg)
+            if maya_type == 'areaLight':
+                # Maya's areaLight shape is a unit (1x1) square; its real size comes from
+                # the transform's scale, not a width/height attribute on the shape.
+                try:
+                    sx = abs(cmds.getAttr(node + '.scaleX'))
+                    sy = abs(cmds.getAttr(node + '.scaleY'))
+                except Exception:
+                    sx = sy = 1.0
+                entry['size'] = sx
+                entry['size_y'] = sy
             lights.append(entry)
     return lights
 

@@ -26,6 +26,9 @@ interface BridgeLightData {
   rotation: Vec3;  // Three.js Euler degrees (XYZ), pre-converted in the addon
   spot_size?: number; // radians, SPOT lights only (full cone angle)
   aim_target?: Vec3;  // optional explicit aim target (world-space, Three.js coords)
+  /** AREA lights only - real-world metres (Blender's .size / .size_y, Maya's transform scale). */
+  size?: number;
+  size_y?: number;
 }
 
 interface BridgeCameraData {
@@ -135,6 +138,9 @@ function applyLights(lightsData: BridgeLightData[], source: BridgePayload['sourc
       },
       ...(studioType === 'spot' && bl.spot_size !== undefined
         ? { spotAngle: Math.max(1, Math.min(90, THREE.MathUtils.radToDeg(bl.spot_size / 2))) }
+        : {}),
+      ...(studioType === 'area' && bl.size !== undefined
+        ? { areaWidth: Math.max(0.1, Math.min(20, bl.size)), areaHeight: Math.max(0.1, Math.min(20, bl.size_y ?? bl.size)), areaLight: true }
         : {}),
     };
 

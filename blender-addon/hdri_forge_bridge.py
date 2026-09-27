@@ -208,6 +208,11 @@ def _gather_lights(context):
         }
         if ld.type == 'SPOT':
             entry['spot_size'] = ld.spot_size   # full cone angle in radians
+        if ld.type == 'AREA':
+            # Blender area lights: SQUARE/DISK use only .size (both axes equal);
+            # RECTANGLE/ELLIPSE also have .size_y for the second axis.
+            entry['size'] = ld.size
+            entry['size_y'] = getattr(ld, 'size_y', ld.size) if ld.shape in {'RECTANGLE', 'ELLIPSE'} else ld.size
         lights.append(entry)
     return lights
 
