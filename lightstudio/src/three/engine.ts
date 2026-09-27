@@ -1605,6 +1605,9 @@ interface LightSyncEntry {
   // Composite membership + its filter stack (applied to the group in the HDRI bake)
   compositeId?: string;
   compositeFilters?: unknown;
+  compositeBlend?: string;
+  /** Position in the light list: lights at the top render over the ones below. */
+  layerIndex?: number;
 }
 
 interface LightObjectEntry {
@@ -1823,6 +1826,8 @@ export class LightManager {
     lightObj.userData.opacity = (ld.opacity ?? 100) / 100;
     lightObj.userData.compositeId = ld.compositeId;
     lightObj.userData.compositeFilters = ld.compositeFilters;
+    lightObj.userData.compositeBlend = ld.compositeBlend;
+    lightObj.userData.layerIndex = ld.layerIndex;
     lightObj.position.set(px, py, pz);
     lightObj.visible = shouldShow;
 

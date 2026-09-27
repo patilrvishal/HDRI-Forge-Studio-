@@ -1042,7 +1042,7 @@ export const Viewport: React.FC<ViewportProps> = ({ sceneManagerRef, onScreensho
     if (!smForLights) return;
 
     lightManagerRef.current?.syncLights(
-      lights.map((l) => { const comp = collections.find((c) => c.id === l.collectionId)?.composite; const adj = applyComposite(l, comp); return {
+      lights.map((l, layerIndex) => { const comp = collections.find((c) => c.id === l.collectionId)?.composite; const adj = applyComposite(l, comp); return {
         id: l.id,
         type: l.type,
         color: l.color,
@@ -1050,7 +1050,9 @@ export const Viewport: React.FC<ViewportProps> = ({ sceneManagerRef, onScreensho
         opacity: adj.opacity,
         visible: adj.visible,
         compositeId: comp?.enabled ? l.collectionId ?? undefined : undefined,
-        compositeFilters: comp?.enabled && comp.filters.some((f) => f.enabled) ? comp.filters : undefined,
+        compositeFilters: comp?.enabled && (comp.filters.some((f) => f.enabled) || (comp.blend ?? 'normal') !== 'normal') ? comp.filters : undefined,
+        compositeBlend: comp?.enabled ? comp.blend : undefined,
+        layerIndex,
         solo: l.solo,
         falloff: l.falloff,
         gearVisible: l.gearVisible,

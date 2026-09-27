@@ -59,7 +59,7 @@ export const CurveEditor: React.FC<Props> = ({ params, aspect, onChange }) => {
     if (e.button !== 0) return;
     e.preventDefault();
     const start = toLocal(e);
-    (e.currentTarget as Element).setPointerCapture?.(e.pointerId);
+    try { (e.currentTarget as Element).setPointerCapture?.(e.pointerId); } catch { /* synthetic / released pointer */ }
 
     if (tool === 'move') {
       const hit = nearest(start.x, start.y);

@@ -39,6 +39,8 @@ import { HdriObjectCaster } from './HDRIObjects';
 import { encodeEXRRGBA } from '../appearance/exr';
 import { getEditedImage, hasEdits, imageToDataTexture } from '../hdriedit/envSource';
 import { applyFilters, type FilterSpec } from '../filters/filters';
+import { blendValue } from '../appearance/evaluate';
+import type { AppearanceBlend } from '../appearance/types';
 
 // --------- Types ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 
@@ -72,6 +74,9 @@ interface ExtractedLight {
   /** Composite this light belongs to and the composite's filter stack. */
   compositeId?: string;
   compositeFilters?: FilterSpec[];
+  compositeBlend?: AppearanceBlend;
+  /** Light list position (0 = top): top lights are painted over the ones below. */
+  layerIndex?: number;
 }
 
 /** Bilinear sample of a light appearance texture at (u,v) in 0..1, v=0 at the top. */
@@ -659,7 +664,7 @@ export async function generateAnalyticalHDRI(
   // Extract all lights from scene
   const allLights = extractLightsFromScene(scene, !!options.includeAreaModeLights);
   // Lights in a Composite that carries filters are rendered as one image, filtered, then laid on top.
-  const isFiltered = (l: ExtractedLight) => !!l.compositeId && !!l.compositeFilters?.some((f) => f.enabled);
+  const isFiltered = (l: ExtractedLight) => !!l.compositeId && !!l.compositeFilters;
   const lights = allLights.filter((l) => !isFiltered(l));
   const groupLights = allLights.filter(isFiltered);
   console.log('[LightForge] Found lights:', lights.length);
@@ -841,15 +846,26 @@ lights.forEach((l, i) => {
         }
         if (y % 64 === 0) await new Promise<void>((resolve) => setTimeout(resolve, 0));
       }
-      const frgb = applyFilters({ data: rgb, width, height }, filters, true);
+      const blend = members[0].compositeBlend ?? 'normal';
+      const frgb = filters.some((f) => f.enabled) ? applyFilters({ data: rgb, width, height }, filters, true) : rgb;
       // the coverage image is blurred the same way but must not be renormalised
       const afilters = filters.map((f) => ({ ...f, params: { ...f.params, energy: false } })) as FilterSpec[];
-      const fal = applyFilters({ data: alpha, width, height }, afilters, true);
+      const fal = filters.some((f) => f.enabled) ? applyFilters({ data: alpha, width, height }, afilters, true) : alpha;
       for (let i = 0; i < width * height; i++) {
         const a = Math.max(0, Math.min(1, fal[i * 4]));
-        pixels[i * 4] = pixels[i * 4] * (1 - a) + frgb[i * 4];
-        pixels[i * 4 + 1] = pixels[i * 4 + 1] * (1 - a) + frgb[i * 4 + 1];
-        pixels[i * 4 + 2] = pixels[i * 4 + 2] * (1 - a) + frgb[i * 4 + 2];
+        if (blend === 'normal') {
+          pixels[i * 4] = pixels[i * 4] * (1 - a) + frgb[i * 4];
+          pixels[i * 4 + 1] = pixels[i * 4 + 1] * (1 - a) + frgb[i * 4 + 1];
+          pixels[i * 4 + 2] = pixels[i * 4 + 2] * (1 - a) + frgb[i * 4 + 2];
+        } else {
+          // other blend modes work on the un-premultiplied colour of the group
+          const inv = a > 1e-6 ? 1 / a : 0;
+          for (let c = 0; c < 3; c++) {
+            const base = pixels[i * 4 + c];
+            const top = frgb[i * 4 + c] * inv;
+            pixels[i * 4 + c] = base + (blendValue(blend, base, top) - base) * a;
+          }
+        }
       }
     }
   }
@@ -894,7 +910,7 @@ lights.forEach((l, i) => {
  */
 function extractLightsFromScene(scene: THREE.Scene, includeAreaMode = false): ExtractedLight[] {
   const lights: ExtractedLight[] = [];
-  let tag: { compositeId?: string; compositeFilters?: FilterSpec[] } = {};
+  let tag: { compositeId?: string; compositeFilters?: FilterSpec[]; compositeBlend?: AppearanceBlend; layerIndex?: number } = {};
   const push = (l: ExtractedLight) => { lights.push({ ...l, ...tag }); };
   const worldPos = new THREE.Vector3();
   const worldQuat = new THREE.Quaternion();
@@ -908,7 +924,7 @@ function extractLightsFromScene(scene: THREE.Scene, includeAreaMode = false): Ex
     // Skip AmbientLight - no position/direction, adds uniform light to all pixels
     if (child instanceof THREE.AmbientLight) return;
 
-    tag = { compositeId: child.userData.compositeId, compositeFilters: child.userData.compositeFilters as FilterSpec[] | undefined };
+    tag = { compositeId: child.userData.compositeId, compositeFilters: child.userData.compositeFilters as FilterSpec[] | undefined, compositeBlend: child.userData.compositeBlend as AppearanceBlend | undefined, layerIndex: child.userData.layerIndex as number | undefined };
     child.getWorldPosition(worldPos);
 
     // ------ PointLight ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------
@@ -996,6 +1012,9 @@ function extractLightsFromScene(scene: THREE.Scene, includeAreaMode = false): Ex
       return;
     }
   });
+
+  // Light list order is paint order: the top of the list renders over the lights below it.
+  lights.sort((a, b) => (b.layerIndex ?? 0) - (a.layerIndex ?? 0));
 
   return lights;
 }

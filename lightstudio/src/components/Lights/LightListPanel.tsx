@@ -1,6 +1,7 @@
 import React, { useState, useCallback, useRef, useMemo, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { useLightsStore } from '../../store/lightsStore';
+import { useUIStore } from '../../store/uiStore';
 import { useSceneHierarchyStore } from '../../store/sceneHierarchyStore';
 import { useHDRIShapesStore } from '../../store/hdriShapesStore';
 import { useHDRIAssetStore } from '../../store/hdriAssetStore';
@@ -163,6 +164,15 @@ export const LightListPanel: React.FC = () => {
   const lights = useLightsStore((s) => s.lights);
   const selectedLightId = useLightsStore((s) => s.selectedLightId);
   const collections = useLightsStore((s) => s.collections);
+  const selectedCompositeId = useLightsStore((s) => s.selectedCompositeId);
+  const selectComposite = useLightsStore((s) => s.selectComposite);
+  const mergeToComposite = useLightsStore((s) => s.mergeToComposite);
+  const releaseFromComposite = useLightsStore((s) => s.releaseFromComposite);
+  const dissolveComposite = useLightsStore((s) => s.dissolveComposite);
+  const setCompositeSettings = useLightsStore((s) => s.setComposite);
+  const setLightCollection = useLightsStore((s) => s.updateLight);
+  // multi-selection (Ctrl/Shift+click) for Merge to Composite
+  const [multi, setMulti] = useState<Set<string>>(new Set());
   const collectionFilter = useLightsStore((s) => s.collectionFilter);
 
   const addLight = useLightsStore((s) => s.addLight);
@@ -285,6 +295,16 @@ export const LightListPanel: React.FC = () => {
       })
       .filter((x): x is NonNullable<typeof x> => x !== null);
   }, [layerOrder, shapes, filteredLights, hdriAssets]);
+
+  const compositeCols = useMemo(() => new Map(collections.filter((c) => c.composite?.enabled).map((c) => [c.id, c])), [collections]);
+  /** The first light of each composite in list order - the composite's header row is drawn above it. */
+  const firstMember = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const it of combinedLayers) {
+      if (it.kind === 'light' && it.light.collectionId && compositeCols.has(it.light.collectionId) && !m.has(it.light.collectionId)) m.set(it.light.collectionId, it.light.id);
+    }
+    return m;
+  }, [combinedLayers, compositeCols]);
 
   const commitLayerOrder = useCallback(
     (next: string[]) => {
@@ -579,13 +599,48 @@ export const LightListPanel: React.FC = () => {
                 }
 
                 const light = item.light;
-                const isSelected = light.id === selectedLightId;
-                return (
+                const isSelected = light.id === selectedLightId || multi.has(light.id);
+                const comp = light.collectionId ? compositeCols.get(light.collectionId) : undefined;
+                const header = comp && firstMember.get(comp.id) === light.id ? (
                   <div
-                    key={light.id}
+                    key={'comp_' + comp.id}
+                    className={`light-list-item ${selectedCompositeId === comp.id ? 'selected' : ''} ${comp.composite?.visible === false ? 'dimmed' : ''}`}
+                    style={{ fontWeight: 600 }}
+                    onClick={(e) => { e.stopPropagation(); selectComposite(comp.id); setMulti(new Set()); }}
+                    onContextMenu={async (e) => { e.preventDefault(); e.stopPropagation(); const n = await useUIStore.getState().requestPrompt('Rename composite', comp.name); if (n && n.trim()) useLightsStore.getState().renameCollection(comp.id, n.trim()); }}
+                  >
+                    <div className="light-type-icon" style={{ color: 'var(--accent-bright, #4af)' }}>▣</div>
+                    <div className="light-item-name">
+                      <span className="light-name-text">{comp.name}</span>
+                      <span className="light-type-label">composite · {lights.filter((l) => l.collectionId === comp.id).length} lights</span>
+                    </div>
+                    <div className="light-item-actions">
+                      <button
+                        className={`btn-icon ${comp.composite?.visible === false ? 'dimmed' : ''}`}
+                        style={{ width: 20, height: 20 }}
+                        onClick={(e) => { e.stopPropagation(); setCompositeSettings(comp.id, { visible: comp.composite?.visible === false }); }}
+                        title="Show / hide the composite"
+                      >
+                        <EyeIcon visible={comp.composite?.visible !== false} />
+                      </button>
+                      <button className="btn-icon" style={{ width: 20, height: 20 }} onClick={(e) => { e.stopPropagation(); dissolveComposite(comp.id); }} title="Release all lights and remove the composite">✕</button>
+                    </div>
+                  </div>
+                ) : null;
+                return (
+                  <React.Fragment key={light.id}>
+                  {header}
+                  <div
                     className={`light-list-item ${isSelected ? 'selected' : ''} ${isDragging ? 'dragging' : ''} ${isDragOver ? 'drag-over' : ''} ${!light.visible ? 'dimmed' : ''}`}
                     draggable={isRenaming !== light.id}
-                    onClick={(e) => { if (isRenaming === light.id) return; e.stopPropagation(); selectLight(light.id); }}
+                    onClick={(e) => {
+                      if (isRenaming === light.id) return;
+                      e.stopPropagation();
+                      if (e.ctrlKey || e.metaKey || e.shiftKey) {
+                        setMulti((prev) => { const n = new Set(prev); if (!n.size && selectedLightId) n.add(selectedLightId); if (n.has(light.id)) n.delete(light.id); else n.add(light.id); return n; });
+                      } else { setMulti(new Set()); }
+                      selectLight(light.id);
+                    }}
                     onContextMenu={(e) => handleContextMenu(e, light.id)}
                     onDragStart={() => handleDragStart(index)}
                     onDragOver={(e) => handleDragOver(e, index)}
@@ -633,6 +688,7 @@ export const LightListPanel: React.FC = () => {
                       >S</button>
                     </div>
                   </div>
+                  </React.Fragment>
                 );
               })}
             </div>
@@ -777,6 +833,30 @@ export const LightListPanel: React.FC = () => {
               Toggle Area Light <span style={{ marginLeft: 'auto', opacity: 0.5 }}>Ctrl+Space</span>
             </div>
           ) : null; })()}
+          {(() => {
+            const ids = multi.size >= 2 && multi.has(contextMenu.lightId) ? [...multi] : [contextMenu.lightId];
+            const l0 = lights.find((x) => x.id === contextMenu.lightId);
+            const inComposite = !!(l0?.collectionId && compositeCols.has(l0.collectionId));
+            const others = collections.filter((c) => c.composite?.enabled && c.id !== l0?.collectionId);
+            return (
+              <>
+                <div className="context-menu-sep" />
+                <div className="context-menu-item" onClick={() => { mergeToComposite(ids); setMulti(new Set()); setContextMenu(null); }}>
+                  Merge to Composite{ids.length > 1 ? ` (${ids.length})` : ''}
+                </div>
+                {inComposite && (
+                  <div className="context-menu-item" onClick={() => { releaseFromComposite(contextMenu.lightId); setContextMenu(null); }}>
+                    Release from Composite
+                  </div>
+                )}
+                {others.map((c) => (
+                  <div key={c.id} className="context-menu-item" onClick={() => { ids.forEach((id) => setLightCollection(id, { collectionId: c.id })); setMulti(new Set()); setContextMenu(null); }}>
+                    Add to “{c.name}”
+                  </div>
+                ))}
+              </>
+            );
+          })()}
           <div className="context-menu-sep" />
           <div className="context-menu-item" style={{ color: 'var(--danger)' }} onClick={() => handleDelete(contextMenu.lightId)}>
             <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round">
