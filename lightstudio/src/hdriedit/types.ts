@@ -67,6 +67,10 @@ export interface FillParams {
   sourceV: number;
   /** Remove: 0-100 how far the surroundings are smeared in. */
   smear: number;
+  /** Clone: brightness multiplier of the copied area (turn an HDRI light up / down). */
+  gain: number;
+  /** Clone: also remove the source area, turning the clone into a MOVE. */
+  removeSource: boolean;
 }
 
 export interface SunParams {
@@ -120,7 +124,7 @@ export function defaultEdit(kind: EditKind): EditParams {
     case 'blocker':
       return { kind, p: { mode: 'multiply', amount: 100, color: '#000000', intensity: 1 } };
     case 'fill':
-      return { kind, p: { mode: 'remove', sourceU: 0.25, sourceV: 0.5, smear: 60 } };
+      return { kind, p: { mode: 'remove', sourceU: 0.25, sourceV: 0.5, smear: 60, gain: 1, removeSource: false } };
     case 'sun':
       return { kind, p: { action: 'resize', scale: 2, intensity: 1, targetU: 0.5, targetV: 0.3, threshold: 25 } };
     case 'mix':

@@ -195,6 +195,12 @@ const LayerParams: React.FC<{ asset: HDRIAsset; layer: EditLayer; onLayer: (l: E
               {pick === 'source' ? 'Click the source…' : 'Pick clone source on map'}
             </button>
           )}
+          {e.p.mode === 'clone' && (
+            <>
+              <Slider label="Gain" value={e.p.gain ?? 1} min={0} max={10} step={0.01} unit="x" onChange={(v) => setP({ gain: v })} />
+              <Toggle label="Move (remove the original)" checked={!!e.p.removeSource} variant="glossy" onChange={(v) => setP({ removeSource: v })} />
+            </>
+          )}
         </>
       );
     case 'sun':

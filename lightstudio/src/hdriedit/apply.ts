@@ -226,9 +226,14 @@ function applyFill(img: FloatImage, layer: EditLayer, mask: Float32Array | null,
     mixInto(img.data, filled, m, k);
     return;
   }
-  // clone: copy the source area over
+  // clone (or move): copy the source area over, optionally scaled, optionally removing the original
   const du = p.sourceU - layer.region.u, dv = p.sourceV - layer.region.v;
   const src = new Float32Array(img.data);
+  const gain = p.gain ?? 1;
+  if (p.removeSource) {
+    const srcMask = regionMask({ ...layer.region, u: p.sourceU, v: p.sourceV, invert: false }, w, h);
+    if (srcMask) mixInto(img.data, inpaint(img, srcMask, p.smear), srcMask, k);
+  }
   const tmp = [0, 0, 0, 0];
   for (let y = 0; y < h; y++) {
     for (let x = 0; x < w; x++) {
@@ -236,7 +241,7 @@ function applyFill(img: FloatImage, layer: EditLayer, mask: Float32Array | null,
       if (a <= 0) continue;
       bilinearWrap(src, w, h, (x + 0.5) / w + du, (y + 0.5) / h + dv, tmp);
       const o = (y * w + x) * 4;
-      img.data[o] = lerp(img.data[o], tmp[0], a); img.data[o + 1] = lerp(img.data[o + 1], tmp[1], a); img.data[o + 2] = lerp(img.data[o + 2], tmp[2], a);
+      img.data[o] = lerp(img.data[o], tmp[0] * gain, a); img.data[o + 1] = lerp(img.data[o + 1], tmp[1] * gain, a); img.data[o + 2] = lerp(img.data[o + 2], tmp[2] * gain, a);
     }
   }
 }

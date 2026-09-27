@@ -62,6 +62,15 @@ const layer = (kind: Parameters<typeof newEditLayer>[0], f?: (l: EditLayer) => v
   ok(Math.abs(px(c, 0.6, 0.5) - 9) < 0.5, 'clone copies the source area');
 }
 
+// clone + move
+{
+  const img = flat(1); for (let y = 60; y < 68; y++) for (let x = 60; x < 68; x++) { const i = (y * W + x) * 4; img.data[i] = img.data[i + 1] = img.data[i + 2] = 40; }
+  const su = 64 / W, sv = 64 / H;
+  const moved = applyEdits(img, [layer('fill', (l) => { if (l.edit.kind === 'fill') { l.edit.p.mode = 'clone'; l.edit.p.sourceU = su; l.edit.p.sourceV = sv; l.edit.p.gain = 0.5; l.edit.p.removeSource = true; } }, { u: 0.75, v: 0.5, size: 8, feather: 0 })]);
+  ok(px(moved, 0.75, 0.5) > 15 && px(moved, 0.75, 0.5) < 25, 'clone gain halves the copied light');
+  ok(px(moved, su, sv) < 5, 'move removes the original');
+}
+
 // sun
 {
   const img = flat(0.5);

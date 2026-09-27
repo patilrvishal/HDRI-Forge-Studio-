@@ -48,6 +48,7 @@ function SceneCameraSlot() {
 import { GradientBackgroundPanel } from '../Environment/GradientBackgroundPanel';
 import { HDRIPreviewPanel } from '../HDRI/HDRIPreviewPanel';
 import { CanvasPanel } from '../Canvas/CanvasPanel';
+import { PresetLibrary } from '../Appearance/PresetLibrary';
 import { ExportDialog } from '../Export/ExportDialog';
 import { FinalRenderPanel } from '../Export/FinalRenderPanel';
 import { EnvironmentBrowser } from '../Environment/EnvironmentBrowser';
@@ -73,10 +74,39 @@ const LightProfileSection: React.FC = () => {
     <div className="light-profile-section">
       <div className="light-profile-section-title">Light Profiles</div>
       <LightProfileGrid
-        lights={lights.map((l) => ({ id: l.id, type: l.type, color: l.color, name: l.name }))}
+        lights={lights.map((l) => ({ id: l.id, type: l.type, color: l.color, name: l.name, appearance: l.appearance, aspect: (l.areaWidth ?? 2) / Math.max(0.01, l.areaHeight ?? 2) }))}
         selectedLightId={selectedLightId}
         onSelectLight={selectLight}
       />
+    </div>
+  );
+};
+
+/** Preset Library: click a preset to add a light that looks like it. */
+const LightPresetLibrarySection: React.FC = () => {
+  const [open, setOpen] = useState(true);
+  return (
+    <div className="light-profile-section">
+      <div className="light-profile-section-title" style={{ cursor: 'pointer' }} onClick={() => setOpen((o) => !o)}>
+        Preset Library {open ? '▾' : '▸'}
+      </div>
+      {open && (
+        <div style={{ padding: '0 6px 6px' }}>
+          <PresetLibrary
+            compact
+            onApply={(a, asp) => {
+              const st = useLightsStore.getState();
+              st.addLight('area');
+              const created = useLightsStore.getState().lights.slice(-1)[0];
+              if (!created) return;
+              const area = 4;
+              const w = Math.min(20, Math.max(0.1, +Math.sqrt(area * asp).toFixed(2)));
+              st.updateLight(created.id, { name: a.name, appearance: a, areaWidth: w, areaHeight: Math.min(20, Math.max(0.1, +(area / w).toFixed(2))) });
+              st.selectLight(created.id);
+            }}
+          />
+        </div>
+      )}
     </div>
   );
 };
@@ -507,6 +537,7 @@ export const AppLayout: React.FC = () => {
                     <LightListPanel />
                   </div>
                   <LightProfileSection />
+                  <LightPresetLibrarySection />
                 </>
               ) : leftTab === 'environment' ? (
                 <>
