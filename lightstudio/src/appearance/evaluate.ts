@@ -337,6 +337,21 @@ export function smoothTangents(pts: { x: number; y: number }[], closed: boolean)
   });
 }
 
+/** This point's own falloff direction: an explicit Freeform Offset override if
+ *  set, else the auto default (perpendicular to the point's local tangent,
+ *  same convention as every other offset direction in this file: rotate the
+ *  forward tangent -90deg to get the "outward" normal). */
+export function pointOffsetDir(q: CurvePoint): { ux: number; uy: number } {
+  if (q.offsetDirX !== undefined && q.offsetDirY !== undefined) {
+    const l = Math.hypot(q.offsetDirX, q.offsetDirY) || 1;
+    return { ux: q.offsetDirX / l, uy: q.offsetDirY / l };
+  }
+  let tx = q.outX - q.inX, ty = q.outY - q.inY;
+  const l = Math.hypot(tx, ty);
+  if (l > 1e-6) { tx /= l; ty /= l; } else { tx = 1; ty = 0; }
+  return { ux: -ty, uy: tx };
+}
+
 function lumiCurveSampler(p: LumiCurveParams, aspect: number): Sampler {
   const c = hexToLinear(p.color);
   const poly = sampleCurve(p).map((q) => ({ x: q.x * aspect, y: q.y, t: q.t }));
@@ -351,6 +366,26 @@ function lumiCurveSampler(p: LumiCurveParams, aspect: number): Sampler {
   const dirA = (p.offsetAngle * D2R);
   const dux = Math.cos(dirA), duy = Math.sin(dirA);
   const total = poly.length;
+  // Freeform Offset: each control point can aim its own falloff direction, so
+  // the effective direction varies continuously along the curve instead of
+  // being one global constant (vertical/horizontal/angle) or the pure local
+  // normal (normal). Precomputed once per sampler build, not per pixel.
+  let freeformDirs: { ux: number; uy: number }[] | null = null;
+  if (p.offsetType === 'freeform' && p.points.length >= 2) {
+    const n = p.points.length;
+    const segs = p.closed ? n : n - 1;
+    const dirs = p.points.map(pointOffsetDir);
+    freeformDirs = poly.map((q) => {
+      const raw = clamp(q.t) * segs;
+      const s0 = Math.max(0, Math.min(segs - 1, Math.floor(raw)));
+      const frac = clamp(raw - s0);
+      const d0 = dirs[s0 % n], d1 = dirs[(s0 + 1) % n];
+      let ux = d0.ux + (d1.ux - d0.ux) * frac;
+      let uy = d0.uy + (d1.uy - d0.uy) * frac;
+      const l = Math.hypot(ux, uy) || 1;
+      return { ux: ux / l, uy: uy / l };
+    });
+  }
   return (x, y, o) => {
     const px = x * aspect, py = y;
     let best = Infinity, bt = 0, side = 1, bTx = 1, bTy = 0, atStart = false, atEnd = false, along = 0;
@@ -364,10 +399,10 @@ function lumiCurveSampler(p: LumiCurveParams, aspect: number): Sampler {
       const cx = a.x + vx * u, cy = a.y + vy * u;
       let dx = px - cx, dy = py - cy;
       let d2: number;
-      if (p.offsetType === 'vertical' || p.offsetType === 'horizontal' || p.offsetType === 'angle') {
-        // distance measured along a fixed direction instead of along the curve normal
-        const ux = p.offsetType === 'vertical' ? 0 : p.offsetType === 'horizontal' ? 1 : dux;
-        const uy = p.offsetType === 'vertical' ? 1 : p.offsetType === 'horizontal' ? 0 : duy;
+      if (p.offsetType === 'vertical' || p.offsetType === 'horizontal' || p.offsetType === 'angle' || p.offsetType === 'freeform') {
+        // distance measured along a fixed (or, for freeform, per-point-interpolated) direction instead of along the curve normal
+        const ux = p.offsetType === 'vertical' ? 0 : p.offsetType === 'horizontal' ? 1 : p.offsetType === 'angle' ? dux : freeformDirs![i].ux;
+        const uy = p.offsetType === 'vertical' ? 1 : p.offsetType === 'horizontal' ? 0 : p.offsetType === 'angle' ? duy : freeformDirs![i].uy;
         const denom = vx * uy - vy * ux;
         if (Math.abs(denom) < 1e-9) { d2 = dx * dx + dy * dy; }
         else {

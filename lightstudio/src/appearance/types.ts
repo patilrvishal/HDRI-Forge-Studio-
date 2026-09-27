@@ -201,6 +201,11 @@ export interface CurvePoint {
   inY: number;
   outX: number;
   outY: number;
+  /** Freeform Offset only: this point's own falloff direction (unit-ish vector,
+   *  local offsets from the point same as inX/outX). Undefined = auto (the
+   *  curve's local normal at this point), same as every other offset type. */
+  offsetDirX?: number;
+  offsetDirY?: number;
 }
 
 export interface LumiCurveParams {
@@ -227,7 +232,7 @@ export interface LumiCurveParams {
   /** degrees */
   startAngle: number;
   endAngle: number;
-  offsetType: 'normal' | 'vertical' | 'horizontal' | 'angle';
+  offsetType: 'normal' | 'vertical' | 'horizontal' | 'angle' | 'freeform';
   /** degrees, for offsetType angle */
   offsetAngle: number;
 }

@@ -1,6 +1,9 @@
 import React, { useRef, useState } from 'react';
 import type { CurvePoint, LumiCurveParams } from '../../appearance/types';
-import { sampleCurve, smoothTangents } from '../../appearance/evaluate';
+import { sampleCurve, smoothTangents, pointOffsetDir } from '../../appearance/evaluate';
+
+/** Length (in local -1..1 units) of the freeform offset-direction handle drawn per point. */
+const DIR_HANDLE_LEN = 0.14;
 
 interface Props {
   params: LumiCurveParams;
@@ -39,12 +42,21 @@ export const CurveEditor: React.FC<Props> = ({ params, aspect, onChange }) => {
     return { x: ((e.clientX - r.left) / r.width) * 2 - 1, y: 1 - ((e.clientY - r.top) / r.height) * 2 };
   };
 
+  const freeform = params.offsetType === 'freeform';
+  /** The point's own explicit direction if set, else the same auto default the evaluator falls back to. */
+  const dirHandlePos = (q: CurvePoint): { x: number; y: number } => {
+    if (q.offsetDirX !== undefined && q.offsetDirY !== undefined) return { x: q.x + q.offsetDirX, y: q.y + q.offsetDirY };
+    const { ux, uy } = pointOffsetDir(q);
+    return { x: q.x + ux * DIR_HANDLE_LEN, y: q.y + uy * DIR_HANDLE_LEN };
+  };
+
   /** Nearest control point or handle within reach, for snap selection. */
-  const nearest = (lx: number, ly: number): { kind: 'pt' | 'in' | 'out'; i: number } | null => {
-    let best: { kind: 'pt' | 'in' | 'out'; i: number } | null = null;
+  const nearest = (lx: number, ly: number): { kind: 'pt' | 'in' | 'out' | 'dir'; i: number } | null => {
+    let best: { kind: 'pt' | 'in' | 'out' | 'dir'; i: number } | null = null;
     let bd = 0.08 * 0.08 * 4;
     pts.forEach((q, i) => {
-      const cands: ['pt' | 'in' | 'out', number, number][] = [['pt', q.x, q.y], ['in', q.x + q.inX, q.y + q.inY], ['out', q.x + q.outX, q.y + q.outY]];
+      const cands: ['pt' | 'in' | 'out' | 'dir', number, number][] = [['pt', q.x, q.y], ['in', q.x + q.inX, q.y + q.inY], ['out', q.x + q.outX, q.y + q.outY]];
+      if (freeform) { const d = dirHandlePos(q); cands.push(['dir', d.x, d.y]); }
       for (const [kind, x, y] of cands) {
         const d = (x - lx) ** 2 + (y - ly) ** 2;
         if (d < bd) { bd = d; best = { kind, i }; }
@@ -70,6 +82,7 @@ export const CurveEditor: React.FC<Props> = ({ params, aspect, onChange }) => {
           if (i !== hit.i) return q;
           if (hit.kind === 'pt') return { ...q, x: p.x, y: p.y };
           if (hit.kind === 'in') return { ...q, inX: p.x - q.x, inY: p.y - q.y };
+          if (hit.kind === 'dir') return { ...q, offsetDirX: p.x - q.x, offsetDirY: p.y - q.y };
           return { ...q, outX: p.x - q.x, outY: p.y - q.y };
         }));
       };
@@ -168,15 +181,24 @@ export const CurveEditor: React.FC<Props> = ({ params, aspect, onChange }) => {
         <path d={offsetPath(params.greenOffset, 1)} fill="none" stroke="#3c6" strokeWidth={1} strokeDasharray="3 3" />
         <path d={offsetPath(params.symmetrical ? params.greenOffset : params.blueOffset, -1)} fill="none" stroke="#48f" strokeWidth={1} strokeDasharray="3 3" />
         <path d={path} fill="none" stroke="#fa4" strokeWidth={2} />
-        {pts.map((q, i) => (
+        {pts.map((q, i) => {
+          const dp = freeform ? dirHandlePos(q) : null;
+          return (
           <g key={i}>
             <line x1={px(q.x)} y1={py(q.y)} x2={px(q.x + q.inX)} y2={py(q.y + q.inY)} stroke="#888" />
             <line x1={px(q.x)} y1={py(q.y)} x2={px(q.x + q.outX)} y2={py(q.y + q.outY)} stroke="#888" />
             <rect x={px(q.x + q.inX) - 3} y={py(q.y + q.inY) - 3} width={6} height={6} fill={snap === `in${i}` ? '#fff' : '#bbb'} />
             <rect x={px(q.x + q.outX) - 3} y={py(q.y + q.outY) - 3} width={6} height={6} fill={snap === `out${i}` ? '#fff' : '#bbb'} />
+            {dp && (
+              <>
+                <line x1={px(q.x)} y1={py(q.y)} x2={px(dp.x)} y2={py(dp.y)} stroke="#fff" strokeWidth={1} strokeDasharray="2 2" />
+                <circle cx={px(dp.x)} cy={py(dp.y)} r={4} fill={snap === `dir${i}` ? '#f4a' : '#fff'} stroke="#000" />
+              </>
+            )}
             <circle cx={px(q.x)} cy={py(q.y)} r={5} fill={snap === `pt${i}` ? '#fff' : '#fa4'} stroke="#000" />
           </g>
-        ))}
+          );
+        })}
       </svg>
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 3, marginTop: 4 }}>
         <button className="btn-sm" title="Flip horizontally" onClick={() => setPts(pts.map((q) => ({ x: -q.x, y: q.y, inX: -q.inX, inY: q.inY, outX: -q.outX, outY: q.outY })))}>Flip H</button>

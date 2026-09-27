@@ -112,6 +112,52 @@ for (const t of types) {
   const d = renderAppearance(a, 32, 32, 1);
   ok(d[(16 * 32 + 16) * 4 + 3] < 0.05 && d[3] > 0.95, 'invert flips alpha mask');
 }
+{
+  // Lumi-Curve Freeform Offset: a per-point offsetDirX/Y override must
+  // actually steer the falloff direction (not be silently ignored), while a
+  // freeform curve with NO overrides set must render identically to 'normal'
+  // mode (the auto default IS the curve normal, so nothing should regress
+  // for existing presets/curves that never touch this field).
+  const w = 48, h = 48, aspect = 1;
+  const a = newAppearance('lumicurve');
+  type LumiCurveContent = { type: 'lumicurve'; p: import('../../src/appearance/types').LumiCurveParams };
+  const c = a.master.content as LumiCurveContent;
+  c.p.points = [
+    { x: -0.4, y: -0.1, inX: -0.1, inY: 0, outX: 0.1, outY: 0 },
+    { x: 0.4, y: 0.15, inX: -0.1, inY: 0, outX: 0.1, outY: 0 },
+  ];
+  c.p.closed = false;
+  c.p.offsetType = 'freeform';
+  c.p.greenOffset = 0.3; c.p.blueOffset = 0.3; c.p.symmetrical = true;
+  c.p.greenRamp = [{ pos: 0, value: 1 }, { pos: 1, value: 0.1 }];
+
+  c.p.points[1] = { ...c.p.points[1], offsetDirX: 1, offsetDirY: 0.05 };
+  const dA = renderAppearance(a, w, h, aspect);
+  c.p.points[1] = { ...c.p.points[1], offsetDirX: 0.05, offsetDirY: 1 };
+  const dB = renderAppearance(a, w, h, aspect);
+  let diffAB = 0;
+  for (let i = 0; i < dA.length; i++) diffAB += Math.abs(dA[i] - dB[i]);
+  ok(diffAB > 1, `freeform per-point offset direction changes rendered output (diff=${diffAB.toFixed(3)})`);
+
+  // When every point's freeform direction is set to the SAME fixed vector,
+  // the per-segment interpolation collapses to one constant direction - the
+  // exact same line-intersection sampling 'angle' mode already does - so the
+  // two must render identically. This is the one case with a known-exact
+  // expected result; an unset (auto) freeform direction deliberately behaves
+  // differently (nearest-point Euclidean vs directional line-intersection),
+  // same as 'vertical'/'horizontal'/'angle' already differ from 'normal'.
+  const ang = 30 * (Math.PI / 180);
+  const ux = Math.cos(ang), uy = Math.sin(ang);
+  c.p.points = c.p.points.map((pt) => ({ ...pt, offsetDirX: ux, offsetDirY: uy }));
+  c.p.offsetType = 'freeform';
+  const dFreeFixed = renderAppearance(a, w, h, aspect);
+  c.p.offsetType = 'angle';
+  c.p.offsetAngle = 30;
+  const dAngle = renderAppearance(a, w, h, aspect);
+  let diffAngle = 0;
+  for (let i = 0; i < dAngle.length; i++) diffAngle += Math.abs(dAngle[i] - dFreeFixed[i]);
+  ok(diffAngle < 1e-6, `freeform with one uniform direction on every point matches 'angle' mode exactly (diff=${diffAngle})`);
+}
 void defaultContent;
 
 // ── PNG writer ──────────────────────────────────────────────────────────────

@@ -221,10 +221,11 @@ const ContentControls: React.FC<{
           <Dropdown
             label="Offset type"
             value={p.offsetType}
-            options={[{ value: 'normal', label: 'Line normal' }, { value: 'vertical', label: 'Vertical' }, { value: 'horizontal', label: 'Horizontal' }, { value: 'angle', label: 'Angle' }]}
+            options={[{ value: 'normal', label: 'Line normal' }, { value: 'vertical', label: 'Vertical' }, { value: 'horizontal', label: 'Horizontal' }, { value: 'angle', label: 'Angle' }, { value: 'freeform', label: 'Freeform (per-point)' }]}
             onChange={(v) => set({ offsetType: v })}
           />
           {p.offsetType === 'angle' && <Slider label="Offset angle" value={p.offsetAngle} min={-180} max={180} step={1} unit="°" onChange={(v) => set({ offsetAngle: v })} />}
+          {p.offsetType === 'freeform' && <div style={{ fontSize: 9, color: 'var(--text-dim)', margin: '2px 0 4px' }}>Drag each point's short white handle in the curve editor above to aim its own falloff direction.</div>}
           <Slider label="Falloff offset (green)" value={p.greenOffset} min={0.01} max={1.5} step={0.005} onChange={(v) => set({ greenOffset: v })} />
           {!p.symmetrical && <Slider label="Falloff offset (blue)" value={p.blueOffset} min={0.01} max={1.5} step={0.005} onChange={(v) => set({ blueOffset: v })} />}
           <Toggle label="Symmetrical" checked={p.symmetrical} variant="glossy" onChange={(v) => set({ symmetrical: v, blueRamp: v ? p.blueRamp : JSON.parse(JSON.stringify(p.greenRamp)), blueOffset: v ? p.blueOffset : p.greenOffset })} />
