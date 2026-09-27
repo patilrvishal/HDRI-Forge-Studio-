@@ -72,11 +72,15 @@ export const BLEND_LABELS: Record<AppearanceBlend, string> = {
   divide: 'Divide',
 };
 
-/** A control point on a ramp. `value` drives value/alpha ramps, `color` colour ramps. */
+/**
+ * A control point on a ramp. `value` drives value/alpha ramps, `color` colour ramps.
+ * `interp` is how the ramp travels from this stop to the next one.
+ */
 export interface RampStop {
   pos: number;
   value: number;
   color?: string;
+  interp?: 'linear' | 'cosine' | 'step';
 }
 
 export interface ContentTransform {
@@ -100,35 +104,48 @@ export const defaultTransform = (): ContentTransform => ({
   flipY: false,
 });
 
-// ── Per-type parameters ─────────────────────────────────────────────────────
+// ── Per-type parameters (control names follow HDR Light Studio's content reference) ──
 
+/** Flat: one colour for the whole light. */
 export interface FlatParams {
   color: string;
   intensity: number;
   alpha: number;
 }
 
+/** Bulb: a bright filament that falls off toward the outside of a Round / Rect / Hex light. */
 export interface BulbParams {
+  shape: 'round' | 'rect' | 'hex';
+  /** 0-100 % - size of the bulb filament. */
+  width: number;
+  /** -50..50 - vertical position of the filament. */
+  position: number;
+  /** Cut the light across the middle, removing the bottom half. */
+  half: boolean;
+  /** Extend the falloff into the corners (softbox look) instead of stopping at the inner bounding box. */
+  outside: boolean;
+  colorMode: 'flat' | 'ramp';
   color: string;
   intensity: number;
-  /** 0-1 radius of the bulb relative to the half size of the light. */
-  width: number;
-  /** 0-1 radius beyond which the bulb is cut off (extent). */
-  extent: number;
-  /** Brightness from centre (pos 0) to edge (pos 1). */
-  ramp: RampStop[];
+  /** Colour along centre (0) to outside (1) when colorMode is ramp. */
+  colorRamp: RampStop[];
+  /** Transparency from the centre (0) to the outside (1). */
+  alphaRamp: RampStop[];
 }
 
 export interface GradientParams {
   mode: 'linear' | 'radial';
-  /** degrees, linear mode */
-  angle: number;
-  color: string;
+  /** degrees */
+  rotation: number;
+  /** -1..1 origin of the gradient in light space. */
+  originX: number;
+  originY: number;
+  /** Size of the gradient (1 = spans the light). */
+  extent: number;
   intensity: number;
+  colorRamp: RampStop[];
   valueRamp: RampStop[];
   alphaRamp: RampStop[];
-  colorRamp: RampStop[];
-  useColorRamp: boolean;
 }
 
 export interface BoxGradParams {
@@ -143,34 +160,47 @@ export interface BoxGradParams {
   right: { pos: number; soft: number };
   top: { pos: number; soft: number };
   bottom: { pos: number; soft: number };
+  /** Edge transition interpolation. */
+  edgeInterp: 'cosine' | 'step';
 }
 
 export interface PolygonParams {
   color: string;
   intensity: number;
+  /** 3-12 */
   sides: number;
-  /** 0-1 of the half size */
-  radius: number;
-  /** 0-1 corner rounding */
-  cornerRadius: number;
+  /** 0-1 softness of the outer edge (the polygon scales down to leave room for the soft edge). */
   softness: number;
+  /** 0-1 corner radius; 1 = a perfect circle. */
+  radius: number;
 }
 
 export interface ImageParams {
   imageId: string | null;
-  channel: 'rgba' | 'rgb' | 'luminance' | 'alpha';
-  fit: 'stretch' | 'fit' | 'fill';
-  wrap: 'clamp' | 'repeat' | 'mirror';
-  /** Exposure in stops applied to the image. */
-  exposure: number;
+  /** Apply the colour-space reverse transform (LDR images: sRGB to linear). */
+  colorTransform: boolean;
+  half: boolean;
+  flip: boolean;
+  unpremultiply: boolean;
+  invertAlpha: boolean;
+  colorMode: 'source' | 'flat' | 'ramp';
   color: string;
+  rampMode: 'linear' | 'radial';
+  colorRamp: RampStop[];
+  saturation: number;
+  gamma: number;
+  /** Extra exposure in stops. */
+  exposure: number;
 }
 
+/** A Lumi-Curve control point with Bezier tangent handles (local offsets). */
 export interface CurvePoint {
   x: number;
   y: number;
-  /** Width multiplier at this point (0-2). */
-  w: number;
+  inX: number;
+  inY: number;
+  outX: number;
+  outY: number;
 }
 
 export interface LumiCurveParams {
@@ -178,55 +208,80 @@ export interface LumiCurveParams {
   intensity: number;
   points: CurvePoint[];
   closed: boolean;
-  smooth: boolean;
-  /** 0-1 of the half size. */
-  thickness: number;
-  softness: number;
-  glow: number;
-  glowFalloff: number;
-  taper: 'none' | 'ends' | 'start' | 'end';
-  /** Brightness along the curve start (pos 0) to end (pos 1). */
-  ramp: RampStop[];
+  /** Distance from the centre line to the falloff offset, each side (light-space units). */
+  greenOffset: number;
+  blueOffset: number;
+  /** Brightness from the centre line (0) to the offset (1). */
+  greenRamp: RampStop[];
+  blueRamp: RampStop[];
+  /** Use the green ramp for both sides. */
+  symmetrical: boolean;
+  /** Brightness multiplier along the length of the curve (0 = start, 1 = end). */
+  lengthRamp: RampStop[];
+  /** 0-0.49 roundness of each end. */
+  roundnessStart: number;
+  roundnessEnd: number;
+  /** 1-6 sharpness of the transition at each end. */
+  startBlend: number;
+  endBlend: number;
+  /** degrees */
+  startAngle: number;
+  endAngle: number;
+  offsetType: 'normal' | 'vertical' | 'horizontal' | 'angle';
+  /** degrees, for offsetType angle */
+  offsetAngle: number;
 }
 
+/** Scrim light: a polygon or spot light above a diffusing scrim. */
 export interface ScrimParams {
+  kind: 'polygon' | 'spot';
   color: string;
   intensity: number;
-  /** Scrim size relative to the light (0-1). */
-  width: number;
+  /** Distance from the light to the scrim. */
   height: number;
-  /** Light position behind the scrim: x,y in -1..1, z = distance behind. */
-  lightX: number;
-  lightY: number;
-  lightZ: number;
-  lightSize: number;
-  falloff: number;
-  /** 0 = pure hotspot, 1 = perfectly diffused/even. */
-  diffusion: number;
-  edgeSoftness: number;
-  /** Width of the darker frame around the scrim (0-1). */
-  frame: number;
+  /** degrees the light leans away from pointing straight at the scrim. */
+  tilt: number;
+  posX: number;
+  posY: number;
+  /** degrees, front-view rotation of the light. */
+  rotation: number;
+  /** Polygon light: 3-25 sides and size. */
+  sides: number;
+  width: number;
+  depth: number;
+  /** degrees of emission spread. */
+  spread: number;
+  /** Height above the scrim below which the light is faded out, softening edges. */
+  surfaceFade: number;
+  /** Scale of the light effect on the scrim. */
+  zoom: number;
+  /** Where the light aims (LightPaint handle); equal to the position = straight down. */
+  handleX: number;
+  handleY: number;
+  /** Spot light: brightness from centre (0) to edge (1). */
+  falloff: RampStop[];
 }
 
+/** Sky: a physically based sky (Preetham) laid out in texture space: x = azimuth, y = altitude 0-90. */
 export interface SkyParams {
-  /** Sun position as direction on the sphere: azimuth 0-360, elevation -90..90. */
-  sunAzimuth: number;
-  sunElevation: number;
-  /** Angular size multiplier (1 = realistic). Bigger suns keep their energy. */
-  sunSize: number;
-  sunIntensity: number;
+  /** 0-90 degrees. */
+  altitude: number;
+  /** -180..180 degrees, position of the sun in texture space. */
+  azimuth: number;
+  /** 0-10 */
   turbidity: number;
-  zenithColor: string;
-  horizonColor: string;
-  groundColor: string;
-  /** Horizon position (-1..1) and softness (0-1) of the sky/ground alpha ramp. */
-  horizon: number;
-  horizonSoftness: number;
-  groundAlpha: number;
-  falloff: number;
-  intensity: number;
-  cloudsImageId: string | null;
-  cloudsAmount: number;
+  /** 0-1 ground reflectance bounced back into the sky. */
+  albedo: number;
+  /** Multiplier on the sun's angular size; energy is preserved. */
+  discSize: number;
+  discVisible: boolean;
+  /** Softness of the disc edge (ramp centre to edge). */
+  discFalloff: RampStop[];
+  /** Brightness multiplier for the sun only. */
+  energyBoost: number;
+  skyVisible: boolean;
+  /** Vertical alpha ramp of the sky (bottom = horizon, top = zenith). */
+  skyAlpha: RampStop[];
 }
 
 export type ContentParams =
@@ -303,6 +358,8 @@ export interface AppearanceImage {
   height: number;
   /** Linear RGBA float. */
   data: Float32Array;
+  /** True for 8-bit images (PNG/JPG): the stored values were converted from sRGB. */
+  ldr?: boolean;
 }
 
 export interface EvalContext {

@@ -106,18 +106,22 @@ export interface TexturedAreaSettings {
   enabled: boolean;
   /** Emitter is visible to the camera (off = still lights, but is not seen). */
   camVisibility: boolean;
-  /** Distance is chosen automatically so the panel sits just outside the model. */
-  smartDolly: boolean;
-  /** Multiplies the (smart or manual) distance from the model. */
+  /** Smart Dolly: distance factor. Moves the light closer / further AND scales its size so the
+   *  light it delivers stays consistent (1 = where LightPaint put it). */
+  smartDolly: number;
+  /** Dolly Multiplier: moves the light without changing its size. */
   dollyMultiplier: number;
+  /** Multiplier on the area light texture resolution (export and preview). */
+  textureScale: number;
   /** 0-100. 100 = wide (Lambert) emission, lower = tighter beam. */
   spread: number;
-  /** Scale the panel with the dolly so its reflections keep the same size. */
+  /** On: the size follows the dolly so the light keeps the same size in reflections on flat surfaces.
+   *  Off: the size follows the dolly so the light fills the same solid angle (same illumination). */
   maintainReflectionSize: boolean;
 }
 
 export function createDefaultTexturedArea(): TexturedAreaSettings {
-  return { enabled: false, camVisibility: true, smartDolly: false, dollyMultiplier: 1, spread: 100, maintainReflectionSize: true };
+  return { enabled: false, camVisibility: true, smartDolly: 1, dollyMultiplier: 1, spread: 100, maintainReflectionSize: true, textureScale: 1 };
 }
 
 export interface LightDropShadow {

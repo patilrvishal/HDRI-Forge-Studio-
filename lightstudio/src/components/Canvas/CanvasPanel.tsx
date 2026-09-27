@@ -12,7 +12,7 @@ import { linearToSrgbChannel } from '../../appearance/evaluate';
 import { newAppearance, newLayer } from '../../appearance/content';
 import { collectLightFrames, dirToUv, insideRect, planeOffsets, rectPointUv, uvToDir, type LightFrame } from './canvasGeometry';
 import type { Light } from '../../types/Light';
-import type { CurvePoint } from '../../appearance/types';
+import { smoothTangents } from '../../appearance/evaluate';
 
 const CW = 1024, CH = 512;
 const BW = 512, BH = 256;
@@ -261,10 +261,11 @@ export const CanvasPanel: React.FC = () => {
     const hw = Math.max(0.3, (maxx - minx) / 2 * 1.25), hh = Math.max(0.3, (maxy - miny) / 2 * 1.25);
     const centre = c.clone().multiplyScalar(R).addScaledVector(right, cx).addScaledVector(up, cy).normalize().multiplyScalar(R);
     // the panel's x runs to the viewer's right = the light's -X = the map's +right axis reversed; see LightAppearanceSection
-    const points: CurvePoint[] = local.map((p) => ({ x: Math.max(-1.3, Math.min(1.3, -((p.x - cx) / hw))), y: Math.max(-1.3, Math.min(1.3, (p.y - cy) / hh)), w: 1 }));
+    const rawPts = local.map((p) => ({ x: Math.max(-1.3, Math.min(1.3, -((p.x - cx) / hw))), y: Math.max(-1.3, Math.min(1.3, (p.y - cy) / hh)) }));
+    const points = smoothTangents(rawPts, false);
     const app = newAppearance('lumicurve', 'Lumi-Curve');
     const layer = newLayer('lumicurve', { name: 'Master' });
-    if (layer.content.type === 'lumicurve') { layer.content.p.points = points; layer.content.p.smooth = true; layer.content.p.thickness = 0.1; layer.content.p.glow = 0.4; }
+    if (layer.content.type === 'lumicurve') { layer.content.p.points = points; layer.content.p.greenOffset = 0.12; layer.content.p.blueOffset = 0.12; }
     app.master = layer;
     const st = useLightsStore.getState();
     st.addLight('area');

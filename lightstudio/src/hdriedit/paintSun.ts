@@ -60,12 +60,11 @@ export function paintSunToDirection(dir: THREE.Vector3): 'light' | 'sky' | null 
     const lx = d.dot(right) / cosc, ly = d.dot(up) / cosc;
     const x = Math.max(-1, Math.min(1, -(lx / tanW))); // texture u runs to the viewer's right = light -X
     const y = Math.max(-1, Math.min(1, ly / tanH));
-    const p = sky.layer.content.p as { horizon: number; sunAzimuth: number; sunElevation: number };
-    const horizon = p.horizon;
-    const az = (x + 1) * 180;
-    const el = y >= horizon ? ((y - horizon) / Math.max(1e-3, 1 - horizon)) * 90 : -((horizon - y) / Math.max(1e-3, horizon + 1)) * 90;
+    // Sky content is laid out in texture space: x = azimuth -180..180, y = altitude 0..90
+    const az = x * 180;
+    const alt = Math.max(0, Math.min(90, ((y + 1) / 2) * 90));
     const app = light.appearance!;
-    const patchLayer = (layer: ContentLayer): ContentLayer => ({ ...layer, content: { ...layer.content, p: { ...layer.content.p, sunAzimuth: az, sunElevation: el } } as ContentLayer['content'] });
+    const patchLayer = (layer: ContentLayer): ContentLayer => ({ ...layer, content: { ...layer.content, p: { ...layer.content.p, azimuth: az, altitude: alt } } as unknown as ContentLayer['content'] });
     const next: LightAppearance = sky.where === 'master'
       ? { ...app, master: patchLayer(app.master) }
       : { ...app, valueBlend: app.valueBlend.map((l, i) => (i === sky.index ? patchLayer(l) : l)) };

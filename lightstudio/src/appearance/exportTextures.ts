@@ -54,6 +54,7 @@ export function lightAspect(l: Light): number {
 
 /** Render + download the RGBA texture of one light. */
 export async function exportLightTexture(l: Light, format: 'exr' | 'png', longSide = 1024): Promise<void> {
+  longSide = Math.round(longSide * (l.areaTex?.textureScale ?? 1));
   const app = l.appearance ?? newAppearance('flat');
   const tex = renderTexture(app, lightAspect(l), longSide);
   const base = safeName(l.name);
@@ -91,7 +92,7 @@ export async function exportAreaLightPack(scene: THREE.Scene, lights: Light[], f
     const l = byId.get(ra.userData.lightId);
     if (!l || !l.areaTex?.enabled || !l.visible) return;
     const aspect = ra.width / Math.max(0.001, ra.height);
-    const tex = renderTexture(l.appearance ?? newAppearance('flat'), aspect, longSide);
+    const tex = renderTexture(l.appearance ?? newAppearance('flat'), aspect, Math.round(longSide * (l.areaTex.textureScale ?? 1)));
     const idx = entries.length;
     const file = `${String(idx + 1).padStart(2, '0')}_${safeName(l.name)}.${format}`;
     ra.getWorldQuaternion(q);

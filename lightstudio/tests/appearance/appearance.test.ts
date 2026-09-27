@@ -59,8 +59,8 @@ for (const t of types) {
   // bulb: centre brighter than edge
   const a = newAppearance('bulb');
   const d = renderAppearance(a, 33, 33, 1);
-  const c = d[(16 * 33 + 16) * 4], e = d[(16 * 33 + 1) * 4];
-  ok(c > e, 'bulb centre brighter than edge');
+  const c = d[(16 * 33 + 16) * 4 + 3], e = d[(16 * 33 + 1) * 4 + 3];
+  ok(c > e, 'bulb centre more opaque than edge');
 }
 {
   // global brightness +1 EV doubles radiance
@@ -96,7 +96,7 @@ for (const t of types) {
   const imgs = new Map();
   imgs.set('i', { id: 'i', name: 'i', width: 2, height: 1, data: new Float32Array([1, 0, 0, 1, 0, 1, 0, 1]) });
   const a = newAppearance('image');
-  if (a.master.content.type === 'image') { a.master.content.p.imageId = 'i'; a.master.content.p.fit = 'stretch'; }
+  if (a.master.content.type === 'image') { a.master.content.p.imageId = 'i'; }
   const d = renderAppearance(a, 16, 8, 2, imgs);
   ok(d[(4 * 16 + 1) * 4] > 0.9 && d[(4 * 16 + 1) * 4 + 1] < 0.1, 'image left is red');
   ok(d[(4 * 16 + 14) * 4 + 1] > 0.9, 'image right is green');

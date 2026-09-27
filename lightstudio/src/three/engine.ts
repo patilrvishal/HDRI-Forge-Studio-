@@ -1794,18 +1794,28 @@ export class LightManager {
     let py = s.height;
     let pz = s.radius * Math.sin(lngRad);
 
-    // HDR Textured Area Lights: Smart Dolly / Dolly Multiplier move the panel along the
-    // line from the model to the light; Maintain Reflection Size scales the panel by the
-    // same factor so its angular size (what shows in reflections) does not change.
+    // HDR Textured Area Lights.
+    //  - Smart Dolly moves the light closer / further AND scales it, so the illumination it delivers
+    //    stays consistent. With Maintain Reflection Size on, the scale is chosen so the light keeps
+    //    the same size in reflections on flat surfaces instead of the same solid angle.
+    //  - Dolly Multiplier moves the light without changing its size.
     const isAreaLight = (ld.type === 'area' || ld.type === 'overhead') && !ld.objectKey;
     let sizeK = 1;
     if (isAreaLight && ld.areaTex?.enabled) {
       const r0 = Math.max(0.05, Math.hypot(px, py, pz));
-      const base = ld.areaTex.smartDolly ? Math.min(40, Math.max(1.5, this._sceneRadius() * 1.25)) : r0;
-      const effR = base * Math.min(10, Math.max(0.1, ld.areaTex.dollyMultiplier ?? 1));
-      const k = effR / r0;
+      const sd = Math.min(10, Math.max(0.05, typeof ld.areaTex.smartDolly === 'number' ? ld.areaTex.smartDolly : 1));
+      const dm = Math.min(10, Math.max(0.05, ld.areaTex.dollyMultiplier ?? 1));
+      const k = sd * dm;
       px *= k; py *= k; pz *= k;
-      sizeK = ld.areaTex.maintainReflectionSize === false ? 1 : k;
+      if (ld.areaTex.maintainReflectionSize === false) {
+        sizeK = sd; // same solid angle from the model
+      } else {
+        // reflection size on a flat surface at the edge of the model as seen from the camera
+        const cam = (window as unknown as { __lightforgeScene?: { camera?: THREE.Camera } }).__lightforgeScene?.camera;
+        const V = cam ? Math.max(0.5, cam.position.length()) : 5;
+        const rObj = Math.min(this._sceneRadius(), r0 * 0.9);
+        sizeK = (V + Math.max(0.1, r0 * sd - rObj)) / (V + Math.max(0.1, r0 - rObj));
+      }
     }
 
     lightObj.userData.edgeSoftness = ld.edgeSoftness ?? 50;
@@ -1983,7 +1993,7 @@ export class LightManager {
     const at = ld.areaTex;
     const w = Math.max(0.01, light.width);
     const h = Math.max(0.01, light.height);
-    const tex = ld.appearance ? getLightTexture(ld.id, ld.appearance, w / h) : null;
+    const tex = ld.appearance ? getLightTexture(ld.id, ld.appearance, w / h, Math.round(Math.min(768, Math.max(96, 192 * (at?.textureScale ?? 1))))) : null;
     if (!ld.appearance) dropLightTexture(ld.id);
     light.userData.appearanceTex = tex ? { data: tex.data, width: tex.width, height: tex.height } : undefined;
     light.userData.areaMode = !!at?.enabled;

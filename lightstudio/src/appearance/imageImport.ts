@@ -39,7 +39,7 @@ function downscale(src: Float32Array, w: number, h: number): { data: Float32Arra
   return { data: out, width: nw, height: nh };
 }
 
-async function decodeLdr(file: Blob): Promise<{ data: Float32Array; width: number; height: number }> {
+async function decodeLdr(file: Blob): Promise<{ data: Float32Array; width: number; height: number; ldr?: boolean }> {
   const bmp = await createImageBitmap(file, { premultiplyAlpha: 'none', colorSpaceConversion: 'none' });
   const canvas = document.createElement('canvas');
   canvas.width = bmp.width;
@@ -57,7 +57,7 @@ async function decodeLdr(file: Blob): Promise<{ data: Float32Array; width: numbe
     out[i * 4 + 3] = id.data[i * 4 + 3] / 255;
   }
   bmp.close();
-  return { data: out, width: bmp.width, height: bmp.height };
+  return { data: out, width: bmp.width, height: bmp.height, ldr: true };
 }
 
 function decodeFloatTexture(parsed: { width: number; height: number; data: ArrayLike<number> }, flip: boolean): { data: Float32Array; width: number; height: number } {
@@ -81,7 +81,7 @@ function decodeFloatTexture(parsed: { width: number; height: number; data: Array
   return { data: out, width, height };
 }
 
-export async function decodeImageBuffer(buf: ArrayBuffer, name: string, type = ''): Promise<{ data: Float32Array; width: number; height: number }> {
+export async function decodeImageBuffer(buf: ArrayBuffer, name: string, type = ''): Promise<{ data: Float32Array; width: number; height: number; ldr?: boolean }> {
   const lower = name.toLowerCase();
   if (lower.endsWith('.hdr') || lower.endsWith('.pic')) {
     const l = new RGBELoader();
@@ -100,7 +100,7 @@ export async function importImageFile(file: File): Promise<AppearanceImage> {
   const buf = await file.arrayBuffer();
   const dec = await decodeImageBuffer(buf, file.name, file.type);
   const ds = downscale(dec.data, dec.width, dec.height);
-  return { id: newImageId(), name: file.name.replace(/\.[^.]+$/, ''), width: ds.width, height: ds.height, data: ds.data };
+  return { id: newImageId(), name: file.name.replace(/\.[^.]+$/, ''), width: ds.width, height: ds.height, data: ds.data, ldr: dec.ldr };
 }
 
 // ── (de)serialisation for project files: half-float base64 ───────────────────
@@ -112,6 +112,7 @@ export interface SerializedImage {
   height: number;
   /** base64 of Uint16 half-float RGBA */
   data: string;
+  ldr?: boolean;
 }
 
 export function serializeImage(img: AppearanceImage): SerializedImage {
@@ -121,7 +122,7 @@ export function serializeImage(img: AppearanceImage): SerializedImage {
   let bin = '';
   const CH = 0x8000;
   for (let i = 0; i < bytes.length; i += CH) bin += String.fromCharCode(...bytes.subarray(i, i + CH));
-  return { id: img.id, name: img.name, width: img.width, height: img.height, data: btoa(bin) };
+  return { id: img.id, name: img.name, width: img.width, height: img.height, data: btoa(bin), ldr: img.ldr };
 }
 
 export function deserializeImage(s: SerializedImage): AppearanceImage {
@@ -131,5 +132,5 @@ export function deserializeImage(s: SerializedImage): AppearanceImage {
   const u16 = new Uint16Array(bytes.buffer);
   const data = new Float32Array(u16.length);
   for (let i = 0; i < u16.length; i++) data[i] = THREE.DataUtils.fromHalfFloat(u16[i]);
-  return { id: s.id, name: s.name, width: s.width, height: s.height, data };
+  return { id: s.id, name: s.name, width: s.width, height: s.height, data, ldr: s.ldr };
 }

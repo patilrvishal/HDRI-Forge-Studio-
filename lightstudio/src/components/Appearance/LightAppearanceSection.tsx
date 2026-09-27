@@ -12,6 +12,8 @@ import { useLightsStore } from '../../store/lightsStore';
 import { AppearanceEditor } from './AppearanceEditor';
 import { PresetLibrary } from './PresetLibrary';
 import { Slider } from '../UI/Slider';
+import { NumericInput } from '../UI/NumericInput';
+import * as THREE from 'three';
 import { Toggle } from '../UI/Toggle';
 
 const Section: React.FC<{ title: string; children: React.ReactNode; defaultOpen?: boolean; right?: React.ReactNode }> = ({ title, children, defaultOpen = true, right }) => {
@@ -33,6 +35,41 @@ const Section: React.FC<{ title: string; children: React.ReactNode; defaultOpen?
 const Hint: React.FC<{ children: React.ReactNode }> = ({ children }) => (
   <div style={{ fontSize: 9, color: 'var(--text-dim)', lineHeight: 1.45, margin: '2px 0 6px' }}>{children}</div>
 );
+
+/** Radius of the model(s) around the origin. */
+function sceneRadiusOf(scene: import('three').Scene): number {
+  const box = new THREE.Box3();
+  const b = new THREE.Box3();
+  scene.traverse((o) => {
+    const m = o as import('three').Mesh;
+    if (!m.isMesh || o.name === '__floor__' || o.name === 'TransformControlsPlane' || !o.visible || !m.geometry) return;
+    for (let p: import('three').Object3D | null = o; p; p = p.parent) if (p.userData?.isHelper || p.userData?.isProxy || p.userData?.isGrid) return;
+    b.setFromObject(m);
+    if (!b.isEmpty()) box.union(b);
+  });
+  if (box.isEmpty()) return 2;
+  return Math.max(box.getBoundingSphere(new THREE.Sphere()).radius, 0.5);
+}
+
+/** LightPaint Pos: the XYZ point this light was last painted onto (its aim point). */
+const LightPaintPos: React.FC<{ light: Light }> = ({ light }) => {
+  const update = useLightsStore((s) => s.updateLightTransform);
+  const aim = (light.transform as { aimTarget?: { x: number; y: number; z: number } }).aimTarget;
+  if (!aim) return <Hint>LightPaint Pos: not painted yet. Use LightPaint on the model to aim this light.</Hint>;
+  const set = (axis: 'x' | 'y' | 'z', v: number) => update(light.id, { aimTarget: { ...aim, [axis]: v } } as never);
+  return (
+    <div>
+      <div className="field-label" style={{ fontSize: 10, margin: '4px 0 2px' }}>LightPaint Pos</div>
+      <div style={{ display: 'flex', gap: 4 }}>
+        {(['x', 'y', 'z'] as const).map((k) => (
+          <div key={k} style={{ flex: 1 }}>
+            <NumericInput label={k.toUpperCase()} value={+aim[k].toFixed(3)} step={0.05} onChange={(v) => set(k, v)} width="100%" />
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+};
 
 /** Canvas showing the rendered appearance over a checkerboard. */
 export const AppearanceCanvas: React.FC<{ appearance: LightAppearance; aspect: number; longSide?: number; maxHeight?: number }> = ({ appearance, aspect, longSide = 200, maxHeight = 220 }) => {
@@ -152,7 +189,7 @@ export const LightAppearanceSection: React.FC<Props> = ({ light, onUpdate }) => 
           />
         )}
         {light.appearance && showEditor && (
-          <AppearanceEditor appearance={light.appearance} aspect={aspect} onChange={(a) => onUpdate({ appearance: a })} />
+          <AppearanceEditor appearance={light.appearance} aspect={aspect} onChange={(a) => onUpdate({ appearance: a })} onRestoreAspect={(ia) => onUpdate({ areaHeight: Math.min(20, Math.max(0.1, +((light.areaWidth ?? 2) / Math.max(0.05, ia)).toFixed(3))) })} />
         )}
         {light.appearance && (
           <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 8 }}>
@@ -163,28 +200,35 @@ export const LightAppearanceSection: React.FC<Props> = ({ light, onUpdate }) => 
       </Section>
 
       {!light.objectKey && (
-        <Section title="Textured Area Light" defaultOpen={false} right={<Toggle checked={tex.enabled} variant="glossy" onChange={(v) => setTex({ enabled: v })} />}>
+        <Section title="Area Light (HDR Textured)" defaultOpen={false} right={<Toggle checked={tex.enabled} variant="glossy" onChange={(v) => setTex({ enabled: v })} />}>
           <div style={{ opacity: tex.enabled ? 1 : 0.5 }}>
             <Hint>
-              Area Light mode turns this light into a real 3D rectangle carrying its appearance as an RGBA texture. It lights and reflects in the viewport and path tracer,
-              and is delivered as a texture instead of being painted into the HDRI.
+              Area Light mode (Ctrl+Space) turns this light into a real 3D rectangle carrying its appearance as an RGBA texture. It lights and reflects in the viewport and path tracer,
+              and is delivered as a texture instead of being painted into the exported HDRI.
             </Hint>
-            <Toggle label="Camera visibility" checked={tex.camVisibility} variant="glossy" onChange={(v) => setTex({ camVisibility: v })} />
-            <Toggle label="Smart Dolly" checked={tex.smartDolly} variant="glossy" onChange={(v) => setTex({ smartDolly: v })} />
+            <Toggle label="Cam visibility" checked={tex.camVisibility} variant="glossy" onChange={(v) => setTex({ camVisibility: v })} />
+            <Slider label="Smart Dolly" value={tex.smartDolly} min={0.1} max={3} step={0.01} onChange={(v) => setTex({ smartDolly: v })} />
+            <div style={{ display: 'flex', gap: 6, margin: '2px 0 6px', alignItems: 'center' }}>
+              <button
+                className="btn-sm"
+                disabled={!scene}
+                title="Set Smart Dolly so the panel sits just outside the model"
+                onClick={() => {
+                  if (!scene) return;
+                  const r = sceneRadiusOf(scene);
+                  const r0 = Math.max(0.05, Math.hypot(light.transform.position.x, light.transform.position.y, light.transform.position.z));
+                  setTex({ smartDolly: Math.min(3, Math.max(0.1, +((r * 1.25) / r0).toFixed(2))) });
+                }}
+              >
+                Fit outside model
+              </button>
+              <span style={{ fontSize: 9, color: 'var(--text-dim)' }}>Moves the light and scales it so the light on the model stays consistent.</span>
+            </div>
             <Slider label="Dolly multiplier" value={tex.dollyMultiplier} min={0.25} max={4} step={0.01} unit="x" onChange={(v) => setTex({ dollyMultiplier: v })} />
             <Toggle label="Maintain reflection size" checked={tex.maintainReflectionSize} variant="glossy" onChange={(v) => setTex({ maintainReflectionSize: v })} />
             <Slider label="Spread" value={tex.spread} min={0} max={100} step={1} unit="%" onChange={(v) => setTex({ spread: v })} />
-            {light.appearance && (
-              <Slider
-                label="Texture scale"
-                value={light.appearance.global.scale}
-                min={0.1}
-                max={5}
-                step={0.01}
-                unit="x"
-                onChange={(v) => onUpdate({ appearance: { ...light.appearance!, global: { ...light.appearance!.global, scale: v } } })}
-              />
-            )}
+            <Slider label="Texture scale" value={tex.textureScale ?? 1} min={0.25} max={4} step={0.25} unit="x" onChange={(v) => setTex({ textureScale: v })} />
+            <LightPaintPos light={light} />
             <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 8 }}>
               <button
                 className="btn-sm"

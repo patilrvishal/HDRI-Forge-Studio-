@@ -13,32 +13,45 @@ import {
   newLayerId,
   CONTENT_TYPE_LABELS,
 } from './types';
+import { smoothTangents } from './evaluate';
 
 export const stops = (...pairs: [number, number][]): RampStop[] => pairs.map(([pos, value]) => ({ pos, value }));
+/** Same, but with cosine interpolation between stops. */
+export const cosStops = (...pairs: [number, number][]): RampStop[] => pairs.map(([pos, value]) => ({ pos, value, interp: 'cosine' as const }));
 export const colorStops = (...pairs: [number, string][]): RampStop[] => pairs.map(([pos, color]) => ({ pos, value: 1, color }));
 
-/** A smooth Gaussian-like falloff, brightest at 0. */
-export const softFalloff = (): RampStop[] =>
-  stops([0, 1], [0.2, 0.9], [0.4, 0.62], [0.6, 0.3], [0.8, 0.08], [1, 0]);
+/** A smooth brightness falloff, brightest at 0. */
+export const softFalloff = (): RampStop[] => cosStops([0, 1], [0.5, 0.55], [1, 0]);
+
+const WHITE_RAMP = (): RampStop[] => colorStops([0, '#ffffff'], [1, '#ffffff']);
+
+/** Curve through a few points with smooth Bezier tangents. */
+export function curveFrom(pts: { x: number; y: number }[], closed = false) {
+  return smoothTangents(pts, closed);
+}
 
 export function defaultContent(type: ContentType): ContentParams {
   switch (type) {
     case 'flat':
       return { type, p: { color: '#ffffff', intensity: 1, alpha: 1 } };
     case 'bulb':
-      return { type, p: { color: '#ffffff', intensity: 1, width: 0.85, extent: 1, ramp: softFalloff() } };
+      return {
+        type,
+        p: {
+          shape: 'round', width: 100, position: 0, half: false, outside: false,
+          colorMode: 'flat', color: '#ffffff', intensity: 1,
+          colorRamp: WHITE_RAMP(),
+          alphaRamp: cosStops([0, 1], [0.5, 0.55], [1, 0]),
+        },
+      };
     case 'gradient':
       return {
         type,
         p: {
-          mode: 'linear',
-          angle: 90,
-          color: '#ffffff',
-          intensity: 1,
+          mode: 'linear', rotation: 90, originX: 0, originY: 0, extent: 1, intensity: 1,
+          colorRamp: WHITE_RAMP(),
           valueRamp: stops([0, 0], [1, 1]),
           alphaRamp: stops([0, 1], [1, 1]),
-          colorRamp: colorStops([0, '#ff8a00'], [1, '#ffffff']),
-          useColorRamp: false,
         },
       };
     case 'boxgrad':
@@ -54,71 +67,58 @@ export function defaultContent(type: ContentType): ContentParams {
           right: { pos: 0.05, soft: 0.1 },
           top: { pos: 0.05, soft: 0.1 },
           bottom: { pos: 0.05, soft: 0.1 },
+          edgeInterp: 'cosine',
         },
       };
     case 'polygon':
-      return { type, p: { color: '#ffffff', intensity: 1, sides: 6, radius: 0.85, cornerRadius: 0, softness: 0.06 } };
+      return { type, p: { color: '#ffffff', intensity: 1, sides: 6, softness: 0.06, radius: 0 } };
     case 'image':
-      return { type, p: { imageId: null, channel: 'rgba', fit: 'fit', wrap: 'clamp', exposure: 0, color: '#ffffff' } };
+      return {
+        type,
+        p: {
+          imageId: null, colorTransform: true, half: false, flip: false, unpremultiply: false, invertAlpha: false,
+          colorMode: 'source', color: '#ffffff', rampMode: 'linear', colorRamp: WHITE_RAMP(), saturation: 1, gamma: 1, exposure: 0,
+        },
+      };
     case 'lumicurve':
       return {
         type,
         p: {
           color: '#ffffff',
           intensity: 1,
-          points: [
-            { x: -0.7, y: -0.3, w: 1 },
-            { x: -0.2, y: 0.4, w: 1 },
-            { x: 0.3, y: -0.4, w: 1 },
-            { x: 0.7, y: 0.3, w: 1 },
-          ],
+          points: curveFrom([{ x: -0.7, y: -0.25 }, { x: -0.25, y: 0.35 }, { x: 0.25, y: -0.35 }, { x: 0.7, y: 0.25 }]),
           closed: false,
-          smooth: true,
-          thickness: 0.12,
-          softness: 0.6,
-          glow: 0,
-          glowFalloff: 1,
-          taper: 'none',
-          ramp: stops([0, 1], [1, 1]),
+          greenOffset: 0.16,
+          blueOffset: 0.16,
+          greenRamp: cosStops([0, 1], [1, 0]),
+          blueRamp: cosStops([0, 1], [1, 0]),
+          symmetrical: true,
+          lengthRamp: stops([0, 1], [1, 1]),
+          roundnessStart: 0.3,
+          roundnessEnd: 0.3,
+          startBlend: 1,
+          endBlend: 1,
+          startAngle: 0,
+          endAngle: 0,
+          offsetType: 'normal',
+          offsetAngle: 90,
         },
       };
     case 'scrim':
       return {
         type,
         p: {
-          color: '#ffffff',
-          intensity: 1,
-          width: 0.9,
-          height: 0.9,
-          lightX: 0,
-          lightY: 0,
-          lightZ: 0.6,
-          lightSize: 0.1,
-          falloff: 1,
-          diffusion: 0.25,
-          edgeSoftness: 0.08,
-          frame: 0.1,
+          kind: 'polygon', color: '#ffffff', intensity: 1, height: 1, tilt: 0, posX: 0, posY: 0, rotation: 0,
+          sides: 4, width: 0.6, depth: 0.6, spread: 120, surfaceFade: 0.05, zoom: 1, handleX: 0, handleY: 0,
+          falloff: cosStops([0, 1], [1, 0.1]),
         },
       };
     case 'sky':
       return {
         type,
         p: {
-          sunAzimuth: 270,
-          sunElevation: 35,
-          sunSize: 1,
-          sunIntensity: 40,
-          turbidity: 3,
-          zenithColor: '#4f86d6',
-          horizonColor: '#cfe2f5',
-          groundColor: '#4a4238',
-          horizon: -0.2,
-          horizonSoftness: 0.05,
-          groundAlpha: 1,
-          falloff: 0.8,
-          intensity: 1,
-          cloudsImageId: null,
-          cloudsAmount: 0.5,
+          altitude: 35, azimuth: 0, turbidity: 3, albedo: 0.3, discSize: 1, discVisible: true,
+          discFalloff: stops([0, 1], [1, 0.6]), energyBoost: 1, skyVisible: true, skyAlpha: stops([0, 1], [1, 1]),
         },
       };
   }
@@ -166,7 +166,10 @@ export function referencedImageIds(a: LightAppearance): string[] {
   for (const l of [a.master, ...a.valueBlend, ...a.alphaMultiply]) {
     const c = l.content;
     if (c.type === 'image' && c.p.imageId) ids.add(c.p.imageId);
-    if (c.type === 'sky' && c.p.cloudsImageId) ids.add(c.p.cloudsImageId);
+  }
+  for (const f of a.filters ?? []) {
+    const id = (f.params as { speedImageId?: string | null }).speedImageId;
+    if (id) ids.add(id);
   }
   return [...ids];
 }

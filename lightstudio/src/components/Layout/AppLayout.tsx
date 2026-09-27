@@ -60,6 +60,7 @@ import { SceneExporter } from '../../three/SceneExporter';
 import { MaterialManager } from '../../three/MaterialManager';
 import * as THREE from 'three';
 import { useEditedEnvSync } from '../../hdriedit/viewportEnv';
+import { useAreaLightShortcut } from '../Lights/useAreaLightShortcut';
 
 
 /** Inline wrapper: Light Profile grid section below the light list */
@@ -128,6 +129,7 @@ const PanelCloseButton: React.FC<{ panel: PanelKey }> = ({ panel }) => (
 
 export const AppLayout: React.FC = () => {
   useEditedEnvSync();
+  useAreaLightShortcut();
   const sceneManagerRef = useRef<SceneManager | null>(null);
   const sceneRef = useRef<THREE.Scene | null>(null);
   const envMapRef = useRef<THREE.Texture | null>(null);

@@ -9,6 +9,7 @@ import type { LightType } from '../../types/Light';
 import type { HDRIShapeType } from '../../types/HDRIShape';
 import { promptForCustomHDRI } from '../../utils/loadCustomHDRI';
 import { addProceduralSky } from '../../hdriedit/addSky';
+import { toggleAreaLight } from '../../three/areaLightApi';
 
 const SHAPE_TYPE_OPTIONS: Array<{ value: HDRIShapeType; label: string }> = [
   { value: 'rectangle', label: 'Rectangle' },
@@ -771,6 +772,11 @@ export const LightListPanel: React.FC = () => {
             </svg>
             Duplicate
           </div>
+          {(() => { const lt = lights.find((x) => x.id === contextMenu.lightId); return lt && (lt.type === 'area' || lt.type === 'overhead') && !lt.objectKey ? (
+            <div className="context-menu-item" onClick={() => { toggleAreaLight(contextMenu.lightId); setContextMenu(null); }}>
+              Toggle Area Light <span style={{ marginLeft: 'auto', opacity: 0.5 }}>Ctrl+Space</span>
+            </div>
+          ) : null; })()}
           <div className="context-menu-sep" />
           <div className="context-menu-item" style={{ color: 'var(--danger)' }} onClick={() => handleDelete(contextMenu.lightId)}>
             <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round">
