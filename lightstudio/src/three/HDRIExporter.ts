@@ -62,7 +62,29 @@ interface ExtractedLight {
   groundColor?: THREE.Color;
   /** RectAreaLight only - 0..1, see the alpha-composite note in evaluateLightRadiance. */
   opacity?: number;
+  /** RectAreaLight only - Light Appearance RGBA texture (linear float, row 0 = top). */
+  tex?: { data: Float32Array; width: number; height: number };
+  /** RectAreaLight only - 0-100 emission spread (100 = Lambert, lower = tighter beam). */
+  spread?: number;
 }
+
+/** Bilinear sample of a light appearance texture at (u,v) in 0..1, v=0 at the top. */
+function sampleLightTex(t: { data: Float32Array; width: number; height: number }, u: number, v: number, out: number[]): void {
+  const w = t.width, h = t.height;
+  const fx = Math.min(w - 1, Math.max(0, u * w - 0.5));
+  const fy = Math.min(h - 1, Math.max(0, v * h - 0.5));
+  const x0 = Math.floor(fx), y0 = Math.floor(fy);
+  const x1 = Math.min(w - 1, x0 + 1), y1 = Math.min(h - 1, y0 + 1);
+  const tx = fx - x0, ty = fy - y0;
+  const d = t.data;
+  const i00 = (y0 * w + x0) * 4, i10 = (y0 * w + x1) * 4, i01 = (y1 * w + x0) * 4, i11 = (y1 * w + x1) * 4;
+  for (let k = 0; k < 4; k++) {
+    const a = d[i00 + k] + (d[i10 + k] - d[i00 + k]) * tx;
+    const b = d[i01 + k] + (d[i11 + k] - d[i01 + k]) * tx;
+    out[k] = a + (b - a) * ty;
+  }
+}
+const _texOut = [0, 0, 0, 0];
 
 /**
  * One environment HDRI layer contributing to the export/preview.
@@ -459,24 +481,40 @@ function evaluateLightRadiance(
       const ny = Math.abs(ly) / Math.tan(Math.min(halfH, 1.55));
       if (nx > 1 || ny > 1) break; // outside the rectangle's true footprint
 
-      const feather = Math.max(0, Math.min(1, (light.edgeSoftness ?? 50) / 100));
-      const featherLo = 1 - feather;
-      const edge = Math.max(nx, ny); // Chebyshev distance = box falloff
-      const coverage = feather < 0.01 ? 1 : 1 - smoothstepHDRI((edge - featherLo) / Math.max(0.001, 1 - featherLo));
+      let coverage: number;
+      let tr = 1, tg = 1, tb = 1;
+      if (light.tex) {
+        // Light Appearance: the RGBA texture defines both the shape (alpha) and the
+        // colour/brightness pattern. u runs to the viewer's right = the light's -X.
+        const tanW = Math.tan(Math.min(halfW, 1.55));
+        const tanH = Math.tan(Math.min(halfH, 1.55));
+        sampleLightTex(light.tex, 0.5 - 0.5 * (lx / tanW), 0.5 - 0.5 * (ly / tanH), _texOut);
+        coverage = Math.max(0, Math.min(1, _texOut[3]));
+        tr = _texOut[0]; tg = _texOut[1]; tb = _texOut[2];
+      } else {
+        const feather = Math.max(0, Math.min(1, (light.edgeSoftness ?? 50) / 100));
+        const featherLo = 1 - feather;
+        const edge = Math.max(nx, ny); // Chebyshev distance = box falloff
+        coverage = feather < 0.01 ? 1 : 1 - smoothstepHDRI((edge - featherLo) / Math.max(0.001, 1 - featherLo));
+      }
       if (coverage <= 0) break;
 
-      // Cosine emission factor (Lambert's law for the area surface)
-      const cosEmit = Math.max(0, -(centerDir.x * lightNormal.x + centerDir.y * lightNormal.y + centerDir.z * lightNormal.z));
+      // Cosine emission factor (Lambert's law for the area surface). Spread < 100 narrows
+      // the lobe: cos^n with n = 1 at 100 rising to 11 at 0.
+      let cosEmit = Math.max(0, -(centerDir.x * lightNormal.x + centerDir.y * lightNormal.y + centerDir.z * lightNormal.z));
+      if (light.spread !== undefined && light.spread < 100) {
+        cosEmit = Math.pow(cosEmit, 1 + (100 - Math.max(0, light.spread)) / 10);
+      }
 
       // Radiance: intensity * cosEmit / solidAngle * coverage. Area lights
       // in studio HDRI should be 200-2000 range (Stage 3).
       const solidAngle = 4 * halfW * halfH;
       const safeSA = Math.max(1e-6, solidAngle);
-      const radiance = (light.intensity * cosEmit * coverage * 0.5 * EXPORT_EXPOSURE) / safeSA;
+      const radiance = (light.intensity * cosEmit * (light.tex ? 1 : coverage) * 0.5 * EXPORT_EXPOSURE) / safeSA;
 
-      result.r = light.color.r * radiance;
-      result.g = light.color.g * radiance;
-      result.b = light.color.b * radiance;
+      result.r = light.color.r * radiance * tr;
+      result.g = light.color.g * radiance * tg;
+      result.b = light.color.b * radiance * tb;
       result.coverage = coverage;
       break;
     }
@@ -608,11 +646,12 @@ export async function generateAnalyticalHDRI(
   height: number,
   capturePoint: THREE.Vector3,
   envLayers: EnvLayer[] = [],
+  options: { includeAreaModeLights?: boolean } = {},
 ): Promise<Float32Array> {
   const pixels = new Float32Array(width * height * 4);
 
   // Extract all lights from scene
-  const lights = extractLightsFromScene(scene);
+  const lights = extractLightsFromScene(scene, !!options.includeAreaModeLights);
   console.log('[LightForge] Found lights:', lights.length);
 lights.forEach((l, i) => {
     console.log(`[LightForge] Light ${i}: type=${l.type} R=${l.color.r.toFixed(3)} G=${l.color.g.toFixed(3)} B=${l.color.b.toFixed(3)} intensity=${l.intensity}`);
@@ -800,7 +839,7 @@ lights.forEach((l, i) => {
  * @param scene - The THREE.Scene to traverse.
  * @returns Array of extracted light data objects.
  */
-function extractLightsFromScene(scene: THREE.Scene): ExtractedLight[] {
+function extractLightsFromScene(scene: THREE.Scene, includeAreaMode = false): ExtractedLight[] {
   const lights: ExtractedLight[] = [];
   const worldPos = new THREE.Vector3();
   const worldQuat = new THREE.Quaternion();
@@ -861,13 +900,21 @@ function extractLightsFromScene(scene: THREE.Scene): ExtractedLight[] {
 
     // ------ RectAreaLight ------------------------------------------------------------------------------------------------------------------------------------------------------------------
     if (child instanceof THREE.RectAreaLight) {
+      // Area Light mode lights are real 3D emitters - they are delivered as textures,
+      // not painted into the HDRI, unless the caller asks for them.
+      if (child.userData.areaMode && !includeAreaMode) return;
+      const tex = child.userData.appearanceTex as ExtractedLight['tex'];
       child.getWorldQuaternion(worldQuat);
       const right = new THREE.Vector3(1, 0, 0).applyQuaternion(worldQuat);
       const up = new THREE.Vector3(0, 1, 0).applyQuaternion(worldQuat);
       const normal = new THREE.Vector3(0, 0, -1).applyQuaternion(worldQuat);
       lights.push({
         type: 'area',
-        color: child.color.clone(),
+        // With a texture the RectAreaLight colour carries the texture's mean; the exporter
+        // samples the texture itself, so use the untouched tint here.
+        color: tex && child.userData.baseColor ? (child.userData.baseColor as THREE.Color).clone() : child.color.clone(),
+        tex,
+        spread: typeof child.userData.spread === 'number' ? child.userData.spread : undefined,
         intensity: child.intensity,
         position: worldPos.clone(),
         width: child.width,

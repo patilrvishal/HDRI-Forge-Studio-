@@ -28,3 +28,4 @@ src-tauri/gen
 *.sw?
 .modtest.mjs
 .modpos.mjs
+.apptest.mjs

@@ -12,6 +12,7 @@ import { colorProfileToHex, hexToKelvin, kelvinToHex } from '../../utils/colorCo
 import { findObjectByKey } from '../../three/objectBinding';
 import { useObjectHdriStore } from '../../store/objectHdriStore';
 import { useSceneHierarchyStore } from '../../store/sceneHierarchyStore';
+import { LightAppearanceSection } from '../Appearance/LightAppearanceSection';
 
 /**
  * Collapsible inspector section with a chevron header — matches the reference
@@ -514,6 +515,8 @@ export const LightProperties: React.FC<{ lightId?: string }> = ({ lightId }) => 
           )}
         </CollapsibleSection>
       )}
+
+      {isAreaLike && <LightAppearanceSection light={light} onUpdate={handleUpdate} />}
 
       {/* Drop shadow - same control set as an HDRI Shape's, baked into the
           HDRI Preview/export as a darkening patch offset from the light. */}

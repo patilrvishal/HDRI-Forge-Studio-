@@ -1,5 +1,7 @@
+import type { LightAppearance } from '../appearance/types';
+
 // Light types for the studio
-export type LightType = 
+export type LightType =
   | 'point' 
   | 'spot' 
   | 'area' 
@@ -88,6 +90,34 @@ export interface Light {
   objectSide?: 'auto' | '+x' | '-x' | '+y' | '-y' | '+z' | '-z';
   /** Make the object itself glow in the viewport / path tracer. Default true. */
   objectGlow?: boolean;
+  /** What the light looks like (content layers + blends). Undefined = classic
+   *  flat light shaped only by Edge Softness. Applies to area-type and object lights. */
+  appearance?: LightAppearance;
+  /** HDR Textured Area Light settings (area-type lights only). */
+  areaTex?: TexturedAreaSettings;
+}
+
+/**
+ * Area Light mode: instead of being painted into the HDRI, the light becomes a real
+ * 3D rectangle carrying its appearance as an RGBA texture.
+ */
+export interface TexturedAreaSettings {
+  /** Area Light mode on/off. */
+  enabled: boolean;
+  /** Emitter is visible to the camera (off = still lights, but is not seen). */
+  camVisibility: boolean;
+  /** Distance is chosen automatically so the panel sits just outside the model. */
+  smartDolly: boolean;
+  /** Multiplies the (smart or manual) distance from the model. */
+  dollyMultiplier: number;
+  /** 0-100. 100 = wide (Lambert) emission, lower = tighter beam. */
+  spread: number;
+  /** Scale the panel with the dolly so its reflections keep the same size. */
+  maintainReflectionSize: boolean;
+}
+
+export function createDefaultTexturedArea(): TexturedAreaSettings {
+  return { enabled: false, camVisibility: true, smartDolly: false, dollyMultiplier: 1, spread: 100, maintainReflectionSize: true };
 }
 
 export interface LightDropShadow {

@@ -18,6 +18,10 @@ import { WebGLPathTracer } from 'three-gpu-pathtracer';
 import { LightProbeGenerator } from 'three/addons/lights/LightProbeGenerator.js';
 import { computeEmitterRect, findObjectByKey, type EmitterSide } from './objectBinding';
 import { ObjectEmitters } from './ObjectEmitters';
+import { TexturedEmitters } from './TexturedEmitters';
+import { getLightTexture, dropLightTexture } from '../appearance/textures';
+import type { LightAppearance } from '../appearance/types';
+import type { TexturedAreaSettings } from '../types/Light';
 
 let _rectAreaLibInitialized = false;
 function ensureRectAreaLib(): void {
@@ -1135,7 +1139,7 @@ export class RenderPipeline {
 
     const hidden: THREE.Object3D[] = [];
     scene.traverse((o) => {
-      if (o.visible && (o.userData?.isProxy || o.userData?.isHelper || o.userData?.hideInPathTracer)) {
+      if (o.visible && ((!o.userData?.keepInPathTracer && (o.userData?.isProxy || o.userData?.isHelper)) || o.userData?.hideInPathTracer)) {
         hidden.push(o);
       }
     });
@@ -1595,6 +1599,9 @@ interface LightSyncEntry {
   objectKey?: string;
   objectSide?: string;
   objectGlow?: boolean;
+  // Light Appearance + HDR Textured Area Light settings
+  appearance?: LightAppearance;
+  areaTex?: TexturedAreaSettings;
 }
 
 interface LightObjectEntry {
@@ -1612,9 +1619,13 @@ export class LightManager {
   private _bound = new Map<string, { ld: LightSyncEntry; show: boolean }>();
   private _objCache = new Map<string, THREE.Object3D>();
   private _frame = 0;
+  private _texEmitters: TexturedEmitters;
+  private _sceneR = 2;
+  private _sceneRFrame = -1;
 
   constructor(scene: THREE.Scene) {
     this._scene = scene;
+    this._texEmitters = new TexturedEmitters(scene);
     ensureRectAreaLib();
   }
 
@@ -1776,9 +1787,23 @@ export class LightManager {
     // the light in toward the origin - which is why LightPaint never landed
     // where you clicked.
     void latRad;
-    const px = s.radius * Math.cos(lngRad);
-    const py = s.height;
-    const pz = s.radius * Math.sin(lngRad);
+    let px = s.radius * Math.cos(lngRad);
+    let py = s.height;
+    let pz = s.radius * Math.sin(lngRad);
+
+    // HDR Textured Area Lights: Smart Dolly / Dolly Multiplier move the panel along the
+    // line from the model to the light; Maintain Reflection Size scales the panel by the
+    // same factor so its angular size (what shows in reflections) does not change.
+    const isAreaLight = (ld.type === 'area' || ld.type === 'overhead') && !ld.objectKey;
+    let sizeK = 1;
+    if (isAreaLight && ld.areaTex?.enabled) {
+      const r0 = Math.max(0.05, Math.hypot(px, py, pz));
+      const base = ld.areaTex.smartDolly ? Math.min(40, Math.max(1.5, this._sceneRadius() * 1.25)) : r0;
+      const effR = base * Math.min(10, Math.max(0.1, ld.areaTex.dollyMultiplier ?? 1));
+      const k = effR / r0;
+      px *= k; py *= k; pz *= k;
+      sizeK = ld.areaTex.maintainReflectionSize === false ? 1 : k;
+    }
 
     lightObj.userData.edgeSoftness = ld.edgeSoftness ?? 50;
     lightObj.userData.dropShadow = ld.dropShadow;
@@ -1854,8 +1879,9 @@ export class LightManager {
 
       // Area light dimensions
       if (lightObj instanceof THREE.RectAreaLight) {
-        if (ld.areaWidth !== undefined) lightObj.width = ld.areaWidth;
-        if (ld.areaHeight !== undefined) lightObj.height = ld.areaHeight;
+        if (ld.areaWidth !== undefined) lightObj.width = ld.areaWidth * sizeK;
+        if (ld.areaHeight !== undefined) lightObj.height = ld.areaHeight * sizeK;
+        if (isAreaLight) this._applyAppearance(ld, lightObj, shouldShow);
       }
 
       // Shadow config
@@ -1892,8 +1918,8 @@ export class LightManager {
         // is immutable, so the old geometry must be disposed and replaced.
         const isAreaType = ld.type === 'area' || ld.type === 'overhead';
         if (isAreaType) {
-          const w = Math.max(0.01, ld.areaWidth ?? 2);
-          const h = Math.max(0.01, ld.areaHeight ?? 2);
+          const w = Math.max(0.01, (ld.areaWidth ?? 2) * sizeK);
+          const h = Math.max(0.01, (ld.areaHeight ?? 2) * sizeK);
           const prev = helper.userData as { hw?: number; hh?: number };
           if (prev.hw !== w || prev.hh !== h) {
             const line = helper.children[0] as THREE.LineLoop;
@@ -1915,6 +1941,70 @@ export class LightManager {
           }
         }
       }
+    }
+  }
+
+  /** Radius of the model(s) around the origin - used by Smart Dolly. Cached for a few frames. */
+  private _sceneRadius(): number {
+    if (this._sceneRFrame !== -1 && this._frame - this._sceneRFrame < 45) return this._sceneR;
+    const box = new THREE.Box3();
+    const b = new THREE.Box3();
+    this._scene.traverse((o) => {
+      const m = o as THREE.Mesh;
+      if (!m.isMesh || o.userData?.isHelper || o.userData?.isProxy || o.name === '__floor__' || !o.visible) return;
+      if (!m.geometry) return;
+      b.setFromObject(m);
+      if (!b.isEmpty()) box.union(b);
+    });
+    let r = 2;
+    if (!box.isEmpty()) {
+      const s = box.getBoundingSphere(new THREE.Sphere());
+      r = Math.max(Math.hypot(box.max.x, box.max.z, box.min.x, box.min.z) / 2, s.radius);
+    }
+    this._sceneR = r;
+    this._sceneRFrame = this._frame;
+    return r;
+  }
+
+  /**
+   * Light Appearance on an area light: stash the RGBA texture for the analytic HDRI
+   * export, tint the analytic RectAreaLight by the texture's mean radiance, and (in
+   * Area Light mode) build the visible textured emitter that also lights the path tracer.
+   */
+  private _applyAppearance(ld: LightSyncEntry, light: THREE.RectAreaLight, show: boolean): void {
+    const at = ld.areaTex;
+    const w = Math.max(0.01, light.width);
+    const h = Math.max(0.01, light.height);
+    const tex = ld.appearance ? getLightTexture(ld.id, ld.appearance, w / h) : null;
+    if (!ld.appearance) dropLightTexture(ld.id);
+    light.userData.appearanceTex = tex ? { data: tex.data, width: tex.width, height: tex.height } : undefined;
+    light.userData.areaMode = !!at?.enabled;
+    light.userData.spread = at?.spread ?? 100;
+    light.userData.baseColor = new THREE.Color(ld.color);
+    if (tex) {
+      // Uniform RectAreaLight approximation of the textured emitter.
+      light.color.r *= tex.mean.r;
+      light.color.g *= tex.mean.g;
+      light.color.b *= tex.mean.b;
+    }
+    if (tex && at?.enabled) {
+      const intensity = (ld.brightness / 1000) * 10 * (ld.opacity / 100);
+      this._texEmitters.update(ld.id, {
+        show,
+        camVisible: at.camVisibility !== false,
+        position: light.position,
+        quaternion: light.quaternion,
+        width: w,
+        height: h,
+        tint: new THREE.Color(ld.color),
+        intensity,
+        texture: tex,
+      });
+      // The path tracer lights from the textured emitter itself; the analytic light would double it.
+      light.userData.hideInPathTracer = this._texEmitters.isVisible(ld.id);
+    } else {
+      this._texEmitters.remove(ld.id);
+      light.userData.hideInPathTracer = false;
     }
   }
 
@@ -2149,6 +2239,8 @@ export class LightManager {
     this._entries.delete(id);
     this._types.delete(id);
     this._bound.delete(id);
+    this._texEmitters.remove(id);
+    dropLightTexture(id);
 
     const helper = this._helpers.get(id);
     if (helper) {
@@ -2187,6 +2279,7 @@ export class LightManager {
       this._removeLight(id);
     }
     this._emitters.releaseAll();
+    this._texEmitters.dispose();
     this._bound.clear();
   }
 }

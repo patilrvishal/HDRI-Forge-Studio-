@@ -2,6 +2,7 @@ import React, { useRef, useEffect, useState, useCallback } from 'react';
 import * as THREE from 'three';
 import { useSceneStore } from '../../store/sceneStore';
 import { useLightsStore } from '../../store/lightsStore';
+import { useAppearanceStore } from '../../appearance/appearanceStore';
 import { useAnimationStore } from '../../store/animationStore';
 import { ThreeSceneProvider } from '../../hooks/useThreeScene';
 import { SceneManager, RenderPipeline, LightManager, ModelLoader, canvasTextureToDataTexture } from '../../three/engine';
@@ -81,6 +82,8 @@ export const Viewport: React.FC<ViewportProps> = ({ sceneManagerRef, onScreensho
   const backplateOpacity = useSceneStore((s) => s.environment.backplateOpacity);
 
   const lights = useLightsStore((s) => s.lights);
+  const appearanceImagesVersion = useAppearanceStore((s) => s.imagesVersion);
+  const appearanceAudition = useAppearanceStore((s) => s.audition);
   const selectedLightId = useLightsStore((s) => s.selectedLightId);
   const updateLight = useLightsStore((s) => s.updateLight);
 
@@ -1046,10 +1049,13 @@ export const Viewport: React.FC<ViewportProps> = ({ sceneManagerRef, onScreensho
         objectKey: l.objectKey,
         objectSide: l.objectSide,
         objectGlow: l.objectGlow,
+        appearance: appearanceAudition && appearanceAudition.lightId === l.id ? appearanceAudition.appearance : l.appearance,
+        areaTex: l.areaTex,
       })),
       smForLights.scene
     );
-  }, [lights, lightManagerRef, sceneManagerRef]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lights, appearanceImagesVersion, appearanceAudition, lightManagerRef, sceneManagerRef]);
 
   // Sync turntable state to SceneManager
   useEffect(() => {
