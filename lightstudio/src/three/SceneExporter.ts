@@ -75,6 +75,8 @@ export interface SceneFile {
       customHeight: number;
       autoSave: boolean;
       autoSaveInterval: number;
+    /** Global illumination settings (present in newer scene files). */
+    gi?: object;
     };
     showGrid: boolean;
     turntable: { active: boolean; speed: number };
@@ -153,7 +155,7 @@ export class SceneExporter {
           shadowQuality: sceneState.renderSettings.shadowQuality,
           bloom: { ...sceneState.renderSettings.bloom },
           ao: { ...sceneState.renderSettings.ao },
-          gi: { ...sceneState.renderSettings.gi },
+          gi: { ...(sceneState.renderSettings as unknown as { gi: object }).gi },
           ground: { ...sceneState.renderSettings.ground },
           vignette: { ...sceneState.renderSettings.vignette },
           colorGrading: { ...sceneState.renderSettings.colorGrading },
@@ -235,7 +237,7 @@ export class SceneExporter {
       useSceneStore.getState().loadSceneState({
         modelName: sceneData.modelName,
         camera: sceneData.camera,
-        environment: sceneData.environment as SceneFile['scene']['environment'],
+        environment: sceneData.environment as unknown as SceneState['environment'],
         renderSettings: sceneData.renderSettings as unknown as SceneState['renderSettings'],
         showGrid: sceneData.showGrid,
         turntable: sceneData.turntable as SceneFile['scene']['turntable'],

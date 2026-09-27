@@ -353,7 +353,7 @@ export const Viewport: React.FC<ViewportProps> = ({ sceneManagerRef, onScreensho
           console.warn('[LightForge] CubeCamera update failed, disabling reflections:', e);
           if (sceneManager._floorCubeCamera) {
             sceneManager.scene.remove(sceneManager._floorCubeCamera);
-            sceneManager._floorCubeCamera.dispose();
+            (sceneManager._floorCubeCamera as unknown as { dispose?: () => void }).dispose?.();
             sceneManager._floorCubeCamera = null;
           }
         }
@@ -1072,7 +1072,6 @@ export const Viewport: React.FC<ViewportProps> = ({ sceneManagerRef, onScreensho
         appearance: appearanceAudition && appearanceAudition.lightId === l.id ? appearanceAudition.appearance : l.appearance,
         areaTex: l.areaTex,
       }; }),
-      smForLights.scene
     );
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [lights, collections, appearanceImagesVersion, appearanceAudition, lightManagerRef, sceneManagerRef]);
@@ -1210,7 +1209,7 @@ export const Viewport: React.FC<ViewportProps> = ({ sceneManagerRef, onScreensho
     if (!l) return;
 
     const sph = cartesianToSpherical(lp.x, lp.y, lp.z);
-    st.updateLightTransform(lightId, {
+    st.updateLightTransform(l.id, {
       position: { x: lp.x, y: lp.y, z: lp.z },
       spherical: { lat: sph.lat, lng: sph.lng, radius: sph.radius, height: sph.height },
       // Leave rotation.enabled alone. Forcing it true makes engine.ts abandon

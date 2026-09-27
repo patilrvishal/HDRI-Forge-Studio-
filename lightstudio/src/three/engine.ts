@@ -222,9 +222,7 @@ export class SceneManager {
       this.ground = null;
     }
     if (this._floorCubeCamera) {
-      if (this._floorCubeCamera && typeof this._floorCubeCamera.dispose === 'function') {
-  this._floorCubeCamera.dispose();
-}
+      (this._floorCubeCamera as unknown as { dispose?: () => void }).dispose?.();
       this._floorCubeCamera = null;
     }
     if (this._floorCubeRT) {
@@ -243,7 +241,7 @@ export class SceneManager {
   updateGround(settings?: GroundSettings | null): void {
     if (!settings) return;
     // Merge with defaults so old scene files missing new fields don't crash
-    const merged: GroundSettings = {
+    const defaults: Partial<GroundSettings> = {
       visible: true,
       reflections: true,
       reflectionSharpness: 0.85,
@@ -251,8 +249,8 @@ export class SceneManager {
       roughness: 0.15,
       metalness: 0.95,
       fadeRadius: 8.0,
-      ...settings,
     };
+    const merged = { ...defaults, ...settings } as GroundSettings;
     this._groundSettings = merged;
     this._disposeGround();
 
@@ -557,7 +555,7 @@ export class SceneManager {
 
       try {
         this._giCubeCamera.update(this.renderer, this.scene);
-        const generated = LightProbeGenerator.fromCubeRenderTarget(this.renderer, this._giCubeRT);
+        const generated = LightProbeGenerator.fromCubeRenderTarget(this.renderer, this._giCubeRT) as unknown as THREE.LightProbe;
         this._lightProbe.sh.copy(generated.sh);
       } finally {
         for (const o of hidden) o.visible = true;

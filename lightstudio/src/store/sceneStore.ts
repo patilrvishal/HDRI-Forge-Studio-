@@ -294,3 +294,6 @@ export const useSceneStore = create<SceneStore>((set, get) => ({
     set({ _pendingHDRIDataBase64: null, _pendingHDRIFileName: 'custom.hdr' });
   },
 }));
+if (import.meta.env.DEV && typeof window !== 'undefined') {
+  (window as unknown as { __sceneStore?: unknown }).__sceneStore = useSceneStore;
+}

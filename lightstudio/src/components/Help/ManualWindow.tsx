@@ -159,6 +159,7 @@ const SECTIONS: ManualSection[] = [
   {
     id: 'materials',
     title: 'Material Editor',
+    category: 'Materials',
     icon: '\u{1F3A8}',
     content: [
       { type: 'heading', data: 'PBR Material System' },
@@ -181,6 +182,7 @@ const SECTIONS: ManualSection[] = [
   {
     id: 'environment',
     title: 'Environment & HDRIs',
+    category: 'Environment',
     icon: '\u{1F30D}',
     content: [
       { type: 'heading', data: 'HDRI Environment Maps' },
@@ -201,6 +203,7 @@ const SECTIONS: ManualSection[] = [
   {
     id: 'animation',
     title: 'Animation & Timeline',
+    category: 'Animation',
     icon: '\u{23F1}',
     content: [
       { type: 'heading', data: 'Timeline System' },
@@ -461,6 +464,7 @@ const SECTIONS: ManualSection[] = [
   {
     id: 'troubleshooting',
     title: 'Troubleshooting',
+    category: 'Help',
     icon: '\u{1F527}',
     content: [
       { type: 'heading', data: 'Common Issues' },

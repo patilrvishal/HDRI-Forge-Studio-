@@ -42,7 +42,7 @@ export class GizmoManager {
 
     this.controls = new TransformControls(camera, domElement);
     this.controls.setSize(0.8);
-    this.controls.visible = false;
+    (this.controls as unknown as { visible: boolean }).visible = false;
 
     // Orbit and gizmo both want the mouse - hand it to the gizmo mid-drag.
     this.controls.addEventListener('dragging-changed', (e) => {
@@ -81,14 +81,14 @@ export class GizmoManager {
     this.mode = mode;
 
     if (!mode) {
-      this.controls.visible = false;
+      (this.controls as unknown as { visible: boolean }).visible = false;
       this.controls.detach();
       this.attachedId = null;
       return;
     }
 
     this.controls.setMode(mode);
-    if (this.controls.object) this.controls.visible = true;
+    if (this.controls.object) (this.controls as unknown as { visible: boolean }).visible = true;
   }
 
   getMode(): GizmoMode {
@@ -104,7 +104,7 @@ export class GizmoManager {
 
     if (!lightId || !this.mode) {
       this.controls.detach();
-      this.controls.visible = false;
+      (this.controls as unknown as { visible: boolean }).visible = false;
       this.attachedId = null;
       return;
     }
@@ -119,13 +119,13 @@ export class GizmoManager {
 
     if (!target) {
       this.controls.detach();
-      this.controls.visible = false;
+      (this.controls as unknown as { visible: boolean }).visible = false;
       this.attachedId = null;
       return;
     }
 
     this.controls.attach(target);
-    this.controls.visible = true;
+    (this.controls as unknown as { visible: boolean }).visible = true;
     this.attachedId = lightId;
   }
 

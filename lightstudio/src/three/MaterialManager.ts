@@ -83,7 +83,7 @@ export class MaterialManager {
         state.clearcoat = pm.clearcoat;
         state.clearcoatRoughness = pm.clearcoatRoughness;
         state.transmission = pm.transmission;
-        state.transmissionRoughness = pm.transmissionRoughness;
+        state.transmissionRoughness = (pm as unknown as { transmissionRoughness: number }).transmissionRoughness;
         state.thickness = pm.thickness;
         state.ior = pm.ior;
         state.sheen = pm.sheen;
@@ -409,7 +409,7 @@ export class MaterialManager {
       mat.clearcoat = state.clearcoat;
       mat.clearcoatRoughness = state.clearcoatRoughness;
       mat.transmission = state.transmission;
-      mat.transmissionRoughness = state.transmissionRoughness;
+      (mat as unknown as { transmissionRoughness: number }).transmissionRoughness = state.transmissionRoughness;
       mat.thickness = state.thickness;
       mat.ior = state.ior;
       mat.sheen = state.sheen;
@@ -417,7 +417,7 @@ export class MaterialManager {
       mat.sheenColor.set(state.sheenColor);
       mat.iridescence = state.iridescence;
       mat.iridescenceIOR = state.iridescenceIOR;
-      mat.iridescenceThicknessRange = new THREE.Vector2(state.iridescenceThicknessRange[0], state.iridescenceThicknessRange[1]);
+      mat.iridescenceThicknessRange = [state.iridescenceThicknessRange[0], state.iridescenceThicknessRange[1]];
       mat.attenuationColor.set(state.attenuationColor);
       mat.attenuationDistance = state.attenuationDistance === Infinity ? Infinity : state.attenuationDistance;
       mat.specularIntensity = state.specularIntensity;

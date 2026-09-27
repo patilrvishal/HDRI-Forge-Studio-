@@ -56,10 +56,6 @@ function pl(
         repeat: false,
         advanced: { lR: 0, p1: 0, p2: 0, p3: 0, rR: 0, ro: 0, roat: 0 },
       },
-      maisleU: 0,
-      mendieV: 0,
-      smartGolly: 0,
-      dailyMultiplier: 1,
     },
     ...opts,
   };

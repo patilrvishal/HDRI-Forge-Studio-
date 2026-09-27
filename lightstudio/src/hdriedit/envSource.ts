@@ -97,7 +97,7 @@ export async function getEditedImage(asset: HDRIAsset, maxW = EDIT_MAX_W, visiti
   if (!src) return null;
   const base = resizeEnv(src, maxW);
   await preloadMixSources(asset);
-  const resolveImage = (id: string) => otherAssetImages.get(id) ?? useAppearanceStoreImage(id);
+  const resolveImage = (id: string) => otherAssetImages.get(id) ?? appearanceImageAsFloat(id);
   const data = applyEdits(base, asset.edits, { resolveAsset: resolveImage });
   const img: FloatImage = { data, width: base.width, height: base.height };
   editedCache.set(asset.id + ':' + maxW, { sig, img });
@@ -105,7 +105,7 @@ export async function getEditedImage(asset: HDRIAsset, maxW = EDIT_MAX_W, visiti
   return img;
 }
 
-function useAppearanceStoreImage(id: string): FloatImage | undefined {
+function appearanceImageAsFloat(id: string): FloatImage | undefined {
   const im = useAppearanceStore.getState().images[id];
   return im ? { data: im.data, width: im.width, height: im.height } : undefined;
 }
