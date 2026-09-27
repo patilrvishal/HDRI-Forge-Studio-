@@ -1,5 +1,9 @@
 import type { PresetLight } from './Preset';
 import type { HDRIShape } from './HDRIShape';
+import type { Light } from './Light';
+import type { LightCollection } from './Composite';
+import type { EditLayer, SkyEnvParams } from '../hdriedit/types';
+import type { ObjectHdriSettings } from '../store/objectHdriStore';
 
 /** Snapshot of the active camera at save time - optional, since a Look
  *  saved with no active camera shouldn't force one into existence on
@@ -23,6 +27,14 @@ export interface LookCamera {
  * for no benefit, since the asset itself doesn't change between Looks in
  * the common case (only the lighting on top of it does).
  */
+/** Everything the lighting design consists of, captured verbatim so a Look restores exactly. */
+export interface LookSnapshot {
+  lights: Light[];
+  collections: LightCollection[];
+  hdri: { id: string; edits?: EditLayer[]; sky?: SkyEnvParams; intensity: number; rotation: number; opacity: number; contrast: number; gamma: number; saturation: number; active: boolean }[];
+  objectHdri: Record<string, ObjectHdriSettings>;
+}
+
 export interface Look {
   id: string;
   name: string;
@@ -31,4 +43,6 @@ export interface Look {
   lights: PresetLight[];
   hdriShapes: HDRIShape[];
   camera: LookCamera | null;
+  /** Full-fidelity capture (appearances, composites, HDRI edits, object settings). Older Looks lack it. */
+  snapshot?: LookSnapshot;
 }

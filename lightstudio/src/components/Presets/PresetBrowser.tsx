@@ -6,6 +6,7 @@ import type { Preset } from '../../types/Preset';
 import { renderPresetThumbnail } from '../../three/PresetThumbnailRenderer';
 import { useHDRIAssetStore } from '../../store/hdriAssetStore';
 import { useLooksStore } from '../../store/looksStore';
+import { useUIStore } from '../../store/uiStore';
 
 interface PresetBrowserProps {
   /** Optional ref to a MaterialPreview's renderThumbnail function for generating thumbnails */
@@ -569,6 +570,11 @@ export const PresetBrowser: React.FC<PresetBrowserProps> = ({ onGenerateThumbnai
                       {look.lights.length} light{look.lights.length !== 1 ? 's' : ''}
                       {look.hdriShapes.length > 0 ? ` · ${look.hdriShapes.length} shape${look.hdriShapes.length !== 1 ? 's' : ''}` : ''}
                       {look.camera ? ' · cam' : ''}
+                    </div>
+                    <div style={{ display: 'flex', gap: 3, justifyContent: 'center', padding: '0 2px 3px' }} onClick={(e) => e.stopPropagation()}>
+                      <button className="btn-sm" style={{ fontSize: 8, padding: '1px 4px' }} title="Overwrite this Look with the scene as it is now" onClick={async () => { await useLooksStore.getState().updateLookFromCurrent(look.id); showToast(`Updated "${look.name}"`); }}>Update</button>
+                      <button className="btn-sm" style={{ fontSize: 8, padding: '1px 4px' }} title="Duplicate this Look" onClick={async () => { const c = await useLooksStore.getState().duplicateLook(look.id); if (c) showToast(`Duplicated as "${c.name}"`); }}>Duplicate</button>
+                      <button className="btn-sm" style={{ fontSize: 8, padding: '1px 4px' }} title="Rename this Look" onClick={async () => { const n = await useUIStore.getState().requestPrompt('Rename Look', look.name); if (n && n.trim()) useLooksStore.getState().renameLook(look.id, n.trim()); }}>Rename</button>
                     </div>
                   </div>
                 ))}
