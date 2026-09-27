@@ -117,12 +117,16 @@ export function hosekWilkieState(turbidity: number, sunAltitudeDeg: number, albe
   return { configs, radiances };
 }
 
-// Reference output is in physical radiometric units (W / m^2 / sr); this app's
-// other content types work in the same "relative HDR units, zenith around a
-// few units" range the old Preetham sky used, so everything downstream
-// (exposure, tonemapping, the energy-conservation tests) keeps behaving the
-// same way regardless of which model produced the linear radiance.
-const SKY_SCALE = 0.0004;
+// Reference output is in physical radiometric units (W / m^2 / sr, order of
+// magnitude ~1-50 at a clear-sky zenith); this app's other content types -
+// and its fixed-exposure preset-thumbnail/preview tonemap - all assume the
+// same "relative HDR units, zenith around a couple of units" range the old
+// Preetham sky used. Calibrated so a clear midday zenith (turbidity 3,
+// altitude 45) lands at roughly the same ~2-3 the old model did - get this
+// wrong and every sky preset silently renders near-black (or blown white)
+// under that fixed tonemap without any error, exactly the regression this
+// constant was mis-set to on the first pass.
+const SKY_SCALE = 0.035;
 
 /**
  * Sky radiance in linear sRGB for a view direction.
