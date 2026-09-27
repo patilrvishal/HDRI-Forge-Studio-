@@ -113,6 +113,32 @@ const SECTIONS: ManualSection[] = [
     ],
   },
   {
+    id: 'renderer-system',
+    title: 'Renderer System',
+    category: 'Reference',
+    icon: '\u{1F5A5}️',
+    content: [
+      { type: 'heading', data: 'How HDR Light Studio renders (the benchmark)' },
+      { type: 'text', data: 'HDR Light Studio never does its own final path-traced render. It has three tiers: its built-in Render View / LiveLight preview is CPU-only and explicitly NOT GPU-accelerated (single flat material, no bounces, polygon-only, low-res proxy textures while editing); its "Render Production HDRI" button is still their own renderer, but bakes the FINAL high-res HDRI map and area-light textures at full quality from the same content (a proxy-vs-production resolution split, not a different renderer); the actual final beauty render with real materials and light bounces is always handed off to the connected host 3D app’s own renderer via a live plugin - V-Ray, Arnold, Redshift, Octane, Corona, RenderMan, Cycles, or Eevee. HDR Light Studio itself has no path tracer of its own.' },
+      { type: 'heading', data: 'How HDRI Forge Studio renders' },
+      { type: 'list', items: [
+        'Real-time PBR viewport - three.js WebGL, GPU-based, per-object real materials (the analog of their Render View, but GPU-accelerated where theirs is CPU-only)',
+        'Analytical HDRI / area-texture exporter - generateAnalyticalHDRI() computes per-pixel radiance directly from light math (no CubeCamera, no rasterization), at a resolution-tiered proxy (live preview, up to ~768 long side) vs. production (export, up to 1024x textureScale) split - the analog of their Render View vs. Render Production HDRI split',
+        'A full self-contained GPU path tracer (three-gpu-pathtracer) built directly into the app for the final beauty render - HDR Light Studio has NO equivalent of this; it always requires an external host renderer for that final tier',
+      ] },
+      { type: 'tip', data: 'Net comparison: HDRI Forge Studio already covers all three of HDR Light Studio’s tiers in a single app - real-time GPU viewport, analytical HDRI bake, AND a built-in path-traced final render - where HDR Light Studio needs a separate host application (Blender/Maya/etc.) plus a paid renderer plugin for that last tier.' },
+      { type: 'heading', data: 'Renderer parity checklist' },
+      { type: 'list', items: [
+        '[DONE] Real-time GPU viewport preview equivalent to Render View/LiveLight',
+        '[DONE] Analytical (non-rasterized) HDRI bake equivalent to Render Production HDRI, same proxy/production resolution split pattern',
+        '[DONE] Built-in GPU path tracer for final beauty render - exceeds HDR Light Studio, which has none',
+        '[DONE] Single shared generateAnalyticalHDRI() function drives both the live HDRI Preview panel and the actual exported file, so light radiance math cannot drift between preview and export',
+        '[FIXED] Exported HDRI was silently dropping the HDRI Shapes layer that the live preview showed (downloadHDRI never checked hdriShapesStore) - now mirrors the preview’s exact shapes-then-gradient layer priority',
+        '[KNOWN GAP] No frame-by-frame comparison against HDR Light Studio’s own video walkthroughs - parity is checked against their written reference docs only',
+      ] },
+    ],
+  },
+  {
     id: 'getting-started',
     title: 'Getting Started',
     category: 'Getting Started',
