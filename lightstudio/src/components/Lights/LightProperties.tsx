@@ -13,6 +13,7 @@ import { findObjectByKey } from '../../three/objectBinding';
 import { useObjectHdriStore } from '../../store/objectHdriStore';
 import { useSceneHierarchyStore } from '../../store/sceneHierarchyStore';
 import { LightAppearanceSection } from '../Appearance/LightAppearanceSection';
+import { CompositeSection } from './CompositeSection';
 import { scaledLightPatch } from '../../three/lightScale';
 
 /**
@@ -742,21 +743,7 @@ export const LightProperties: React.FC<{ lightId?: string }> = ({ lightId }) => 
         </>
       )}
 
-      {/* Collection assignment */}
-      <CollapsibleSection title="Advanced Render Collection">
-        <Dropdown
-          label="Group"
-          value={light.collectionId ?? '__none__'}
-          options={[
-            { value: '__none__', label: 'None' },
-            { value: 'default', label: 'Default' },
-            { value: 'key', label: 'Key Lights' },
-            { value: 'fill', label: 'Fill Lights' },
-            { value: 'rim', label: 'Rim Lights' },
-          ]}
-          onChange={(v) => handleUpdate({ collectionId: v === '__none__' ? null : v })}
-        />
-      </CollapsibleSection>
+      <CompositeSection light={light} onUpdate={handleUpdate} />
     </div>
   );
 };

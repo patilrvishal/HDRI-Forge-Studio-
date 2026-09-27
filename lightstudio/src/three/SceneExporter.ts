@@ -11,6 +11,7 @@ import type { SceneState } from '../types/Scene';
 import { getModelingController } from '../modeling/bridge';
 import { useObjectHdriStore, type ObjectHdriSettings } from '../store/objectHdriStore';
 import { useAppearanceStore } from '../appearance/appearanceStore';
+import type { LightCollection } from '../types/Composite';
 import type { SerializedImage } from '../appearance/imageImport';
 import type { EditableObjectJSON } from '../modeling/EditableObject';
 
@@ -104,6 +105,8 @@ export interface SceneFile {
   objectHdri?: Record<string, ObjectHdriSettings>;
   // ── Images used by Light Appearance content (Image / Sky clouds) ──────────
   appearanceImages?: SerializedImage[];
+  // ── Light groups (Composites) ──────────────────────────────────────────────
+  collections?: LightCollection[];
 }
 
 // ── SceneExporter ──────────────────────────────────────────────────────────
@@ -178,6 +181,7 @@ export class SceneExporter {
       modeling: getModelingController()?.serialize() ?? [],
       objectHdri: useObjectHdriStore.getState().exportSettings(),
       appearanceImages: useAppearanceStore.getState().exportImages(lightsState.lights.map((l) => l.appearance)),
+      collections: JSON.parse(JSON.stringify(lightsState.collections)),
     };
   }
 
@@ -307,6 +311,7 @@ export class SceneExporter {
       useObjectHdriStore.getState().importSettings(data.objectHdri);
       useAppearanceStore.getState().clearImages();
       useAppearanceStore.getState().importImages(data.appearanceImages);
+      if (Array.isArray(data.collections) && data.collections.length) useLightsStore.getState().setCollections(data.collections);
 
       return null;
     } catch (err) {

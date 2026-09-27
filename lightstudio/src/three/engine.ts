@@ -1602,6 +1602,9 @@ interface LightSyncEntry {
   // Light Appearance + HDR Textured Area Light settings
   appearance?: LightAppearance;
   areaTex?: TexturedAreaSettings;
+  // Composite membership + its filter stack (applied to the group in the HDRI bake)
+  compositeId?: string;
+  compositeFilters?: unknown;
 }
 
 interface LightObjectEntry {
@@ -1808,6 +1811,8 @@ export class LightManager {
     lightObj.userData.edgeSoftness = ld.edgeSoftness ?? 50;
     lightObj.userData.dropShadow = ld.dropShadow;
     lightObj.userData.opacity = (ld.opacity ?? 100) / 100;
+    lightObj.userData.compositeId = ld.compositeId;
+    lightObj.userData.compositeFilters = ld.compositeFilters;
     lightObj.position.set(px, py, pz);
     lightObj.visible = shouldShow;
 

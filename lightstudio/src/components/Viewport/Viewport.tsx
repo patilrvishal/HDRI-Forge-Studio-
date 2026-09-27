@@ -7,6 +7,7 @@ import { useHDRIAssetStore } from '../../store/hdriAssetStore';
 import { paintSunToDirection } from '../../hdriedit/paintSun';
 import { PaintModeBar } from './PaintModeBar';
 import { scaledLightPatch } from '../../three/lightScale';
+import { applyComposite } from '../../three/composite';
 import { useAnimationStore } from '../../store/animationStore';
 import { ThreeSceneProvider } from '../../hooks/useThreeScene';
 import { SceneManager, RenderPipeline, LightManager, ModelLoader, canvasTextureToDataTexture } from '../../three/engine';
@@ -86,6 +87,7 @@ export const Viewport: React.FC<ViewportProps> = ({ sceneManagerRef, onScreensho
   const backplateOpacity = useSceneStore((s) => s.environment.backplateOpacity);
 
   const lights = useLightsStore((s) => s.lights);
+  const collections = useLightsStore((s) => s.collections);
   const appearanceImagesVersion = useAppearanceStore((s) => s.imagesVersion);
   const appearanceAudition = useAppearanceStore((s) => s.audition);
   const shiftHeldRef = useRef(false);
@@ -1040,17 +1042,19 @@ export const Viewport: React.FC<ViewportProps> = ({ sceneManagerRef, onScreensho
     if (!smForLights) return;
 
     lightManagerRef.current?.syncLights(
-      lights.map((l) => ({
+      lights.map((l) => { const comp = collections.find((c) => c.id === l.collectionId)?.composite; const adj = applyComposite(l, comp); return {
         id: l.id,
         type: l.type,
         color: l.color,
-        brightness: l.brightness,
-        opacity: l.opacity,
-        visible: l.visible,
+        brightness: adj.brightness,
+        opacity: adj.opacity,
+        visible: adj.visible,
+        compositeId: comp?.enabled ? l.collectionId ?? undefined : undefined,
+        compositeFilters: comp?.enabled && comp.filters.some((f) => f.enabled) ? comp.filters : undefined,
         solo: l.solo,
         falloff: l.falloff,
         gearVisible: l.gearVisible,
-        transform: l.transform,
+        transform: comp?.enabled ? { ...l.transform, spherical: adj.spherical, position: adj.position } : l.transform,
         spotAngle: l.spotAngle,
         spotPenumbra: l.spotPenumbra,
         spotDecay: 2,
@@ -1063,11 +1067,11 @@ export const Viewport: React.FC<ViewportProps> = ({ sceneManagerRef, onScreensho
         objectGlow: l.objectGlow,
         appearance: appearanceAudition && appearanceAudition.lightId === l.id ? appearanceAudition.appearance : l.appearance,
         areaTex: l.areaTex,
-      })),
+      }; }),
       smForLights.scene
     );
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [lights, appearanceImagesVersion, appearanceAudition, lightManagerRef, sceneManagerRef]);
+  }, [lights, collections, appearanceImagesVersion, appearanceAudition, lightManagerRef, sceneManagerRef]);
 
   // Sync turntable state to SceneManager
   useEffect(() => {

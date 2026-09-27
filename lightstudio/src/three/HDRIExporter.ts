@@ -38,6 +38,7 @@ import { isEXRBuffer } from '../utils/hdriFormat';
 import { HdriObjectCaster } from './HDRIObjects';
 import { encodeEXRRGBA } from '../appearance/exr';
 import { getEditedImage, hasEdits, imageToDataTexture } from '../hdriedit/envSource';
+import { applyFilters, type FilterSpec } from '../filters/filters';
 
 // --------- Types ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 
@@ -68,6 +69,9 @@ interface ExtractedLight {
   tex?: { data: Float32Array; width: number; height: number };
   /** RectAreaLight only - 0-100 emission spread (100 = Lambert, lower = tighter beam). */
   spread?: number;
+  /** Composite this light belongs to and the composite's filter stack. */
+  compositeId?: string;
+  compositeFilters?: FilterSpec[];
 }
 
 /** Bilinear sample of a light appearance texture at (u,v) in 0..1, v=0 at the top. */
@@ -653,7 +657,11 @@ export async function generateAnalyticalHDRI(
   const pixels = new Float32Array(width * height * 4);
 
   // Extract all lights from scene
-  const lights = extractLightsFromScene(scene, !!options.includeAreaModeLights);
+  const allLights = extractLightsFromScene(scene, !!options.includeAreaModeLights);
+  // Lights in a Composite that carries filters are rendered as one image, filtered, then laid on top.
+  const isFiltered = (l: ExtractedLight) => !!l.compositeId && !!l.compositeFilters?.some((f) => f.enabled);
+  const lights = allLights.filter((l) => !isFiltered(l));
+  const groupLights = allLights.filter(isFiltered);
   console.log('[LightForge] Found lights:', lights.length);
 lights.forEach((l, i) => {
     console.log(`[LightForge] Light ${i}: type=${l.type} R=${l.color.r.toFixed(3)} G=${l.color.g.toFixed(3)} B=${l.color.b.toFixed(3)} intensity=${l.intensity}`);
@@ -803,6 +811,49 @@ lights.forEach((l, i) => {
     }
   }
 
+  // Composite groups with filters: render each group's lights alone into a premultiplied
+  // image, run its Diffusion / Motion filters on the whole thing, then composite over the map.
+  if (groupLights.length) {
+    const groups = new Map<string, ExtractedLight[]>();
+    for (const l of groupLights) {
+      const k = l.compositeId as string;
+      if (!groups.has(k)) groups.set(k, []);
+      groups.get(k)!.push(l);
+    }
+    for (const members of groups.values()) {
+      const filters = members[0].compositeFilters as FilterSpec[];
+      const rgb = new Float32Array(width * height * 4);
+      const alpha = new Float32Array(width * height * 4);
+      for (let y = 0; y < height; y++) {
+        for (let x = 0; x < width; x++) {
+          const dir = pixelToDirection(x, y, width, height);
+          let r = 0, g = 0, b = 0, a = 0;
+          for (const l of members) {
+            const c = evaluateLightRadiance(l, dir, capturePoint);
+            if (c.coverage !== undefined) {
+              const al = Math.max(0, Math.min(1, c.coverage * (l.opacity ?? 1)));
+              r = r * (1 - al) + c.r * al; g = g * (1 - al) + c.g * al; b = b * (1 - al) + c.b * al; a = a * (1 - al) + al;
+            } else { r += c.r; g += c.g; b += c.b; }
+          }
+          const i = (y * width + x) * 4;
+          rgb[i] = r; rgb[i + 1] = g; rgb[i + 2] = b; rgb[i + 3] = 1;
+          alpha[i] = alpha[i + 1] = alpha[i + 2] = a; alpha[i + 3] = 1;
+        }
+        if (y % 64 === 0) await new Promise<void>((resolve) => setTimeout(resolve, 0));
+      }
+      const frgb = applyFilters({ data: rgb, width, height }, filters, true);
+      // the coverage image is blurred the same way but must not be renormalised
+      const afilters = filters.map((f) => ({ ...f, params: { ...f.params, energy: false } })) as FilterSpec[];
+      const fal = applyFilters({ data: alpha, width, height }, afilters, true);
+      for (let i = 0; i < width * height; i++) {
+        const a = Math.max(0, Math.min(1, fal[i * 4]));
+        pixels[i * 4] = pixels[i * 4] * (1 - a) + frgb[i * 4];
+        pixels[i * 4 + 1] = pixels[i * 4 + 1] * (1 - a) + frgb[i * 4 + 1];
+        pixels[i * 4 + 2] = pixels[i * 4 + 2] * (1 - a) + frgb[i * 4 + 2];
+      }
+    }
+  }
+
   // VERIFY - Stage 3 check: max pixel MUST be > 1.0 for true HDR
   let maxVal = 0;
   let nonBlackCount = 0;
@@ -843,6 +894,8 @@ lights.forEach((l, i) => {
  */
 function extractLightsFromScene(scene: THREE.Scene, includeAreaMode = false): ExtractedLight[] {
   const lights: ExtractedLight[] = [];
+  let tag: { compositeId?: string; compositeFilters?: FilterSpec[] } = {};
+  const push = (l: ExtractedLight) => { lights.push({ ...l, ...tag }); };
   const worldPos = new THREE.Vector3();
   const worldQuat = new THREE.Quaternion();
 
@@ -855,11 +908,12 @@ function extractLightsFromScene(scene: THREE.Scene, includeAreaMode = false): Ex
     // Skip AmbientLight - no position/direction, adds uniform light to all pixels
     if (child instanceof THREE.AmbientLight) return;
 
+    tag = { compositeId: child.userData.compositeId, compositeFilters: child.userData.compositeFilters as FilterSpec[] | undefined };
     child.getWorldPosition(worldPos);
 
     // ------ PointLight ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------
     if (child instanceof THREE.PointLight) {
-      lights.push({
+      push({
         type: 'point',
         color: child.color.clone(),
         intensity: child.intensity,
@@ -873,7 +927,7 @@ function extractLightsFromScene(scene: THREE.Scene, includeAreaMode = false): Ex
     if (child instanceof THREE.SpotLight) {
       const dir = new THREE.Vector3();
       child.getWorldDirection(dir);
-      lights.push({
+      push({
         type: 'spot',
         color: child.color.clone(),
         intensity: child.intensity,
@@ -890,7 +944,7 @@ function extractLightsFromScene(scene: THREE.Scene, includeAreaMode = false): Ex
     if (child instanceof THREE.DirectionalLight) {
       const dir = new THREE.Vector3();
       child.getWorldDirection(dir);
-      lights.push({
+      push({
         type: 'directional',
         color: child.color.clone(),
         intensity: child.intensity,
@@ -910,7 +964,7 @@ function extractLightsFromScene(scene: THREE.Scene, includeAreaMode = false): Ex
       const right = new THREE.Vector3(1, 0, 0).applyQuaternion(worldQuat);
       const up = new THREE.Vector3(0, 1, 0).applyQuaternion(worldQuat);
       const normal = new THREE.Vector3(0, 0, -1).applyQuaternion(worldQuat);
-      lights.push({
+      push({
         type: 'area',
         // With a texture the RectAreaLight colour carries the texture's mean; the exporter
         // samples the texture itself, so use the untouched tint here.

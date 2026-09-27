@@ -2,11 +2,13 @@ import { create } from 'zustand';
 import type { Light } from '../types/Light';
 import { createDefaultLight, LIGHT_TEMPLATES } from '../types/Light';
 import { history } from './historyStore';
+import type { CompositeSettings, LightCollection } from '../types/Composite';
+import { defaultComposite } from '../types/Composite';
 
 interface LightsState {
   lights: Light[];
   selectedLightId: string | null;
-  collections: { id: string; name: string }[];
+  collections: LightCollection[];
   collectionFilter: string | null; // null = "All Lights"
 
   addLight: (templateKey?: string) => void;
@@ -24,6 +26,9 @@ interface LightsState {
   setLightsOrder: (ids: string[]) => void;
   setCollectionFilter: (collectionId: string | null) => void;
   addCollection: (name: string) => void;
+  /** Turn a group on/off as a Composite and edit its shared controls. */
+  setComposite: (collectionId: string, patch: Partial<CompositeSettings> | null) => void;
+  setCollections: (c: LightCollection[]) => void;
   removeCollection: (id: string) => void;
   setLightsFromPreset: (lights: Light[]) => void;
   clearAllLights: () => void;
@@ -161,6 +166,19 @@ export const useLightsStore = create<LightsState>((set, get) => ({
       collections: [...state.collections, { id, name }],
     }));
   },
+
+  setComposite: (collectionId, patch) => {
+    history.recordThrottled('Update Composite');
+    set((state) => ({
+      collections: state.collections.map((c) => {
+        if (c.id !== collectionId) return c;
+        if (patch === null) return { id: c.id, name: c.name };
+        return { ...c, composite: { ...(c.composite ?? defaultComposite()), ...patch } };
+      }),
+    }));
+  },
+
+  setCollections: (collections) => set({ collections }),
 
   removeCollection: (id) => {
     history.record('Remove Collection');
