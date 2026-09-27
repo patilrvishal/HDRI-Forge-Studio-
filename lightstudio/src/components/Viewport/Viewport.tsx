@@ -25,7 +25,8 @@ import { CameraSwitcher } from './CameraSwitcher';
 import { ViewportPropertiesPanel } from './ViewportPropertiesPanel';
 import { CameraPanel } from './CameraPanel';
 import { GizmoManager, type GizmoMode } from '../../three/GizmoManager';
-import { solveLightPaint, smoothNormalAt, computeLightDistance, pickLightForReflection, type PaintMode } from '../../three/LightPaint';
+import { solveLightPaint, smoothNormalAt, computeLightDistance, pickLightForReflection, solveCurvePointPaint, type PaintMode } from '../../three/LightPaint';
+import { useCurvePaintStore } from '../../store/curvePaintStore';
 import { cartesianToSpherical } from '../../utils/math';
 import { CameraBookmarks } from './CameraBookmarks';
 import { ModelingOverlay } from '../Modeling/ModelingOverlay';
@@ -1137,6 +1138,42 @@ export const Viewport: React.FC<ViewportProps> = ({ sceneManagerRef, onScreensho
       const incident = hit.point.clone().sub(sm.camera.position).normalize();
       const R = incident.clone().sub(N.clone().multiplyScalar(2 * incident.dot(N))).normalize();
       paintSunToDirection(R);
+      return;
+    }
+
+    // LightPaint a single Lumi-Curve point: reflect the view ray off the clicked
+    // surface and intersect it with the SELECTED LIGHT'S OWN rectangle plane, so
+    // just that one point's content-space (x,y) moves - the light itself stays put.
+    const armedIdx = useCurvePaintStore.getState().armedPointIndex;
+    if (armedIdx !== null && lightId) {
+      const st = useLightsStore.getState();
+      const l = st.lights.find((x) => x.id === lightId);
+      const content = l?.appearance?.master?.content;
+      if (l && content?.type === 'lumicurve' && content.p.points[armedIdx]) {
+        const hit = hits[0];
+        if (!hit) return;
+        const N = smoothNormalAt(hit);
+        let lightObj: THREE.Object3D | null = null;
+        sm.scene.traverse((obj) => {
+          if (lightObj) return;
+          if (obj.userData?.lightId === lightId && obj instanceof THREE.Light) lightObj = obj;
+        });
+        if (!lightObj) return;
+        const worldPos = new THREE.Vector3();
+        const worldQuat = new THREE.Quaternion();
+        (lightObj as THREE.Object3D).getWorldPosition(worldPos);
+        (lightObj as THREE.Object3D).getWorldQuaternion(worldQuat);
+        const width = l.areaWidth ?? 2, height = l.areaHeight ?? 2;
+        const res = solveCurvePointPaint(hit.point.clone(), N, sm.camera, worldPos, worldQuat, width, height);
+        if (!res) return;
+        const nextPoints = content.p.points.map((pt, i) => (i === armedIdx ? { ...pt, x: res.x, y: res.y } : pt));
+        st.updateLight(lightId, {
+          appearance: {
+            ...l.appearance!,
+            master: { ...l.appearance!.master, content: { ...content, p: { ...content.p, points: nextPoints } } },
+          },
+        } as never);
+      }
       return;
     }
 

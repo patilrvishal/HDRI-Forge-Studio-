@@ -1,6 +1,7 @@
-import React, { useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import type { CurvePoint, LumiCurveParams } from '../../appearance/types';
 import { sampleCurve, smoothTangents, pointOffsetDir } from '../../appearance/evaluate';
+import { useCurvePaintStore } from '../../store/curvePaintStore';
 
 /** Length (in local -1..1 units) of the freeform offset-direction handle drawn per point. */
 const DIR_HANDLE_LEN = 0.14;
@@ -11,7 +12,7 @@ interface Props {
   onChange: (patch: Partial<LumiCurveParams>) => void;
 }
 
-type Tool = 'move' | 'insert' | 'extend' | 'delete' | 'rotate' | 'scale';
+type Tool = 'move' | 'insert' | 'extend' | 'delete' | 'rotate' | 'scale' | 'lightpaint';
 
 const TOOLS: [Tool, string, string][] = [
   ['move', 'Move', 'Move points and tangent handles (the crosshair snaps to the nearest one)'],
@@ -20,6 +21,7 @@ const TOOLS: [Tool, string, string][] = [
   ['delete', 'Delete', 'Click a point to remove it'],
   ['rotate', 'Rotate', 'Drag to rotate the curve around where you started'],
   ['scale', 'Scale', 'Drag to scale the curve (Shift = horizontal only, Ctrl = vertical only)'],
+  ['lightpaint', 'LightPaint', "Click a point here, then click the model in the 3D viewport (LightPaint mode must be on) to place it via reflection - just that point moves, the light doesn't"],
 ];
 
 /**
@@ -34,6 +36,18 @@ export const CurveEditor: React.FC<Props> = ({ params, aspect, onChange }) => {
   const [tool, setTool] = useState<Tool>('move');
   const [snap, setSnap] = useState<string | null>(null);
   const pts = params.points;
+  const armedPointIndex = useCurvePaintStore((s) => s.armedPointIndex);
+  const armPoint = useCurvePaintStore((s) => s.armPoint);
+  const disarm = useCurvePaintStore((s) => s.disarm);
+
+  // Leaving the LightPaint tool (switching tools, editing a different light,
+  // or closing the editor) must disarm - otherwise a later viewport click
+  // would silently reposition a point on whatever light/curve happens to be
+  // selected next, using a stale index into a completely different array.
+  useEffect(() => {
+    if (tool !== 'lightpaint') disarm();
+  }, [tool, disarm]);
+  useEffect(() => () => disarm(), [disarm]);
 
   const px = (x: number) => ((x + 1) / 2) * W;
   const py = (y: number) => ((1 - y) / 2) * H;
@@ -94,6 +108,15 @@ export const CurveEditor: React.FC<Props> = ({ params, aspect, onChange }) => {
     if (tool === 'delete') {
       const hit = nearest(start.x, start.y);
       if (hit && pts.length > 2) setPts(pts.filter((_, i) => i !== hit.i));
+      return;
+    }
+    if (tool === 'lightpaint') {
+      // Only the point itself arms - a click on a tangent/direction handle
+      // here does nothing (those aren't LightPaint-able, they have no
+      // reflection target of their own).
+      let best = -1, bd = 0.08 * 0.08 * 4;
+      pts.forEach((q, i) => { const d = (q.x - start.x) ** 2 + (q.y - start.y) ** 2; if (d < bd) { bd = d; best = i; } });
+      if (best >= 0) armPoint(best);
       return;
     }
     if (tool === 'extend') {
@@ -196,6 +219,9 @@ export const CurveEditor: React.FC<Props> = ({ params, aspect, onChange }) => {
               </>
             )}
             <circle cx={px(q.x)} cy={py(q.y)} r={5} fill={snap === `pt${i}` ? '#fff' : '#fa4'} stroke="#000" />
+            {tool === 'lightpaint' && armedPointIndex === i && (
+              <circle cx={px(q.x)} cy={py(q.y)} r={9} fill="none" stroke="#f4a" strokeWidth={2} />
+            )}
           </g>
           );
         })}
@@ -209,6 +235,13 @@ export const CurveEditor: React.FC<Props> = ({ params, aspect, onChange }) => {
       <div style={{ fontSize: 9, color: 'var(--text-dim)', marginTop: 3 }}>
         Orange = centre line. Green and blue dashes show the falloff offsets each side. Squares are tangent handles.
       </div>
+      {tool === 'lightpaint' && (
+        <div style={{ fontSize: 9, color: armedPointIndex !== null ? '#f4a' : 'var(--text-dim)', marginTop: 2 }}>
+          {armedPointIndex !== null
+            ? `Point ${armedPointIndex + 1} armed - click the model in the 3D viewport (LightPaint mode must be on) to place it.`
+            : 'Click a point above to arm it for LightPaint.'}
+        </div>
+      )}
     </div>
   );
 };
