@@ -36,6 +36,7 @@ import { RGBELoader } from 'three/addons/loaders/RGBELoader.js';
 import { EXRLoader } from 'three/addons/loaders/EXRLoader.js';
 import { isEXRBuffer } from '../utils/hdriFormat';
 import { HdriObjectCaster } from './HDRIObjects';
+import { encodeEXRRGBA } from '../appearance/exr';
 
 // --------- Types ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 
@@ -1229,156 +1230,10 @@ export function encodeEXR(
   width: number,
   height: number,
 ): ArrayBuffer {
-  const CHANNEL_NAMES = ['B', 'G', 'R'] as const;
-  const PIXEL_TYPE_FLOAT = 2;
-  const NUM_CHANNELS = 3;
-  const BYTES_PER_PIXEL = NUM_CHANNELS * 4;
-  const SCANLINE_DATA_SIZE = width * BYTES_PER_PIXEL;
-
-  // ------ Low-level write helpers ------------------------------------------------------------------------------------------------------------------------------------------
-  const intToBytes = (val: number): number[] => [
-    val & 0xff,
-    (val >>> 8) & 0xff,
-    (val >>> 16) & 0xff,
-    (val >>> 24) & 0xff,
-  ];
-
-  const floatToBytes = (val: number): number[] => {
-    const buf = new ArrayBuffer(4);
-    new DataView(buf).setFloat32(0, val, true);
-    return [...new Uint8Array(buf)];
-  };
-
-  const writeName = (arr: number[], str: string): void => {
-    const bytes = new TextEncoder().encode(str);
-    for (const b of bytes) arr.push(b);
-    arr.push(0);
-  };
-
-  const writeChannelEntry = (arr: number[], name: string): void => {
-    const bytes = new TextEncoder().encode(name);
-    for (const b of bytes) arr.push(b);
-    arr.push(0);
-    const nameLen = bytes.length + 1;
-    const pad = (4 - (nameLen % 4)) % 4;
-    for (let i = 0; i < pad; i++) arr.push(0);
-    // pixel_type(i32) + pLinear(u32) + x_sampling(u32) + y_sampling(u32)
-    for (const v of intToBytes(PIXEL_TYPE_FLOAT)) arr.push(v);
-    for (const v of intToBytes(0)) arr.push(v);
-    for (const v of intToBytes(1)) arr.push(v);
-    for (const v of intToBytes(1)) arr.push(v);
-  };
-
-  const writeAttrValue = (arr: number[], valueBytes: number[]): void => {
-    for (const v of intToBytes(valueBytes.length)) arr.push(v);
-    for (const b of valueBytes) arr.push(b);
-    const pad = (4 - (valueBytes.length % 4)) % 4;
-    for (let i = 0; i < pad; i++) arr.push(0);
-  };
-
-  // ------ Build header attributes ------------------------------------------------------------------------------------------------------------------------------------------
-  const hdr: number[] = [];
-
-  // 1) channels (chlist)
-  writeName(hdr, 'channels');
-  writeName(hdr, 'chlist');
-  const channelData: number[] = [];
-  for (const chName of CHANNEL_NAMES) {
-    writeChannelEntry(channelData, chName);
-  }
-  channelData.push(0);
-  writeAttrValue(hdr, channelData);
-
-  // 2) compression
-  writeName(hdr, 'compression');
-  writeName(hdr, 'compression');
-  writeAttrValue(hdr, [0]);
-
-  // 3) dataWindow (box2i)
-  writeName(hdr, 'dataWindow');
-  writeName(hdr, 'box2i');
-  writeAttrValue(hdr, [
-    ...intToBytes(0), ...intToBytes(0),
-    ...intToBytes(width - 1), ...intToBytes(height - 1),
-  ]);
-
-  // 4) displayWindow (box2i)
-  writeName(hdr, 'displayWindow');
-  writeName(hdr, 'box2i');
-  writeAttrValue(hdr, [
-    ...intToBytes(0), ...intToBytes(0),
-    ...intToBytes(width - 1), ...intToBytes(height - 1),
-  ]);
-
-  // 5) lineOrder
-  writeName(hdr, 'lineOrder');
-  writeName(hdr, 'lineOrder');
-  writeAttrValue(hdr, [0]);
-
-  // 6) pixelAspectRatio
-  writeName(hdr, 'pixelAspectRatio');
-  writeName(hdr, 'float');
-  writeAttrValue(hdr, floatToBytes(1.0));
-
-  // 7) screenWindowCenter (v2f)
-  writeName(hdr, 'screenWindowCenter');
-  writeName(hdr, 'v2f');
-  writeAttrValue(hdr, [...floatToBytes(0.0), ...floatToBytes(0.0)]);
-
-  // 8) screenWindowWidth
-  writeName(hdr, 'screenWindowWidth');
-  writeName(hdr, 'float');
-  writeAttrValue(hdr, floatToBytes(1.0));
-
-  // End of header
-  hdr.push(0);
-  while (hdr.length % 8 !== 0) hdr.push(0);
-
-  const fileHeaderSize = 8;
-  const headerSize = hdr.length;
-  const offsetTableSize = height * 8;
-  const scanlineDataStart = fileHeaderSize + headerSize + offsetTableSize;
-  const scanlineBlockSize = 4 + 4 + SCANLINE_DATA_SIZE;
-
-  // ------ Offset table ------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-  const offsets: number[] = [];
-  for (let y = 0; y < height; y++) {
-    offsets.push(scanlineDataStart + y * scanlineBlockSize);
-  }
-
-  // ------ Scanline pixel data ---------------------------------------------------------------------------------------------------------------------------------------------------
-  const scanlines: number[] = [];
-  for (let y = 0; y < height; y++) {
-    for (const v of intToBytes(y)) scanlines.push(v);
-    for (const v of intToBytes(SCANLINE_DATA_SIZE)) scanlines.push(v);
-    for (let x = 0; x < width; x++) {
-      const srcIdx = (y * width + x) * 4;
-      for (const b of floatToBytes(pixels[srcIdx + 2])) scanlines.push(b); // B
-      for (const b of floatToBytes(pixels[srcIdx + 1])) scanlines.push(b); // G
-      for (const b of floatToBytes(pixels[srcIdx])) scanlines.push(b);     // R
-    }
-  }
-
-  // ------ Assemble file ---------------------------------------------------------------------------------------------------------------------------------------------------------------------
-  const totalSize = fileHeaderSize + headerSize + offsetTableSize + scanlines.length;
-  const file = new Uint8Array(totalSize);
-  const dv = new DataView(file.buffer);
-
-  dv.setUint32(0, 20000630, true);
-  dv.setUint32(4, 2, true);
-
-  file.set(new Uint8Array(hdr), 8);
-
-  const offsetBase = fileHeaderSize + headerSize;
-  for (let y = 0; y < height; y++) {
-    const off = offsets[y];
-    dv.setUint32(offsetBase + y * 8, off & 0xffffffff, true);
-    dv.setUint32(offsetBase + y * 8 + 4, Math.floor(off / 0x100000000) & 0xffffffff, true);
-  }
-
-  file.set(new Uint8Array(scanlines), scanlineDataStart);
-
-  return file.buffer;
+  // Delegates to the shared writer: planar per-scanline channels (B,G,R) as the format
+  // requires. The previous inline writer interleaved channels per pixel, which readers
+  // such as three.js EXRLoader could not parse.
+  return encodeEXRRGBA(pixels, width, height, false);
 }
 
 // --------- FUNCTION 8: downloadHDRI ---------------------------------------------------------------------------------------------------------------------------------------------

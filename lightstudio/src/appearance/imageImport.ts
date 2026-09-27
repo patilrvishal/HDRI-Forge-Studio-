@@ -60,14 +60,14 @@ async function decodeLdr(file: Blob): Promise<{ data: Float32Array; width: numbe
   return { data: out, width: bmp.width, height: bmp.height };
 }
 
-function decodeFloatTexture(parsed: { width: number; height: number; data: ArrayLike<number> }): { data: Float32Array; width: number; height: number } {
+function decodeFloatTexture(parsed: { width: number; height: number; data: ArrayLike<number> }, flip: boolean): { data: Float32Array; width: number; height: number } {
   const { width, height } = parsed;
   const stride = Math.round(parsed.data.length / (width * height));
   const out = new Float32Array(width * height * 4);
   const half = parsed.data instanceof Uint16Array;
-  // three's loaders deliver rows bottom-up (GL convention) - flip to top-down.
+  // EXRLoader delivers rows bottom-up (GL convention) and needs a flip; RGBELoader is already top-down.
   for (let y = 0; y < height; y++) {
-    const sy = height - 1 - y;
+    const sy = flip ? height - 1 - y : y;
     for (let x = 0; x < width; x++) {
       const s = (sy * width + x) * stride;
       const o = (y * width + x) * 4;
@@ -86,12 +86,12 @@ export async function decodeImageBuffer(buf: ArrayBuffer, name: string, type = '
   if (lower.endsWith('.hdr') || lower.endsWith('.pic')) {
     const l = new RGBELoader();
     l.setDataType(THREE.FloatType);
-    return decodeFloatTexture(l.parse(buf) as unknown as { width: number; height: number; data: ArrayLike<number> });
+    return decodeFloatTexture(l.parse(buf) as unknown as { width: number; height: number; data: ArrayLike<number> }, false);
   }
   if (lower.endsWith('.exr')) {
     const l = new EXRLoader();
     l.setDataType(THREE.FloatType);
-    return decodeFloatTexture(l.parse(buf) as unknown as { width: number; height: number; data: ArrayLike<number> });
+    return decodeFloatTexture(l.parse(buf) as unknown as { width: number; height: number; data: ArrayLike<number> }, true);
   }
   return decodeLdr(new Blob([buf], { type: type || 'image/png' }));
 }

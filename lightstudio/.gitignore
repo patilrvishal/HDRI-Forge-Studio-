@@ -29,3 +29,4 @@ src-tauri/gen
 .modtest.mjs
 .modpos.mjs
 .apptest.mjs
+.exrtest.mjs

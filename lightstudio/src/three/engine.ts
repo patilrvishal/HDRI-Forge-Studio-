@@ -1951,8 +1951,11 @@ export class LightManager {
     const b = new THREE.Box3();
     this._scene.traverse((o) => {
       const m = o as THREE.Mesh;
-      if (!m.isMesh || o.userData?.isHelper || o.userData?.isProxy || o.name === '__floor__' || !o.visible) return;
-      if (!m.geometry) return;
+      if (!m.isMesh || o.name === '__floor__' || o.name === 'TransformControlsPlane' || !o.visible || !m.geometry) return;
+      // Skip anything inside a helper / gizmo hierarchy (transform gizmo parts carry no flag themselves).
+      for (let p: THREE.Object3D | null = o; p; p = p.parent) {
+        if (p.userData?.isHelper || p.userData?.isProxy || p.userData?.isGrid) return;
+      }
       b.setFromObject(m);
       if (!b.isEmpty()) box.union(b);
     });

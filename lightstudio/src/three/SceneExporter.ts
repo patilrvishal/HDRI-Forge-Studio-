@@ -10,6 +10,8 @@ import type { AnimationState } from '../types/Animation';
 import type { SceneState } from '../types/Scene';
 import { getModelingController } from '../modeling/bridge';
 import { useObjectHdriStore, type ObjectHdriSettings } from '../store/objectHdriStore';
+import { useAppearanceStore } from '../appearance/appearanceStore';
+import type { SerializedImage } from '../appearance/imageImport';
 import type { EditableObjectJSON } from '../modeling/EditableObject';
 
 // ── Scene file schema ───────────────────────────────────────────────────────
@@ -100,6 +102,8 @@ export interface SceneFile {
   modeling?: EditableObjectJSON[];
   // ── Per-object HDRI include/exclude settings ──────────────────────────────
   objectHdri?: Record<string, ObjectHdriSettings>;
+  // ── Images used by Light Appearance content (Image / Sky clouds) ──────────
+  appearanceImages?: SerializedImage[];
 }
 
 // ── SceneExporter ──────────────────────────────────────────────────────────
@@ -173,6 +177,7 @@ export class SceneExporter {
       hdriAssets: useHDRIAssetStore.getState().exportAssets(),
       modeling: getModelingController()?.serialize() ?? [],
       objectHdri: useObjectHdriStore.getState().exportSettings(),
+      appearanceImages: useAppearanceStore.getState().exportImages(lightsState.lights.map((l) => l.appearance)),
     };
   }
 
@@ -300,6 +305,8 @@ export class SceneExporter {
       // ── Restore modelled meshes ──────────────────────────────────────────
       getModelingController()?.deserialize(data.modeling ?? []);
       useObjectHdriStore.getState().importSettings(data.objectHdri);
+      useAppearanceStore.getState().clearImages();
+      useAppearanceStore.getState().importImages(data.appearanceImages);
 
       return null;
     } catch (err) {
