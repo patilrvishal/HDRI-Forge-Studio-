@@ -1,5 +1,7 @@
 import { create } from 'zustand';
 import { hdriAssetDB } from '../services/HDRIAssetDB';
+import type { EditLayer, SkyEnvParams } from '../hdriedit/types';
+import { defaultSky } from '../hdriedit/types';
 
 /** A single custom HDRI asset in the scene */
 export interface HDRIAsset {
@@ -39,6 +41,12 @@ export interface HDRIAsset {
   saturation: number;
   /** Whether this asset is currently active/selected */
   active: boolean;
+  /** 'sky' = procedural sky (no file); default is a loaded file. */
+  kind?: 'file' | 'sky';
+  /** Sky parameters when kind is 'sky'. */
+  sky?: SkyEnvParams;
+  /** Non-destructive Edit HDRI Environments layer stack. */
+  edits?: EditLayer[];
 }
 
 /** Defaults for the new grading fields, so every existing call site that
@@ -59,12 +67,14 @@ interface HDRIAssetStore {
 
   /** Add a new HDRI asset from file */
   addAsset: (file: File, arrayBuffer: ArrayBuffer) => HDRIAsset;
+  /** Add a procedural sky as an HDRI asset */
+  addSkyAsset: () => HDRIAsset;
   /** Remove an asset by ID (also revokes blob URL, deletes from IndexedDB) */
   removeAsset: (id: string) => void;
   /** Select an asset (makes it active) */
   selectAsset: (id: string | null) => void;
   /** Update per-asset properties */
-  updateAsset: (id: string, updates: Partial<Pick<HDRIAsset, 'name' | 'intensity' | 'rotation' | 'active' | 'opacity' | 'contrast' | 'gamma' | 'saturation'>>) => void;
+  updateAsset: (id: string, updates: Partial<Pick<HDRIAsset, 'name' | 'intensity' | 'rotation' | 'active' | 'opacity' | 'contrast' | 'gamma' | 'saturation' | 'edits' | 'sky'>>) => void;
   /** Set the blob URL on an asset (after creating from base64 restore) */
   setAssetBlobUrl: (id: string, url: string) => void;
   /** Reorder the whole assets array to match the given id sequence - keeps
@@ -135,6 +145,26 @@ export const useHDRIAssetStore = create<HDRIAssetStore>((set, get) => ({
       assets: [...s.assets, asset],
       selectedAssetId: id,
     }));
+    return asset;
+  },
+
+  addSkyAsset: () => {
+    const id = `hdri_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    const asset: HDRIAsset = {
+      id,
+      name: 'Procedural Sky',
+      fileName: 'sky',
+      blobUrl: null,
+      dataBase64: null,
+      intensity: 1.0,
+      rotation: 0,
+      ...HDRI_ASSET_GRADING_DEFAULTS,
+      active: true,
+      kind: 'sky',
+      sky: defaultSky(),
+      edits: [],
+    };
+    set((s) => ({ assets: [...s.assets, asset], selectedAssetId: id }));
     return asset;
   },
 
@@ -265,3 +295,6 @@ export const useHDRIAssetStore = create<HDRIAssetStore>((set, get) => ({
     );
   },
 }));
+if (import.meta.env.DEV && typeof window !== 'undefined') {
+  (window as unknown as { __hdriAssetStore?: unknown }).__hdriAssetStore = useHDRIAssetStore;
+}

@@ -116,6 +116,7 @@ export const Viewport: React.FC<ViewportProps> = ({ sceneManagerRef, onScreensho
 
     const modelLoader = new ModelLoader(sceneManager.scene);
     modelLoaderRef.current = modelLoader;
+    if (import.meta.env.DEV) (window as unknown as { __modelLoader?: unknown }).__modelLoader = modelLoader;
 
     const erikLoader = new ErikLoader(sceneManager.scene, sceneManager.renderer);
     erikLoaderRef.current = erikLoader;

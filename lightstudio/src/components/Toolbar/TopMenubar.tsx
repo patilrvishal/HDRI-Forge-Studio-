@@ -13,6 +13,7 @@ import { useAppearanceStore } from '../../appearance/appearanceStore';
 import { exportSceneAsHDR, exportSceneAsEXR } from '../../three/HDRIExporter';
 import type { SceneManager } from '../../three/engine';
 import { promptForCustomHDRI } from '../../utils/loadCustomHDRI';
+import { addProceduralSky } from '../../hdriedit/addSky';
 
 interface MenuItem {
   label: string;
@@ -241,6 +242,10 @@ const MENU_DEFINITIONS = (
     customHDRI: {
       label: 'Custom HDRI...',
       action: () => promptForCustomHDRI(),
+    },
+    proceduralSky: {
+      label: 'Procedural Sky',
+      action: () => addProceduralSky(),
     },
     camera: {
       label: 'Camera',

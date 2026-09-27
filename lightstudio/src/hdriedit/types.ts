@@ -1,0 +1,174 @@
+/**
+ * Edit HDRI Environments - a non-destructive stack of edit layers applied to a
+ * loaded HDRI (or a procedural sky). Layers are applied in order, each through an
+ * optional region mask painted on the sphere.
+ */
+import type { FilterSpec } from '../filters/filters';
+
+export type EditKind = 'adjust' | 'blur' | 'blocker' | 'fill' | 'sun' | 'mix';
+
+export const EDIT_KIND_LABELS: Record<EditKind, string> = {
+  adjust: 'Colour / Exposure',
+  blur: 'Blur (Diffusion / Motion)',
+  blocker: 'Blocker',
+  fill: 'Remove / Clone',
+  sun: 'Sun',
+  mix: 'Mix HDRI',
+};
+
+/** Where on the map a layer acts. Coordinates are map UV (0-1, u across, v down). */
+export interface EditRegion {
+  shape: 'global' | 'circle' | 'rect';
+  u: number;
+  v: number;
+  /** Circle radius / rectangle half-width, in degrees on the sphere. */
+  size: number;
+  /** Rectangle half-height in degrees. */
+  sizeV: number;
+  /** Rectangle roll in degrees. */
+  rotation: number;
+  /** 0-100 soft edge. */
+  feather: number;
+  invert: boolean;
+}
+
+export const defaultRegion = (u = 0.5, v = 0.35): EditRegion => ({
+  shape: 'circle', u, v, size: 25, sizeV: 15, rotation: 0, feather: 40, invert: false,
+});
+
+export interface AdjustParams {
+  exposure: number;
+  hue: number;
+  saturation: number;
+  contrast: number;
+  gamma: number;
+  tint: string;
+  /** 0-100 how strongly the tint colour is applied. */
+  tintAmount: number;
+}
+
+export interface BlurParams {
+  filters: FilterSpec[];
+}
+
+export interface BlockerParams {
+  mode: 'multiply' | 'solid';
+  /** 0-100 how dark / how opaque. */
+  amount: number;
+  color: string;
+  /** Radiance multiplier for solid mode (a bright card > 1). */
+  intensity: number;
+}
+
+export interface FillParams {
+  mode: 'remove' | 'clone';
+  /** Clone source centre (map UV). */
+  sourceU: number;
+  sourceV: number;
+  /** Remove: 0-100 how far the surroundings are smeared in. */
+  smear: number;
+}
+
+export interface SunParams {
+  action: 'resize' | 'remove' | 'move';
+  /** Angular size multiplier (resize/move); light energy is preserved. */
+  scale: number;
+  /** Extra energy multiplier. */
+  intensity: number;
+  /** Where the sun ends up (move). */
+  targetU: number;
+  targetV: number;
+  /** 1-100: pixels brighter than this % of the peak count as the sun. */
+  threshold: number;
+}
+
+export interface MixParams {
+  assetId: string | null;
+  /** Rotation of the source HDRI in degrees. */
+  rotation: number;
+  blend: 'normal' | 'add' | 'multiply' | 'screen';
+  intensity: number;
+}
+
+export type EditParams =
+  | { kind: 'adjust'; p: AdjustParams }
+  | { kind: 'blur'; p: BlurParams }
+  | { kind: 'blocker'; p: BlockerParams }
+  | { kind: 'fill'; p: FillParams }
+  | { kind: 'sun'; p: SunParams }
+  | { kind: 'mix'; p: MixParams };
+
+export interface EditLayer {
+  id: string;
+  name: string;
+  enabled: boolean;
+  /** 0-100 overall strength of the layer. */
+  opacity: number;
+  region: EditRegion;
+  edit: EditParams;
+}
+
+let counter = 0;
+export const newEditId = (): string => `edit_${Date.now().toString(36)}_${(counter++).toString(36)}`;
+
+export function defaultEdit(kind: EditKind): EditParams {
+  switch (kind) {
+    case 'adjust':
+      return { kind, p: { exposure: 0, hue: 0, saturation: 0, contrast: 0, gamma: 1, tint: '#ffffff', tintAmount: 0 } };
+    case 'blur':
+      return { kind, p: { filters: [] } };
+    case 'blocker':
+      return { kind, p: { mode: 'multiply', amount: 100, color: '#000000', intensity: 1 } };
+    case 'fill':
+      return { kind, p: { mode: 'remove', sourceU: 0.25, sourceV: 0.5, smear: 60 } };
+    case 'sun':
+      return { kind, p: { action: 'resize', scale: 2, intensity: 1, targetU: 0.5, targetV: 0.3, threshold: 25 } };
+    case 'mix':
+      return { kind, p: { assetId: null, rotation: 0, blend: 'normal', intensity: 1 } };
+  }
+}
+
+export function newEditLayer(kind: EditKind, region?: Partial<EditRegion>): EditLayer {
+  const globalByDefault = kind === 'adjust' || kind === 'blur' || kind === 'mix';
+  return {
+    id: newEditId(),
+    name: EDIT_KIND_LABELS[kind],
+    enabled: true,
+    opacity: 100,
+    region: { ...defaultRegion(), ...(globalByDefault ? { shape: 'global' as const } : {}), ...(region ?? {}) },
+    edit: defaultEdit(kind),
+  };
+}
+
+/** Procedural sky as an HDRI source (no file). */
+export interface SkyEnvParams {
+  sunAzimuth: number;
+  sunElevation: number;
+  /** Multiplier on the real sun's angular size (0.53 degrees). */
+  sunSize: number;
+  /** Sun radiance at real size; bigger/smaller suns keep the same energy. */
+  sunIntensity: number;
+  sunColor: string;
+  turbidity: number;
+  zenithColor: string;
+  horizonColor: string;
+  groundColor: string;
+  horizonSoftness: number;
+  falloff: number;
+  intensity: number;
+}
+
+export const defaultSky = (): SkyEnvParams => ({
+  sunAzimuth: 200,
+  sunElevation: 40,
+  sunSize: 1,
+  sunIntensity: 30000,
+  sunColor: '#fff4e0',
+  turbidity: 3,
+  zenithColor: '#3d74c8',
+  horizonColor: '#bcd4f0',
+  groundColor: '#4a4238',
+  horizonSoftness: 0.04,
+  falloff: 0.7,
+  intensity: 1,
+});

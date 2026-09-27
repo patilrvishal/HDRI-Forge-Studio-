@@ -8,6 +8,7 @@ import { useSceneStore } from '../../store/sceneStore';
 import type { LightType } from '../../types/Light';
 import type { HDRIShapeType } from '../../types/HDRIShape';
 import { promptForCustomHDRI } from '../../utils/loadCustomHDRI';
+import { addProceduralSky } from '../../hdriedit/addSky';
 
 const SHAPE_TYPE_OPTIONS: Array<{ value: HDRIShapeType; label: string }> = [
   { value: 'rectangle', label: 'Rectangle' },
@@ -714,6 +715,9 @@ export const LightListPanel: React.FC = () => {
                 <div className="context-menu-sep" />
                 <div className="context-menu-item" onClick={() => { setAddMenuOpen(false); promptForCustomHDRI(); }}>
                   {HDRI_ICON}<span style={{ marginLeft: 6 }}>Custom HDRI...</span>
+                </div>
+                <div className="context-menu-item" onClick={() => { setAddMenuOpen(false); addProceduralSky(); }}>
+                  {HDRI_ICON}<span style={{ marginLeft: 6 }}>Procedural Sky</span>
                 </div>
               </>
             )}

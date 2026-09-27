@@ -388,3 +388,13 @@ export function applyFilters(
   }
   return cur;
 }
+
+/**
+ * In-place separable blur of a RGBA image whose rgb is already premultiplied by the
+ * weight in alpha (normalized convolution). Wraps horizontally, reflects vertically.
+ * The caller divides rgb by alpha afterwards. Used for inpainting.
+ */
+export function blurPremultiplied(data: Float32Array, w: number, h: number, sigmaX: number, sigmaY: number): void {
+  blurRows(data, w, h, () => sigmaX, 'wrap');
+  blurColumns(data, w, h, sigmaY, 'reflect');
+}

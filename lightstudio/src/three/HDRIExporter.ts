@@ -37,6 +37,7 @@ import { EXRLoader } from 'three/addons/loaders/EXRLoader.js';
 import { isEXRBuffer } from '../utils/hdriFormat';
 import { HdriObjectCaster } from './HDRIObjects';
 import { encodeEXRRGBA } from '../appearance/exr';
+import { getEditedImage, hasEdits, imageToDataTexture } from '../hdriedit/envSource';
 
 // --------- Types ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 
@@ -1450,7 +1451,7 @@ export function gradientToEnvLayer(config: GradientBackgroundConfig, intensity =
 export async function loadActiveHDRILayers(globalIntensity = 1.0): Promise<EnvLayer[]> {
   const assets = useHDRIAssetStore
     .getState()
-    .assets.filter((a) => a.active && a.dataBase64);
+    .assets.filter((a) => a.active && (a.dataBase64 || a.kind === 'sky'));
 
   if (assets.length === 0) {
     console.log('[HDRI Forge] No active HDRI assets - exporting lights only');
@@ -1461,8 +1462,14 @@ export async function loadActiveHDRILayers(globalIntensity = 1.0): Promise<EnvLa
 
   for (const asset of assets) {
     try {
-      const buffer = hdriBase64ToArrayBuffer(asset.dataBase64 as string);
-      const texture = await loadHDRITexture(buffer);
+      let texture: THREE.DataTexture | null;
+      if (hasEdits(asset)) {
+        // Edit HDRI Environments: sample the edited float image instead of the raw file.
+        const edited = await getEditedImage(asset, 2048);
+        texture = edited ? imageToDataTexture(edited) : null;
+      } else {
+        texture = await loadHDRITexture(hdriBase64ToArrayBuffer(asset.dataBase64 as string));
+      }
 
       if (!texture) {
         console.warn(`[HDRI Forge] Could not decode "${asset.name}" - skipping`);

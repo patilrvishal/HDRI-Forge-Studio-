@@ -3,6 +3,9 @@ import { useHDRIAssetStore } from '../../store/hdriAssetStore';
 import { useSceneStore } from '../../store/sceneStore';
 import { Slider } from '../UI/Slider';
 import { Toggle } from '../UI/Toggle';
+import { EditHdriSection } from './EditHdriSection';
+import { hasEdits } from '../../hdriedit/envSource';
+import { driveViewportWith, getLiveAssetId } from '../../hdriedit/viewportEnv';
 
 /** Matches LightProperties/HDRIShapeProperties' CollapsibleSection so all
  *  three property panels read as one system. */
@@ -63,7 +66,7 @@ export const CustomHDRIProperties: React.FC = () => {
   // This asset is also the one actually driving the live 3D viewport
   // (environment.hdri is a single global slot, not per-asset) only when its
   // blob URL matches what's currently loaded there.
-  const drivesViewport = environment.presetId === '__custom__' && environment.hdri === asset.blobUrl;
+  const drivesViewport = (environment.presetId === '__custom__' && environment.hdri === asset.blobUrl && !hasEdits(asset)) || (hasEdits(asset) && getLiveAssetId() === asset.id);
 
   return (
     <div style={{ flex: 1, overflowY: 'auto' }}>
@@ -92,7 +95,9 @@ export const CustomHDRIProperties: React.FC = () => {
               className="btn-sm"
               style={{ width: '100%', justifyContent: 'center' }}
               onClick={() => {
-                if (asset.blobUrl) {
+                if (hasEdits(asset)) {
+                  void driveViewportWith(asset.id);
+                } else if (asset.blobUrl) {
                   setEnvironment({ hdri: asset.blobUrl, presetId: '__custom__', showBackground: true });
                 }
               }}
@@ -113,6 +118,10 @@ export const CustomHDRIProperties: React.FC = () => {
             </div>
           )}
         </div>
+      </CollapsibleSection>
+
+      <CollapsibleSection title="Edit HDRI Environment" defaultOpen={asset.kind === 'sky' || !!asset.edits?.length}>
+        <EditHdriSection asset={asset} />
       </CollapsibleSection>
 
       <CollapsibleSection title="Transform">

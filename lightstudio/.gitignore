@@ -31,3 +31,5 @@ src-tauri/gen
 .apptest.mjs
 .exrtest.mjs
 .filtertest.mjs
+public/_testcar.glb
+.hdrieditttest.mjs
