@@ -109,3 +109,7 @@ export const useAppearanceStore = create<AppearanceState>((set, get) => ({
   },
   clearImages: () => set((s) => ({ images: {}, imagesVersion: s.imagesVersion + 1 })),
 }));
+
+if (import.meta.env.DEV && typeof window !== 'undefined') {
+  (window as unknown as { __appearanceStore?: unknown }).__appearanceStore = useAppearanceStore;
+}

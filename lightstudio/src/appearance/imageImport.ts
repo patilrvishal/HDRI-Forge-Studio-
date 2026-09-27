@@ -56,8 +56,9 @@ async function decodeLdr(file: Blob): Promise<{ data: Float32Array; width: numbe
     out[i * 4 + 2] = lut[id.data[i * 4 + 2]];
     out[i * 4 + 3] = id.data[i * 4 + 3] / 255;
   }
+  const width = bmp.width, height = bmp.height; // read before close(): a closed bitmap reports 0
   bmp.close();
-  return { data: out, width: bmp.width, height: bmp.height, ldr: true };
+  return { data: out, width, height, ldr: true };
 }
 
 function decodeFloatTexture(parsed: { width: number; height: number; data: ArrayLike<number> }, flip: boolean): { data: Float32Array; width: number; height: number } {
