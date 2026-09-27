@@ -8,6 +8,7 @@
 import * as THREE from 'three';
 import { useLightsStore } from '../store/lightsStore';
 import { useHDRIAssetStore } from '../store/hdriAssetStore';
+import { cartesianToSpherical } from '../utils/math';
 import type { Light } from '../types/Light';
 import type { ContentLayer, LightAppearance } from '../appearance/types';
 
@@ -52,18 +53,33 @@ export function paintSunToDirection(dir: THREE.Vector3): 'light' | 'sky' | null 
     const up = new THREE.Vector3(0, 1, 0).applyQuaternion(q);
     const centre = pos.clone().normalize();
     const cosc = d.dot(centre);
-    if (cosc <= 0.02) return null; // pointing away from the light's own hemisphere
     // gnomonic projection into the light's plane, exactly as the HDRI export does
     const dist = Math.max(0.01, pos.length());
     const tanW = Math.tan(Math.min(Math.max(0.02, Math.atan2(rect.width / 2, dist)), 1.55));
     const tanH = Math.tan(Math.min(Math.max(0.02, Math.atan2(rect.height / 2, dist)), 1.55));
-    const lx = d.dot(right) / cosc, ly = d.dot(up) / cosc;
-    const x = Math.max(-1, Math.min(1, -(lx / tanW))); // texture u runs to the viewer's right = light -X
-    const y = Math.max(-1, Math.min(1, ly / tanH));
+    const lx = d.dot(right) / Math.max(cosc, 0.02), ly = d.dot(up) / Math.max(cosc, 0.02);
+    let x = -(lx / tanW); // texture u runs to the viewer's right = light -X
+    let y = ly / tanH;
+    // The reflected direction is outside this light: bring the light there (keeping its distance)
+    // and put the sun at the centre of its texture, so the reflection lands where you clicked.
+    if (cosc <= 0.02 || Math.abs(x) > 1.02 || Math.abs(y) > 1.02) {
+      const R = Math.max(0.5, Math.hypot(light.transform.position.x, light.transform.position.y, light.transform.position.z));
+      const np = d.clone().multiplyScalar(R);
+      const sph = cartesianToSpherical(np.x, np.y, np.z);
+      ls.updateLightTransform(light.id, {
+        position: { x: np.x, y: np.y, z: np.z },
+        spherical: { lat: sph.lat, lng: sph.lng, radius: sph.radius, height: sph.height },
+        aimTarget: undefined,
+        rotation: { ...light.transform.rotation, enabled: false },
+      } as never);
+      x = 0; y = 0;
+    }
+    x = Math.max(-1, Math.min(1, x));
+    y = Math.max(-1, Math.min(1, y));
     // Sky content is laid out in texture space: x = azimuth -180..180, y = altitude 0..90
     const az = x * 180;
     const alt = Math.max(0, Math.min(90, ((y + 1) / 2) * 90));
-    const app = light.appearance!;
+    const app = useLightsStore.getState().lights.find((l) => l.id === light.id)!.appearance!;
     const patchLayer = (layer: ContentLayer): ContentLayer => ({ ...layer, content: { ...layer.content, p: { ...layer.content.p, azimuth: az, altitude: alt } } as unknown as ContentLayer['content'] });
     const next: LightAppearance = sky.where === 'master'
       ? { ...app, master: patchLayer(app.master) }

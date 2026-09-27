@@ -278,3 +278,7 @@ export const useLooksStore = create<LooksState>((set, get) => ({
     for (const g of gone) await lookDB.del(g);
   },
 }));
+
+if (import.meta.env.DEV && typeof window !== 'undefined') {
+  (window as unknown as { __looksStore?: unknown }).__looksStore = useLooksStore;
+}

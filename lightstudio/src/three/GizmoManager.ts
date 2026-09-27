@@ -28,6 +28,8 @@ export class GizmoManager {
   private mode: GizmoMode = null;
   private callbacks: GizmoCallbacks;
   private disposed = false;
+  /** Scale reported by the previous change event, so only the CHANGE is passed on. */
+  private prevScale = new THREE.Vector3(1, 1, 1);
 
   constructor(
     camera: THREE.Camera,
@@ -46,7 +48,15 @@ export class GizmoManager {
 
     // Orbit and gizmo both want the mouse - hand it to the gizmo mid-drag.
     this.controls.addEventListener('dragging-changed', (e) => {
-      this.orbit.enabled = !(e as unknown as { value: boolean }).value;
+      const dragging = (e as unknown as { value: boolean }).value;
+      this.orbit.enabled = !dragging;
+      const obj = this.controls.object;
+      if (obj) {
+        // A finished drag resets the object's scale: the light's size lives in its width / height, so a
+        // scale left on the object would compound the next drag (and every event within it).
+        obj.scale.set(1, 1, 1);
+      }
+      this.prevScale.set(1, 1, 1);
     });
 
     this.controls.addEventListener('objectChange', () => {
@@ -60,8 +70,14 @@ export class GizmoManager {
           y: (obj.rotation.y * 180) / Math.PI,
           z: (obj.rotation.z * 180) / Math.PI,
         },
-        scale: { x: obj.scale.x, y: obj.scale.y, z: obj.scale.z },
+        // relative change since the previous event (1 = unchanged)
+        scale: {
+          x: obj.scale.x / (this.prevScale.x || 1),
+          y: obj.scale.y / (this.prevScale.y || 1),
+          z: obj.scale.z / (this.prevScale.z || 1),
+        },
       });
+      this.prevScale.copy(obj.scale);
     });
 
     // In three r16x+ TransformControls is a helper, not a scene object - its
