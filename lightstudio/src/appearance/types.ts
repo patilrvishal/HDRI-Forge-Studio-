@@ -1,3 +1,5 @@
+import type { FilterSpec } from '../filters/filters';
+
 /**
  * Light Appearance - the content system that defines what a light looks like.
  *
@@ -273,6 +275,8 @@ export interface LightAppearance {
   valueBlend: ContentLayer[];
   alphaMultiply: ContentLayer[];
   global: AppearanceGlobals;
+  /** Planar filters (Diffusion / Motion blur) applied to the finished texture. */
+  filters?: FilterSpec[];
 }
 
 export const defaultGlobals = (): AppearanceGlobals => ({

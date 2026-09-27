@@ -20,6 +20,7 @@ import { Dropdown } from '../UI/Dropdown';
 import { ColorPicker } from '../UI/ColorPicker';
 import { RampEditor } from './RampEditor';
 import { CurveEditor } from './CurveEditor';
+import { FilterStackEditor } from '../Filters/FilterStackEditor';
 
 const TYPE_OPTIONS = (section: SectionKind) =>
   (Object.keys(CONTENT_TYPE_LABELS) as ContentType[])
@@ -42,7 +43,7 @@ const Sub: React.FC<{ title: string; children: React.ReactNode; open?: boolean }
 
 // ── image picker ────────────────────────────────────────────────────────────
 
-const ImagePicker: React.FC<{ value: string | null; onChange: (id: string | null) => void; label: string }> = ({ value, onChange, label }) => {
+export const ImagePicker: React.FC<{ value: string | null; onChange: (id: string | null) => void; label: string }> = ({ value, onChange, label }) => {
   const images = useAppearanceStore((s) => s.images);
   const addImage = useAppearanceStore((s) => s.addImage);
   const file = useRef<HTMLInputElement>(null);
@@ -405,6 +406,9 @@ export const AppearanceEditor: React.FC<EditorProps> = ({ appearance, aspect, on
           + Alpha Multiply
         </button>
       </div>
+
+      <div className="section-header" style={{ marginTop: 10 }}>Filters</div>
+      <FilterStackEditor filters={appearance.filters} onChange={(f) => onChange({ ...appearance, filters: f })} />
 
       <div className="section-header" style={{ marginTop: 10 }}>Global</div>
       <Slider label="Brightness" value={g.brightness} min={-6} max={6} step={0.05} unit=" EV" onChange={(v) => setG({ brightness: v })} />

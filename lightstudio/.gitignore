@@ -30,3 +30,4 @@ src-tauri/gen
 .modpos.mjs
 .apptest.mjs
 .exrtest.mjs
+.filtertest.mjs

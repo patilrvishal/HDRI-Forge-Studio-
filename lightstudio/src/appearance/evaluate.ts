@@ -26,6 +26,7 @@ import type {
   ScrimParams,
   SkyParams,
 } from './types';
+import { applyFilters } from '../filters/filters';
 
 // ── small helpers ───────────────────────────────────────────────────────────
 
@@ -595,6 +596,9 @@ export function renderAppearance(app: LightAppearance, W: number, H: number, asp
       out[idx + 2] = rgb[2];
       out[idx + 3] = clamp(a * opacity, 0, 1);
     }
+  }
+  if (app.filters?.some((f) => f.enabled)) {
+    return applyFilters({ data: out, width: W, height: H }, app.filters, false, (id) => ctx.images.get(id));
   }
   return out;
 }
