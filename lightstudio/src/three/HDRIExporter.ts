@@ -31,11 +31,13 @@
 import * as THREE from 'three';
 import { hdriBase64ToArrayBuffer } from '../store/hdriDataStore';
 import { useHDRIAssetStore } from '../store/hdriAssetStore';
+import { useHDRIShapesStore } from '../store/hdriShapesStore';
 import { useSceneStore } from '../store/sceneStore';
 import { RGBELoader } from 'three/addons/loaders/RGBELoader.js';
 import { EXRLoader } from 'three/addons/loaders/EXRLoader.js';
 import { isEXRBuffer } from '../utils/hdriFormat';
 import { HdriObjectCaster } from './HDRIObjects';
+import { compositeShapesCanvas, shapesCanvasToEnvLayer } from './HDRIShapesLayer';
 import { encodeEXRRGBA } from '../appearance/exr';
 import { getEditedImage, hasEdits, imageToDataTexture } from '../hdriedit/envSource';
 import { applyFilters, type FilterSpec } from '../filters/filters';
@@ -1349,13 +1351,21 @@ export async function downloadHDRI(
     options.environmentLayers ??
     (await loadActiveHDRILayers(options.environmentGlobalIntensity ?? 1.0));
 
-  // Gradient background acts as its own environment layer, same as a real
-  // loaded HDRI, so the exported file matches what the HDRI Preview panel
-  // shows instead of coming out black whenever no real .hdr is active.
+  // Gradient background AND HDRI Shapes act as their own environment layer(s),
+  // same as a real loaded HDRI, so the exported file matches what the HDRI
+  // Preview panel shows instead of coming out black (or silently missing any
+  // painted shapes) whenever no real .hdr is active. Mirrors the exact same
+  // shapes-take-priority-over-plain-gradient logic HDRIPreviewPanel uses when
+  // building its own live-preview layer stack, so preview and export never drift.
   if (!options.environmentLayers) {
     const gb = useSceneStore.getState().environment.gradientBackground;
-    if (gb?.enabled) {
-      layers.push(gradientToEnvLayer(gb, options.environmentGlobalIntensity ?? 1.0));
+    const currentShapes = useHDRIShapesStore.getState().shapes;
+    const globalIntensity = options.environmentGlobalIntensity ?? 1.0;
+    if (currentShapes.length > 0) {
+      const canvas = compositeShapesCanvas(currentShapes, gb?.enabled ? gb : null);
+      layers.push(shapesCanvasToEnvLayer(canvas, globalIntensity));
+    } else if (gb?.enabled) {
+      layers.push(gradientToEnvLayer(gb, globalIntensity));
     }
   }
 
