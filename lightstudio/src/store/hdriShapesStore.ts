@@ -62,6 +62,14 @@ interface HDRIShapesStore {
    *  of updateShape directly, so dragging a grouped shape moves the whole
    *  composite - ungrouped shapes fall through to a plain single-shape move. */
   moveShapeAndGroup: (shapeId: string, newU: number, newV: number) => void;
+
+  /** Full-fidelity export for the project (.lightscene) file - unlike
+   *  setShapesFromLook, ids/groupId are kept exactly as-is since this is a
+   *  round-trip of the same project, not stacking a Look onto a live scene. */
+  exportShapes: () => { shapes: HDRIShape[]; groups: HDRIShapeGroup[] };
+  /** Counterpart to exportShapes - replaces the whole shape+group stack
+   *  verbatim, restoring a saved project exactly as it was. */
+  importShapes: (shapes: HDRIShape[] | undefined, groups: HDRIShapeGroup[] | undefined) => void;
 }
 
 export const useHDRIShapesStore = create<HDRIShapesStore>((set, get) => ({
@@ -231,6 +239,19 @@ export const useHDRIShapesStore = create<HDRIShapesStore>((set, get) => ({
     });
   },
 
+  exportShapes: () => ({
+    shapes: JSON.parse(JSON.stringify(get().shapes)) as HDRIShape[],
+    groups: JSON.parse(JSON.stringify(get().groups)) as HDRIShapeGroup[],
+  }),
+
+  importShapes: (shapes, groups) => {
+    set({
+      shapes: Array.isArray(shapes) ? shapes : [],
+      groups: Array.isArray(groups) ? groups : [],
+      selectedShapeId: null,
+    });
+  },
+
   moveShapeAndGroup: (shapeId, newU, newV) => {
     set((s) => {
       const target = s.shapes.find((sh) => sh.id === shapeId);
@@ -253,3 +274,7 @@ export const useHDRIShapesStore = create<HDRIShapesStore>((set, get) => ({
     });
   },
 }));
+
+if (import.meta.env.DEV && typeof window !== 'undefined') {
+  (window as unknown as { __hdriShapesStore?: unknown }).__hdriShapesStore = useHDRIShapesStore;
+}

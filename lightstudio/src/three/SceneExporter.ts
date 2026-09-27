@@ -14,6 +14,8 @@ import { useAppearanceStore } from '../appearance/appearanceStore';
 import type { LightCollection } from '../types/Composite';
 import type { SerializedImage } from '../appearance/imageImport';
 import type { EditableObjectJSON } from '../modeling/EditableObject';
+import { useHDRIShapesStore } from '../store/hdriShapesStore';
+import type { HDRIShape, HDRIShapeGroup } from '../types/HDRIShape';
 
 // ── Scene file schema ───────────────────────────────────────────────────────
 
@@ -109,6 +111,9 @@ export interface SceneFile {
   appearanceImages?: SerializedImage[];
   // ── Light groups (Composites) ──────────────────────────────────────────────
   collections?: LightCollection[];
+  // ── HDRI Shapes (drawn map shapes) and their composite groups ─────────────
+  hdriShapes?: HDRIShape[];
+  hdriShapeGroups?: HDRIShapeGroup[];
 }
 
 // ── SceneExporter ──────────────────────────────────────────────────────────
@@ -184,6 +189,10 @@ export class SceneExporter {
       objectHdri: useObjectHdriStore.getState().exportSettings(),
       appearanceImages: useAppearanceStore.getState().exportImages(lightsState.lights.map((l) => l.appearance)),
       collections: JSON.parse(JSON.stringify(lightsState.collections)),
+      ...(() => {
+        const { shapes, groups } = useHDRIShapesStore.getState().exportShapes();
+        return { hdriShapes: shapes, hdriShapeGroups: groups };
+      })(),
     };
   }
 
@@ -314,6 +323,9 @@ export class SceneExporter {
       useAppearanceStore.getState().clearImages();
       useAppearanceStore.getState().importImages(data.appearanceImages);
       if (Array.isArray(data.collections) && data.collections.length) useLightsStore.getState().setCollections(data.collections);
+
+      // ── Restore HDRI Shapes (drawn map shapes + composite groups) ───────
+      useHDRIShapesStore.getState().importShapes(data.hdriShapes, data.hdriShapeGroups);
 
       return null;
     } catch (err) {
