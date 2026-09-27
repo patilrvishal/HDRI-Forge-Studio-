@@ -36,6 +36,7 @@ import { useObjectHdriStore } from '../../store/objectHdriStore';
 import type { AnimatedProperty } from '../../types/Animation';
 import { MaterialManager } from '../../three/MaterialManager';
 import { useMaterialEditorStore } from '../../store/materialEditorStore';
+import type { PBRMaterialState } from '../../types/MaterialEditor';
 import { useUIStore } from '../../store/uiStore';
 import { useHDRIShapesStore } from '../../store/hdriShapesStore';
 import { compositeShapesCanvas } from '../../three/HDRIShapesLayer';
@@ -44,6 +45,43 @@ interface ViewportProps {
   sceneManagerRef: React.MutableRefObject<SceneManager | null>;
   onScreenshot: (dataUrl: string) => void;
   onReady?: (renderPipeline: RenderPipeline | null, materialManager: MaterialManager | null) => void;
+}
+
+/**
+ * A primitive/duplicate/split created by the modelling tools gets its own
+ * real THREE.MeshPhysicalMaterial (see EditableObject's constructor), but
+ * extractMaterials() only ever runs once, right after a GLB/.erik model
+ * loads - so those meshes never got an entry in the Material Editor store,
+ * and the main Material tab (not the modelling system's own little N-panel)
+ * silently showed nothing for them. Called on every modelling change; cheap
+ * (a handful of objects at most) and additive - only registers materials
+ * this store doesn't already know about (so it never disturbs anything
+ * already tracked), then focuses the Material tab on whichever shape was
+ * just created.
+ */
+function syncModelingMaterials(modeling: ModelingController, materialManager: MaterialManager): void {
+  const store = useMaterialEditorStore.getState();
+  const trackedNames = new Set(store.materials.map((m) => m.name));
+  const additions: PBRMaterialState[] = [];
+  let index = store.materials.length;
+
+  for (const obj of modeling.objects.values()) {
+    const mat = obj.object.material;
+    if (Array.isArray(mat) || !mat.name || trackedNames.has(mat.name)) continue;
+    const state = materialManager.registerAdHocMaterial(obj.object, index++);
+    if (state) {
+      additions.push(state);
+      trackedNames.add(state.name);
+    }
+  }
+
+  if (additions.length === 0) return;
+  useMaterialEditorStore.getState().addMaterials(additions);
+  // Jump the Material tab to the just-created shape's new material, the same
+  // way most 3D tools focus a newly added object's properties - this only
+  // ever runs on a FRESH addition (an already-tracked material is skipped
+  // above), never on an unrelated change to something else already selected.
+  useMaterialEditorStore.getState().selectMaterial(additions[additions.length - 1].id);
 }
 
 export const Viewport: React.FC<ViewportProps> = ({ sceneManagerRef, onScreenshot, onReady }) => {
@@ -140,6 +178,7 @@ export const Viewport: React.FC<ViewportProps> = ({ sceneManagerRef, onScreensho
     // Material Manager
     const materialManager = new MaterialManager();
     materialManagerRef.current = materialManager;
+    if (import.meta.env.DEV) (window as unknown as { __materialManager?: unknown }).__materialManager = materialManager;
 
     // Phase 9: Environment loader
     const envLoader = new EnvironmentLoader();
@@ -216,7 +255,13 @@ export const Viewport: React.FC<ViewportProps> = ({ sceneManagerRef, onScreensho
 
     // Blender-style modelling tools (primitives + Edit Mode). Path tracer is told to
     // rebuild whenever geometry or transforms change.
-    const modeling = new ModelingController(sceneManager, { onChanged: () => { renderPipeline.markPathTracerDirty(); useObjectHdriStore.getState().touch(); } });
+    const modeling = new ModelingController(sceneManager, {
+      onChanged: () => {
+        renderPipeline.markPathTracerDirty();
+        useObjectHdriStore.getState().touch();
+        syncModelingMaterials(modeling, materialManager);
+      },
+    });
     setModelingController(modeling);
 
     // Phase 9: Apply default environment preset

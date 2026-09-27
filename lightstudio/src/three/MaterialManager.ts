@@ -51,9 +51,34 @@ export class MaterialManager {
     let matIndex = 0;
 
     for (const [, group] of materialGroups) {
-      const mat = group.material;
+      const state = this.buildMaterialState(matIndex, group.material, group.meshNames);
+      this.materialMap.set(state.id, [group.material]);
+      states.push(state);
+      matIndex++;
+    }
+
+    return states;
+  }
+
+  /**
+   * Register a single mesh's material with the store/manager without
+   * touching anything else already tracked - unlike extractMaterials(),
+   * which clears and rebuilds everything (meant for a fresh model load).
+   * Used for meshes created OUTSIDE the model-load path (the modelling
+   * system's primitives/duplicates/splits) so they get a real, editable
+   * entry in the main Material tab instead of silently having none.
+   */
+  registerAdHocMaterial(mesh: THREE.Mesh, index: number): PBRMaterialState | null {
+    const mat = mesh.material;
+    if (Array.isArray(mat) || !(mat instanceof THREE.MeshStandardMaterial)) return null;
+    const state = this.buildMaterialState(index, mat, [mesh.name]);
+    this.materialMap.set(state.id, [mat]);
+    return state;
+  }
+
+  private buildMaterialState(matIndex: number, mat: THREE.MeshStandardMaterial, meshNames: string[]): PBRMaterialState {
       const isPhys = mat instanceof THREE.MeshPhysicalMaterial;
-      const state = createPBRMaterialState(matIndex, mat.name, group.meshNames);
+      const state = createPBRMaterialState(matIndex, mat.name, meshNames);
 
       // Read standard material properties
       state.color = '#' + mat.color.getHexString();
@@ -133,14 +158,7 @@ export class MaterialManager {
         state.displacementMap = { enabled: true, dataUrl: null, fileName: '(embedded)', uvChannel: mat.displacementMap.channel };
       }
 
-      // Store mapping: state.id → [actual Three.js materials]
-      this.materialMap.set(state.id, [mat]);
-
-      states.push(state);
-      matIndex++;
-    }
-
-    return states;
+      return state;
   }
 
   /**

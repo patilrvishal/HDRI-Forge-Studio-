@@ -43,6 +43,12 @@ export class EditableObject {
       polygonOffsetFactor: 1,
       polygonOffsetUnits: 1,
     });
+    // A stable, unique name (not the display name, which the user can rename
+    // and which two objects could share) - this is what the main Material
+    // Editor tab (not just this modelling system's own little N-panel) uses
+    // to find and track this object's material, the same way it tracks
+    // materials extracted from a loaded model.
+    mat.name = `${id}_material`;
     this.object = new THREE.Mesh(new THREE.BufferGeometry(), mat);
     this.object.name = name;
     this.object.castShadow = true;
