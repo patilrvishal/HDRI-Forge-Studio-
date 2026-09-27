@@ -47,6 +47,7 @@ function SceneCameraSlot() {
 }
 import { GradientBackgroundPanel } from '../Environment/GradientBackgroundPanel';
 import { HDRIPreviewPanel } from '../HDRI/HDRIPreviewPanel';
+import { CanvasPanel } from '../Canvas/CanvasPanel';
 import { ExportDialog } from '../Export/ExportDialog';
 import { FinalRenderPanel } from '../Export/FinalRenderPanel';
 import { EnvironmentBrowser } from '../Environment/EnvironmentBrowser';
@@ -136,7 +137,7 @@ export const AppLayout: React.FC = () => {
   const viewportDesignVisible = panelVisibility.viewportDesign;
 
   // Bottom panel: side-by-side tabs (mutually exclusive)
-  const [bottomTab, setBottomTab] = useState<'hdri' | 'presets' | 'customHdri'>('hdri');
+  const [bottomTab, setBottomTab] = useState<'hdri' | 'canvas' | 'presets' | 'customHdri'>('hdri');
 
   // History state for status bar
   const undoCount = useHistoryStore((s) => s.undoStack.length);
@@ -625,6 +626,12 @@ export const AppLayout: React.FC = () => {
                     HDRI Preview
                   </div>
                   <div
+                    className={`tab-item ${bottomTab === 'canvas' ? 'active' : ''}`}
+                    onClick={() => setBottomTab('canvas')}
+                  >
+                    Canvas
+                  </div>
+                  <div
                     className={`tab-item ${bottomTab === 'presets' ? 'active' : ''}`}
                     onClick={() => setBottomTab('presets')}
                   >
@@ -645,6 +652,7 @@ export const AppLayout: React.FC = () => {
               {/* Tab content - mutually exclusive, full width */}
               <div style={{ flex: 1, overflow: 'hidden' }}>
                 {bottomTab === 'hdri' && <HDRIPreviewPanel />}
+                {bottomTab === 'canvas' && <CanvasPanel />}
                 {bottomTab === 'presets' && <PresetBrowser onGenerateThumbnail={handleGenerateThumbnail} />}
                 {bottomTab === 'customHdri' && <EnvironmentAssetsPanel />}
               </div>

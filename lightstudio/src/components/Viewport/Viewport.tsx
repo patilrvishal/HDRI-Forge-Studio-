@@ -6,6 +6,7 @@ import { useAppearanceStore } from '../../appearance/appearanceStore';
 import { useHDRIAssetStore } from '../../store/hdriAssetStore';
 import { paintSunToDirection } from '../../hdriedit/paintSun';
 import { PaintModeBar } from './PaintModeBar';
+import { scaledLightPatch } from '../../three/lightScale';
 import { useAnimationStore } from '../../store/animationStore';
 import { ThreeSceneProvider } from '../../hooks/useThreeScene';
 import { SceneManager, RenderPipeline, LightManager, ModelLoader, canvasTextureToDataTexture } from '../../three/engine';
@@ -87,6 +88,14 @@ export const Viewport: React.FC<ViewportProps> = ({ sceneManagerRef, onScreensho
   const lights = useLightsStore((s) => s.lights);
   const appearanceImagesVersion = useAppearanceStore((s) => s.imagesVersion);
   const appearanceAudition = useAppearanceStore((s) => s.audition);
+  const shiftHeldRef = useRef(false);
+  useEffect(() => {
+    const dn = (e: KeyboardEvent) => { if (e.key === 'Shift') shiftHeldRef.current = true; };
+    const up = (e: KeyboardEvent) => { if (e.key === 'Shift') shiftHeldRef.current = false; };
+    window.addEventListener('keydown', dn);
+    window.addEventListener('keyup', up);
+    return () => { window.removeEventListener('keydown', dn); window.removeEventListener('keyup', up); };
+  }, []);
   const hasSkyAsset = useHDRIAssetStore((s) => s.assets.some((a) => a.kind === 'sky'));
   const selectedLightId = useLightsStore((s) => s.selectedLightId);
   const updateLight = useLightsStore((s) => s.updateLight);
@@ -891,10 +900,8 @@ export const Viewport: React.FC<ViewportProps> = ({ sceneManagerRef, onScreensho
           });
 
           if (l.type === 'area' || l.type === 'overhead') {
-            st.updateLight(lightId, {
-              areaWidth: Math.max(0.1, (l.areaWidth ?? 2) * data.scale.x),
-              areaHeight: Math.max(0.1, (l.areaHeight ?? 2) * data.scale.y),
-            });
+            // Shift while scaling = Energy-Conserving Light Scaling (total output stays constant)
+            st.updateLight(lightId, scaledLightPatch(l, (l.areaWidth ?? 2) * data.scale.x, (l.areaHeight ?? 2) * data.scale.y, shiftHeldRef.current && (data.scale.x !== 1 || data.scale.y !== 1)));
           }
         },
       },

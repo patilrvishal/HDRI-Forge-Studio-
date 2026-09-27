@@ -13,6 +13,7 @@ import { findObjectByKey } from '../../three/objectBinding';
 import { useObjectHdriStore } from '../../store/objectHdriStore';
 import { useSceneHierarchyStore } from '../../store/sceneHierarchyStore';
 import { LightAppearanceSection } from '../Appearance/LightAppearanceSection';
+import { scaledLightPatch } from '../../three/lightScale';
 
 /**
  * Collapsible inspector section with a chevron header — matches the reference
@@ -185,13 +186,24 @@ export const LightProperties: React.FC<{ lightId?: string }> = ({ lightId }) => 
   // whenever a different light is selected. Without this the slider snaps back
   // to 1 on every drag and the dimensions compound (1.5x then 1.5x = 2.25x).
   const [areaScale, setAreaScale] = useState(1);
-  const areaBaseRef = useRef<{ w: number; h: number }>({ w: 2, h: 2 });
+  const areaBaseRef = useRef<{ w: number; h: number; b: number }>({ w: 2, h: 2, b: 100 });
+  // Energy-Conserving Light Scaling: resizing keeps the light's total output constant.
+  const [keepEnergy, setKeepEnergy] = useState(false);
+  const shiftDown = useRef(false);
+  useEffect(() => {
+    const dn = (e: KeyboardEvent) => { if (e.key === 'Shift') shiftDown.current = true; };
+    const up = (e: KeyboardEvent) => { if (e.key === 'Shift') shiftDown.current = false; };
+    window.addEventListener('keydown', dn);
+    window.addEventListener('keyup', up);
+    return () => { window.removeEventListener('keydown', dn); window.removeEventListener('keyup', up); };
+  }, []);
 
   useEffect(() => {
     if (!light) return;
     areaBaseRef.current = {
       w: light.areaWidth ?? 2,
       h: light.areaHeight ?? 2,
+      b: light.brightness,
     };
     setAreaScale(1);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -209,17 +221,15 @@ export const LightProperties: React.FC<{ lightId?: string }> = ({ lightId }) => 
     (scale: number) => {
       const base = areaBaseRef.current;
       setAreaScale(scale);
-      handleUpdate({
-        areaWidth: Math.min(20, Math.max(0.1, base.w * scale)),
-        areaHeight: Math.min(20, Math.max(0.1, base.h * scale)),
-      });
+      if (!light) return;
+      handleUpdate(scaledLightPatch({ ...light, areaWidth: base.w, areaHeight: base.h, brightness: base.b }, base.w * scale, base.h * scale, keepEnergy || shiftDown.current));
     },
-    [handleUpdate],
+    [handleUpdate, light, keepEnergy],
   );
 
   const handleAreaWidth = useCallback(
     (v: number) => {
-      areaBaseRef.current = { w: v, h: light?.areaHeight ?? 2 };
+      areaBaseRef.current = { w: v, h: light?.areaHeight ?? 2, b: light?.brightness ?? 100 };
       setAreaScale(1);
       handleUpdate({ areaWidth: v });
     },
@@ -228,7 +238,7 @@ export const LightProperties: React.FC<{ lightId?: string }> = ({ lightId }) => 
 
   const handleAreaHeight = useCallback(
     (v: number) => {
-      areaBaseRef.current = { w: light?.areaWidth ?? 2, h: v };
+      areaBaseRef.current = { w: light?.areaWidth ?? 2, h: v, b: light?.brightness ?? 100 };
       setAreaScale(1);
       handleUpdate({ areaHeight: v });
     },
@@ -511,6 +521,7 @@ export const LightProperties: React.FC<{ lightId?: string }> = ({ lightId }) => 
             onChange={handleAreaScale}
             unit="x"
           />
+          <Toggle label="Keep energy (or hold Shift)" checked={keepEnergy} variant="glossy" onChange={setKeepEnergy} />
             </>
           )}
         </CollapsibleSection>
