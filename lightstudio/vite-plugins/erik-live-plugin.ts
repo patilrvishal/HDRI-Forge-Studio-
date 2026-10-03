@@ -20,6 +20,8 @@ export function erikLivePlugin(): Plugin {
   let ash = '';
   let meta = { w: 0, h: 0, ms: 0, pass: '' };
   const clients = new Set<ServerResponse>();
+  // Forge page listens here for messages Erik sends back (e.g. "match reference photo" gains)
+  const upClients = new Set<ServerResponse>();
 
   const cors = (res: ServerResponse) => {
     res.setHeader('Access-Control-Allow-Origin', '*');
@@ -44,7 +46,7 @@ export function erikLivePlugin(): Plugin {
 
         if (req.method === 'GET' && url === '/status') {
           res.writeHead(200, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify({ ok: true, app: 'HDRI Forge Studio', version, clients: clients.size, hasMap: !!hdr, ...meta }));
+          res.end(JSON.stringify({ ok: true, app: 'HDRI Forge Studio', version, clients: clients.size, forge: upClients.size, hasMap: !!hdr, ...meta }));
           return;
         }
 
@@ -54,6 +56,33 @@ export function erikLivePlugin(): Plugin {
           clients.add(res);
           const ping = setInterval(() => res.write(': ping\n\n'), 15000);
           req.on('close', () => { clearInterval(ping); clients.delete(res); });
+          return;
+        }
+
+        if (req.method === 'GET' && url === '/up-events') {
+          res.writeHead(200, { 'Content-Type': 'text/event-stream', Connection: 'keep-alive' });
+          res.write(': ok\n\n');
+          upClients.add(res);
+          const ping = setInterval(() => res.write(': ping\n\n'), 15000);
+          req.on('close', () => { clearInterval(ping); upClients.delete(res); });
+          return;
+        }
+
+        if (req.method === 'POST' && url === '/up') {
+          const chunks: Buffer[] = [];
+          let size = 0;
+          req.on('data', (c: Buffer) => { size += c.length; if (size <= 4096) chunks.push(c); });
+          req.on('end', () => {
+            try {
+              if (size > 4096) throw new Error('too big');
+              const msg = JSON.stringify(JSON.parse(Buffer.concat(chunks).toString('utf8')));
+              for (const c of upClients) c.write(`data: ${msg}\n\n`);
+              res.writeHead(200, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({ ok: true, listeners: upClients.size }));
+            } catch {
+              res.writeHead(400).end('bad message');
+            }
+          });
           return;
         }
 

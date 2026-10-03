@@ -27,6 +27,7 @@ import { useHDRIShapesStore } from '../store/hdriShapesStore';
 import { useObjectHdriStore } from '../store/objectHdriStore';
 import { useAppearanceStore } from '../appearance/appearanceStore';
 import { encodeHDRRLE, computeAshSH9, formatAsh } from './hdriLiveEncode';
+import { useMatchGainStore, getMatchGain } from './matchGain';
 
 const DEBOUNCE_MS = 120;
 
@@ -93,6 +94,26 @@ export const useErikLiveStore = create<LiveState>((set, get) => ({
 let gen = 0;
 let timer: number | null = null;
 let unsubs: Array<() => void> = [];
+let upSource: EventSource | null = null;
+
+/** Messages Erik sends back (currently only "match reference photo" gain requests). */
+async function listenToErik(): Promise<void> {
+  try {
+    const base = await getBase();
+    if (upSource) return;
+    const es = new EventSource(`${base}/up-events`);
+    upSource = es;
+    es.onmessage = (ev) => {
+      let m: { type?: string; gain?: number[]; seq?: number };
+      try { m = JSON.parse(ev.data); } catch { return; }
+      if (m.type === 'matchGain' && Array.isArray(m.gain) && m.gain.length === 3 && typeof m.seq === 'number') {
+        useMatchGainStore.getState().set([m.gain[0], m.gain[1], m.gain[2]], m.seq);
+      } else if (m.type === 'matchReset') {
+        useMatchGainStore.getState().reset();
+      }
+    };
+  } catch { /* bridge not reachable: the live link itself reports that */ }
+}
 
 let layerCache: { assets: unknown; intensity: number; layers: EnvLayer[] } | null = null;
 let shapeCache: { shapes: unknown; gb: unknown; intensity: number; layer: EnvLayer } | null = null;
@@ -124,7 +145,13 @@ async function buildLayers(): Promise<EnvLayer[]> {
   return layers;
 }
 
-const nextFrames = () => new Promise<void>((r) => requestAnimationFrame(() => requestAnimationFrame(() => r())));
+// requestAnimationFrame stops while Forge's window is hidden or covered (e.g. you are watching Erik), so cap the wait.
+const nextFrames = () => new Promise<void>((resolve) => {
+  let done = false;
+  const fin = () => { if (!done) { done = true; resolve(); } };
+  requestAnimationFrame(() => requestAnimationFrame(fin));
+  window.setTimeout(fin, 100);
+});
 
 // Diffuse (SH) lighting is very low-frequency. It is DEFINED as the SH of a 512x256 render of the
 // current scene (see exportSHText in HDRIExporter, which the file export uses), so the live preview and
@@ -138,6 +165,8 @@ async function renderAndPush(pass: Pass, my: number): Promise<boolean> {
   if (!scene) { st._set({ status: 'error', error: 'Viewport scene not ready' }); return false; }
 
   const t0 = performance.now();
+  const mg = getMatchGain();
+  const mseq = useMatchGainStore.getState().seq;
   st._set({ status: 'rendering', pass: pass.label });
   const layers = await buildLayers();
   if (my !== gen) return false;
@@ -157,7 +186,10 @@ async function renderAndPush(pass: Pass, my: number): Promise<boolean> {
   if (my !== gen) return false;
 
   const exposure = useSceneStore.getState().renderSettings.exposure;
-  if (exposure !== 1.0) for (let i = 0; i < pixels.length; i++) pixels[i] *= exposure;
+  const gr = exposure * mg[0], gg = exposure * mg[1], gb = exposure * mg[2];
+  if (gr !== 1 || gg !== 1 || gb !== 1) {
+    for (let i = 0; i < pixels.length; i += 4) { pixels[i] *= gr; pixels[i + 1] *= gg; pixels[i + 2] *= gb; }
+  }
 
   let hdr: Uint8Array;
   try {
@@ -178,7 +210,7 @@ async function renderAndPush(pass: Pass, my: number): Promise<boolean> {
         'Content-Type': 'application/octet-stream',
         'X-Ash': encodeURIComponent(ash),
         // final = the selected export resolution, i.e. byte-identical to what Export HDRI writes
-        'X-Meta': encodeURIComponent(JSON.stringify({ w: pass.w, h: pass.h, ms, pass: pass.label, final: pass.w === useErikLiveStore.getState().targetW })),
+        'X-Meta': encodeURIComponent(JSON.stringify({ w: pass.w, h: pass.h, ms, pass: pass.label, final: pass.w === useErikLiveStore.getState().targetW, m: mseq })),
       },
       body: hdr,
     });
@@ -231,6 +263,8 @@ function start() {
   watch((l) => useHDRIShapesStore.subscribe(l), () => useHDRIShapesStore.getState().shapes);
   watch((l) => useObjectHdriStore.subscribe(l), () => useObjectHdriStore.getState().version);
   watch((l) => useAppearanceStore.subscribe(l), () => useAppearanceStore.getState());
+  watch((l) => useMatchGainStore.subscribe(l), () => useMatchGainStore.getState().gain);
+  void listenToErik();
   useErikLiveStore.getState()._set({ status: 'idle', error: '' });
   schedule(); // push the current state straight away
 }
@@ -240,5 +274,9 @@ function stop(resetStatus = true) {
   if (timer) { window.clearTimeout(timer); timer = null; }
   unsubs.forEach((u) => u());
   unsubs = [];
-  if (resetStatus) useErikLiveStore.getState()._set({ status: 'off' });
+  if (upSource) { upSource.close(); upSource = null; }
+  if (resetStatus) {
+    useErikLiveStore.getState()._set({ status: 'off' });
+    useMatchGainStore.getState().reset();
+  }
 }

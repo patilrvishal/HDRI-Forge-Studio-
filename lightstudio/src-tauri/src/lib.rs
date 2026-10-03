@@ -96,6 +96,8 @@ struct ErikLiveState {
   ash: String,
   meta: serde_json::Map<String, serde_json::Value>,
   clients: Vec<Box<dyn Write + Send>>,
+  /// Forge page listening for messages Erik sends back ("match reference photo" gains).
+  up_clients: Vec<Box<dyn Write + Send>>,
 }
 
 fn erik_header(k: &str, v: &str) -> tiny_http::Header {
@@ -183,6 +185,8 @@ fn start_erik_live_server() {
       if let Ok(mut g) = st.lock() {
         g.clients
           .retain_mut(|c| c.write_all(b": ping\n\n").and_then(|_| c.flush()).is_ok());
+        g.up_clients
+          .retain_mut(|c| c.write_all(b": ping\n\n").and_then(|_| c.flush()).is_ok());
       }
     });
   }
@@ -211,6 +215,7 @@ fn start_erik_live_server() {
             obj.insert("mode".into(), "desktop".into());
             obj.insert("version".into(), g.version.into());
             obj.insert("clients".into(), g.clients.len().into());
+            obj.insert("forge".into(), g.up_clients.len().into());
             obj.insert("hasMap".into(), (!g.hdr.is_empty()).into());
             serde_json::Value::Object(obj).to_string()
           };
@@ -225,6 +230,40 @@ fn start_erik_live_server() {
           );
           if w.write_all(first.as_bytes()).and_then(|_| w.flush()).is_ok() {
             g.clients.push(w);
+          }
+        }
+        (tiny_http::Method::Get, "/up-events") => {
+          let mut w = request.into_writer();
+          let mut g = state.lock().unwrap();
+          let first = "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nCache-Control: no-store\r\nConnection: keep-alive\r\nAccess-Control-Allow-Origin: *\r\n\r\n: ok\n\n";
+          if w.write_all(first.as_bytes()).and_then(|_| w.flush()).is_ok() {
+            g.up_clients.push(w);
+          }
+        }
+        (tiny_http::Method::Post, "/up") => {
+          let mut body = Vec::new();
+          let read_ok = std::io::Read::read_to_end(&mut request.as_reader().take(4097), &mut body).is_ok();
+          let parsed = if read_ok && body.len() <= 4096 {
+            serde_json::from_slice::<serde_json::Value>(&body).ok()
+          } else {
+            None
+          };
+          match parsed {
+            Some(v) => {
+              let msg = format!("data: {}\n\n", v);
+              let listeners = {
+                let mut g = state.lock().unwrap();
+                g.up_clients
+                  .retain_mut(|c| c.write_all(msg.as_bytes()).and_then(|_| c.flush()).is_ok());
+                g.up_clients.len()
+              };
+              let _ = request.respond(erik_json(tiny_http::Response::from_string(format!(
+                "{{\"ok\":true,\"listeners\":{listeners}}}"
+              ))));
+            }
+            None => {
+              let _ = request.respond(erik_cors(tiny_http::Response::from_string("bad message").with_status_code(400)));
+            }
           }
         }
         (tiny_http::Method::Get, "/hdr") => {

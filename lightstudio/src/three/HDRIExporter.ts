@@ -44,6 +44,7 @@ import { applyFilters, type FilterSpec } from '../filters/filters';
 import { blendValue } from '../appearance/evaluate';
 import type { AppearanceBlend } from '../appearance/types';
 import { encodeHDRRLE, computeAshSH9, formatAsh } from '../erikLive/hdriLiveEncode';
+import { getMatchGain } from '../erikLive/matchGain';
 
 // --------- Types ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 
@@ -302,6 +303,18 @@ const GAUSSIAN_SOFTNESS = 1.5;
  *   Too dark                -> raise it (2, 5, 10)
  */
 const EXPORT_EXPOSURE = 200.0;
+
+/**
+ * Let other tasks (UI events, a newer edit cancelling this render) run. MessageChannel instead of setTimeout(0):
+ * timers are throttled to ~1/s while the window is hidden or covered, which would stall a live render for minutes.
+ */
+function yieldToEventLoop(): Promise<void> {
+  return new Promise<void>((resolve) => {
+    const ch = new MessageChannel();
+    ch.port1.onmessage = () => { ch.port1.close(); resolve(); };
+    ch.port2.postMessage(0);
+  });
+}
 
 // --------- FUNCTION 1: pixelToDirection ------------------------------------------------------------------------------------------------------------------------------------
 
@@ -948,7 +961,7 @@ lights.forEach((l, i) => {
       if (yieldEvery === 100) {
         console.log(`[HDRI Forge] ${Math.round((y / height) * 100)}% complete`);
       }
-      await new Promise<void>((resolve) => setTimeout(resolve, 0));
+      await yieldToEventLoop();
       if (options.isCancelled?.()) throw new HDRICancelled();
     }
   }
@@ -981,7 +994,7 @@ lights.forEach((l, i) => {
           rgb[i] = r; rgb[i + 1] = g; rgb[i + 2] = b; rgb[i + 3] = 1;
           alpha[i] = alpha[i + 1] = alpha[i + 2] = a; alpha[i + 3] = 1;
         }
-        if (y % 64 === 0) await new Promise<void>((resolve) => setTimeout(resolve, 0));
+        if (y % 64 === 0) await yieldToEventLoop();
       }
       const blend = members[0].compositeBlend ?? 'normal';
       const frgb = filters.some((f) => f.enabled) ? applyFilters({ data: rgb, width, height }, filters, true) : rgb;
@@ -1498,11 +1511,14 @@ export async function downloadHDRI(
   // the file remains true HDR - just scaled, the same way exposure works as
   // a linear stops multiplier on a real camera.
   const exposure = options.viewExposure ?? useSceneStore.getState().renderSettings.exposure;
-  if (exposure !== 1.0) {
-    for (let i = 0; i < pixels.length; i++) {
-      pixels[i] *= exposure;
+  // "Match reference photo" (sent by Erik while the live link is on) is baked in too, so the file equals the live look.
+  const mg = getMatchGain();
+  const er = exposure * mg[0], eg = exposure * mg[1], eb = exposure * mg[2];
+  if (er !== 1.0 || eg !== 1.0 || eb !== 1.0) {
+    for (let i = 0; i < pixels.length; i += 4) {
+      pixels[i] *= er; pixels[i + 1] *= eg; pixels[i + 2] *= eb; pixels[i + 3] *= exposure;
     }
-    console.log(`[HDRI Forge] Baked View Exposure ${exposure.toFixed(2)}x into exported data`);
+    console.log(`[HDRI Forge] Baked View Exposure ${exposure.toFixed(2)}x (match gain ${mg.map((v) => v.toFixed(3)).join('/')}) into exported data`);
   }
 
   const baseName = filename ?? `lightforge_hdri_${Date.now()}`;
@@ -1522,7 +1538,7 @@ export async function downloadHDRI(
   // pair looks identical to the live preview.
   if (options.alsoExportSH) {
     const sh = await generateAnalyticalHDRI(scene, 512, 256, cp, layers);
-    if (exposure !== 1.0) for (let i = 0; i < sh.length; i++) sh[i] *= exposure;
+    if (er !== 1.0 || eg !== 1.0 || eb !== 1.0) for (let i = 0; i < sh.length; i += 4) { sh[i] *= er; sh[i + 1] *= eg; sh[i + 2] *= eb; }
     const ash = formatAsh(computeAshSH9(sh, 512, 256));
     // small gap so the browser treats it as a second download of the same click
     await new Promise<void>((r) => setTimeout(r, 400));
