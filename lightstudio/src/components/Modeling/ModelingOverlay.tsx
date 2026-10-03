@@ -7,6 +7,11 @@ import { objectKey } from '../../three/objectBinding';
 import { useObjectHdriStore } from '../../store/objectHdriStore';
 import { useLightsStore } from '../../store/lightsStore';
 import { enableObjectLight, disableObjectLight, setIncludeInHdri } from '../../three/objectLightApi';
+import { SliderNumberField } from '../UI/SliderNumberField';
+import {
+  brightnessToIntensity, intensityToBrightness,
+  INTENSITY_SLIDER_MAX, INTENSITY_INPUT_MAX, INTENSITY_STEP,
+} from '../../utils/lightIntensity';
 
 const ctl = () => getModelingController();
 
@@ -406,8 +411,19 @@ function HdriLightQuick() {
       </div>
       {light && (
         <div className="mdl-field">
-          <label>Brightness</label>
-          <input className="mdl-range" type="range" min={0} max={1000} step={1} value={light.brightness} onChange={(e) => useLightsStore.getState().updateLight(light.id, { brightness: parseFloat(e.target.value) })} />
+          <label>Intensity</label>
+          <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <input
+              className="mdl-range" style={{ width: 80 }} type="range" min={0} max={INTENSITY_SLIDER_MAX} step={INTENSITY_STEP}
+              value={brightnessToIntensity(light.brightness)}
+              onChange={(e) => useLightsStore.getState().updateLight(light.id, { brightness: intensityToBrightness(parseFloat(e.target.value)) })}
+            />
+            <SliderNumberField
+              className="mdl-num" style={{ width: 52 }} label="Intensity"
+              value={brightnessToIntensity(light.brightness)} min={0} max={INTENSITY_INPUT_MAX} step={INTENSITY_STEP}
+              onChange={(v) => useLightsStore.getState().updateLight(light.id, { brightness: intensityToBrightness(v) })}
+            />
+          </span>
         </div>
       )}
     </>

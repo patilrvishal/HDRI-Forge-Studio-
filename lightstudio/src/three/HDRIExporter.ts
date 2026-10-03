@@ -43,6 +43,7 @@ import { getEditedImage, hasEdits, imageToDataTexture } from '../hdriedit/envSou
 import { applyFilters, type FilterSpec } from '../filters/filters';
 import { blendValue } from '../appearance/evaluate';
 import type { AppearanceBlend } from '../appearance/types';
+import { encodeHDRRLE, computeAshSH9, formatAsh } from '../erikLive/hdriLiveEncode';
 
 // --------- Types ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 
@@ -132,47 +133,115 @@ export interface EnvLayer {
   /** -100..100, default 0 (no change). Desaturate toward luminance at
    *  -100, oversaturate at +100. */
   saturation?: number;
+  /** Rotation around X (pitch) and Z (roll), DEGREES. (Y is `rotation`, radians.) */
+  rotationX?: number;
+  rotationZ?: number;
+  /** Viewer offset inside the projection dome, metres, and the dome radius
+   *  (see HDRIAsset.offsetX). No effect unless an offset is non-zero. */
+  offsetX?: number;
+  offsetY?: number;
+  offsetZ?: number;
+  domeRadius?: number;
+  /** Mirror left/right. */
+  flipX?: boolean;
+  /** -180..180 degrees. */
+  hue?: number;
+  /** -100..100 cool..warm. */
+  temperature?: number;
+  /** -100..100 green..magenta. */
+  tint?: number;
+  /** -100..100, luminance-weighted tone controls. */
+  highlights?: number;
+  shadows?: number;
+  /** 0 = off; else soft-limit on peak radiance. */
+  peakLimit?: number;
 }
 
-/** Apply gamma -> contrast -> saturation to a linear RGB color, in that
- *  order (gamma reshapes the curve first, contrast pivots around the
- *  resulting mid-grey, saturation is a post-process on top of both) -
- *  shared by every place that samples a graded EnvLayer, so the HDRI
- *  Preview panel and the exported file always agree on the exact math. */
-function applyColorGrading(
-  color: THREE.Color,
-  contrast: number | undefined,
-  gamma: number | undefined,
-  saturation: number | undefined,
-): THREE.Color {
+type Grade = Pick<EnvLayer, 'contrast' | 'gamma' | 'saturation' | 'hue' | 'temperature' | 'tint' | 'highlights' | 'shadows' | 'peakLimit'>;
+
+function needsGrading(l: Grade): boolean {
+  return !!(l.contrast || l.saturation || (l.gamma !== undefined && l.gamma !== 1) || l.hue || l.temperature || l.tint
+    || l.highlights || l.shadows || l.peakLimit);
+}
+
+/** Grade a linear RGB colour: gamma -> contrast -> highlights/shadows -> white balance (temperature/tint) ->
+ *  hue -> saturation -> peak limit, in that order. Shared by every place that samples a graded EnvLayer, so
+ *  the HDRI Preview panel, the exported file and the Erik live link always agree on the exact math. All steps
+ *  are no-ops at their default values. */
+function applyColorGrading(color: THREE.Color, l: Grade): THREE.Color {
   let r = color.r, g = color.g, b = color.b;
 
-  if (gamma !== undefined && gamma !== 1) {
-    const invGamma = 1 / Math.max(0.01, gamma);
+  if (l.gamma !== undefined && l.gamma !== 1) {
+    const invGamma = 1 / Math.max(0.01, l.gamma);
     r = Math.pow(Math.max(0, r), invGamma);
     g = Math.pow(Math.max(0, g), invGamma);
     b = Math.pow(Math.max(0, b), invGamma);
   }
 
-  if (contrast) {
+  if (l.contrast) {
     // -100..100 -> a multiplicative factor pivoted at 0.5 (mid-grey in
     // display space) - values above 1.0 stay proportionally more extreme
     // instead of clamping, since this operates in unbounded HDR space.
-    const factor = (100 + contrast) / 100;
+    const factor = (100 + l.contrast) / 100;
     r = (r - 0.5) * factor + 0.5;
     g = (g - 0.5) * factor + 0.5;
     b = (b - 0.5) * factor + 0.5;
   }
 
-  if (saturation) {
+  if (l.highlights || l.shadows) {
+    // Weight by luminance relative to mid-grey (0.18): ~1 for darks, ~0 for brights.
+    const lum = Math.max(0, r * 0.2126 + g * 0.7152 + b * 0.0722);
+    const x = lum / 0.18;
+    const wShadow = 1 / (1 + x * x);
+    const wHigh = 1 - wShadow;
+    const s = (1 + ((l.shadows ?? 0) / 100) * 0.8 * wShadow) * (1 + ((l.highlights ?? 0) / 100) * 0.8 * wHigh);
+    r *= s; g *= s; b *= s;
+  }
+
+  if (l.temperature || l.tint) {
+    const t = (l.temperature ?? 0) / 100;
+    const u = (l.tint ?? 0) / 100;
+    r *= (1 + 0.35 * t) * (1 + 0.1 * u);
+    b *= (1 - 0.35 * t) * (1 + 0.1 * u);
+    g *= 1 - 0.3 * u;
+  }
+
+  if (l.hue) {
+    const a = (l.hue * Math.PI) / 180;
+    const c = Math.cos(a), s = Math.sin(a);
+    const nr = r * (0.213 + c * 0.787 - s * 0.213) + g * (0.715 - c * 0.715 - s * 0.715) + b * (0.072 - c * 0.072 + s * 0.928);
+    const ng = r * (0.213 - c * 0.213 + s * 0.143) + g * (0.715 + c * 0.285 + s * 0.140) + b * (0.072 - c * 0.072 - s * 0.283);
+    const nb = r * (0.213 - c * 0.213 - s * 0.787) + g * (0.715 - c * 0.715 + s * 0.715) + b * (0.072 + c * 0.928 + s * 0.072);
+    r = nr; g = ng; b = nb;
+  }
+
+  if (l.saturation) {
     const lum = r * 0.2126 + g * 0.7152 + b * 0.0722;
-    const factor = (100 + saturation) / 100;
+    const factor = (100 + l.saturation) / 100;
     r = lum + (r - lum) * factor;
     g = lum + (g - lum) * factor;
     b = lum + (b - lum) * factor;
   }
 
-  return new THREE.Color(Math.max(0, r), Math.max(0, g), Math.max(0, b));
+  r = Math.max(0, r); g = Math.max(0, g); b = Math.max(0, b);
+
+  if (l.peakLimit && l.peakLimit > 0) {
+    // Soft knee at 80% of the limit, hue-preserving (scales all channels together).
+    const cap = l.peakLimit, knee = cap * 0.8;
+    const m = Math.max(r, g, b);
+    if (m > knee) {
+      const m2 = knee + (cap - knee) * Math.tanh((m - knee) / (cap - knee));
+      const k = m2 / m;
+      r *= k; g *= k; b *= k;
+    }
+  }
+
+  return new THREE.Color(r, g, b);
+}
+
+/** Thrown by generateAnalyticalHDRI when options.isCancelled() reports true. */
+export class HDRICancelled extends Error {
+  constructor() { super('HDRI render cancelled'); this.name = 'HDRICancelled'; }
 }
 
 /** Options for the main downloadHDRI() entry point. */
@@ -190,6 +259,8 @@ export interface HDRIExportOptions {
   environmentLayers?: EnvLayer[];
   /** Global multiplier applied on top of each layer's own intensity. */
   environmentGlobalIntensity?: number;
+  /** Also download a matching Erik spherical-harmonics (.ash) file for diffuse lighting. */
+  alsoExportSH?: boolean;
   /** Legacy single-texture fields - used only if no layers are found. */
   includeEnvironment?: boolean;
   environmentTexture?: THREE.Texture | null;
@@ -661,8 +732,15 @@ export async function generateAnalyticalHDRI(
   height: number,
   capturePoint: THREE.Vector3,
   envLayers: EnvLayer[] = [],
-  options: { includeAreaModeLights?: boolean } = {},
+  options: {
+    includeAreaModeLights?: boolean;
+    /** Polled between row batches; return true to abandon this render (throws HDRICancelled). */
+    isCancelled?: () => boolean;
+    /** Rows between event-loop yields (default 100). Smaller keeps the UI responsive in live mode. */
+    yieldEveryRows?: number;
+  } = {},
 ): Promise<Float32Array> {
+  const yieldEvery = Math.max(1, options.yieldEveryRows ?? 100);
   const pixels = new Float32Array(width * height * 4);
 
   // Extract all lights from scene
@@ -684,6 +762,28 @@ lights.forEach((l, i) => {
 
   // Objects the user switched to 'Include in HDRI': ray-cast per pixel so their
   // real silhouette is painted and lights behind them are occluded.
+  // Per-layer orientation setup, done once (not per pixel).
+  const D2R = Math.PI / 180;
+  const scratchDir = new THREE.Vector3();
+  const prep = envLayers.map((l) => {
+    const rx = (l.rotationX ?? 0) * D2R, rz = (l.rotationZ ?? 0) * D2R;
+    let m: number[] | null = null;
+    if (rx || rz) {
+      // dirTex = Rz(-rz) * Rx(-rx) * dir  (X first, then Z; the Y yaw is applied last, inside sampleEnvTexture)
+      const cx = Math.cos(-rx), sx = Math.sin(-rx), cz = Math.cos(-rz), sz = Math.sin(-rz);
+      m = [cz, -sz * cx, sz * sx, sz, cz * cx, -cz * sx, 0, sx, cx];
+    }
+    let off: { o: number[]; R: number; c: number } | null = null;
+    const ox = l.offsetX ?? 0, oy = l.offsetY ?? 0, oz = l.offsetZ ?? 0;
+    if (ox || oy || oz) {
+      const R = Math.max(0.01, l.domeRadius ?? 50);
+      let o = [ox, oy, oz];
+      const len = Math.hypot(ox, oy, oz);
+      if (len >= R * 0.98) o = o.map((v) => (v / len) * R * 0.98); // keep the viewer inside the dome
+      off = { o, R, c: o[0] * o[0] + o[1] * o[1] + o[2] * o[2] - R * R };
+    }
+    return { m, off, flip: !!l.flipX, grade: needsGrading(l) };
+  });
   const objCaster = HdriObjectCaster.build(scene);
   const lightDist = lights.map((l) => (l.type === 'directional' || l.type === 'hemisphere' ? Infinity : l.position.distanceTo(capturePoint)));
   // For each pixel, calculate analytical radiance
@@ -714,10 +814,32 @@ lights.forEach((l, i) => {
       // the "everything else disappears" bug fixed earlier this session.
       for (let i = 0; i < envLayers.length; i++) {
         const layer = envLayers[i];
-        const raw = sampleEnvTexture(layer.texture, dir, layer.rotation, layer.intensity);
-        const e = (layer.contrast || layer.saturation || (layer.gamma !== undefined && layer.gamma !== 1))
-          ? applyColorGrading(raw, layer.contrast, layer.gamma, layer.saturation)
-          : raw;
+        const pp = prep[i];
+        // Orientation pipeline per pixel: dome offset (parallax) -> X/Z rotation -> flip -> Y yaw (inside sampleEnvTexture).
+        let sd = dir;
+        if (pp.off || pp.m || pp.flip) {
+          let dx = dir.x, dy = dir.y, dz = dir.z;
+          if (pp.off) {
+            const o = pp.off.o;
+            const bq = o[0] * dx + o[1] * dy + o[2] * dz;
+            const t = -bq + Math.sqrt(Math.max(0, bq * bq - pp.off.c));
+            const px = o[0] + t * dx, py = o[1] + t * dy, pz = o[2] + t * dz;
+            const inv = 1 / Math.max(1e-9, Math.hypot(px, py, pz, 0));
+            dx = px * inv; dy = py * inv; dz = pz * inv;
+          }
+          if (pp.m) {
+            const m = pp.m;
+            const nx = m[0] * dx + m[1] * dy + m[2] * dz;
+            const ny = m[3] * dx + m[4] * dy + m[5] * dz;
+            const nz = m[6] * dx + m[7] * dy + m[8] * dz;
+            dx = nx; dy = ny; dz = nz;
+          }
+          if (pp.flip) dz = -dz;
+          scratchDir.set(dx, dy, dz);
+          sd = scratchDir;
+        }
+        const raw = sampleEnvTexture(layer.texture, sd, layer.rotation, layer.intensity);
+        const e = pp.grade ? applyColorGrading(raw, layer) : raw;
 
         if (layer.opacity !== undefined) {
           const alpha = Math.max(0, Math.min(1, layer.opacity / 100));
@@ -821,11 +943,13 @@ lights.forEach((l, i) => {
       pixels[idx + 3] = 1.0;
     }
 
-    // Log progress every 100 rows + yield to event loop
-    if (y % 100 === 0) {
-      const pct = Math.round((y / height) * 100);
-      console.log(`[HDRI Forge] ${pct}% complete`);
+    // Yield to the event loop periodically (and let a live render be cancelled)
+    if (y % yieldEvery === 0) {
+      if (yieldEvery === 100) {
+        console.log(`[HDRI Forge] ${Math.round((y / height) * 100)}% complete`);
+      }
       await new Promise<void>((resolve) => setTimeout(resolve, 0));
+      if (options.isCancelled?.()) throw new HDRICancelled();
     }
   }
 
@@ -1221,29 +1345,11 @@ export function encodeHDR(
   width: number,
   height: number,
 ): ArrayBuffer {
-  const headerText =
-    '#?RADIANCE\n' +
-    'SOFTWARE=HDRI Forge Studio\n' +
-    'FORMAT=32-bit_rle_rgbe\n' +
-    'EXPOSURE=1.0\n' +
-    `\n-Y ${height} +X ${width}\n`;
-  const headerBytes = new TextEncoder().encode(headerText);
-
-  const pixelDataSize = width * height * 4;
-  const pixelData = new Uint8Array(pixelDataSize);
-
-  for (let i = 0; i < width * height; i++) {
-    const r = pixels[i * 4];
-    const g = pixels[i * 4 + 1];
-    const b = pixels[i * 4 + 2];
-    rgbFloatToRGBE(r, g, b, pixelData, i * 4);
-  }
-
-  const buffer = new ArrayBuffer(headerBytes.length + pixelDataSize);
-  const view = new Uint8Array(buffer);
-  view.set(headerBytes, 0);
-  view.set(pixelData, headerBytes.length);
-  return buffer;
+  // Writes real new-style RLE scanlines to match the FORMAT=32-bit_rle_rgbe header.
+  // The previous version wrote flat scanlines under that same header, which the Erik
+  // engine rendered as a black viewport. Decoded values are identical; files are smaller.
+  const rle = encodeHDRRLE(pixels, width, height);
+  return rle.buffer.slice(rle.byteOffset, rle.byteOffset + rle.byteLength) as ArrayBuffer;
 }
 
 /**
@@ -1408,21 +1514,35 @@ export async function downloadHDRI(
       ? encodeHDR(pixels, width, height)
       : encodeEXR(pixels, width, height);
 
-  const blob = new Blob([buffer], { type: mimeType });
+  saveBlob(new Blob([buffer], { type: mimeType }), `${baseName}${ext}`);
+  console.log(`[HDRI Forge] Export complete: ${baseName}${ext}`);
+
+  // Matching diffuse-lighting file for the Erik Adjuster (Spherical Harmonics asset). Defined as the SH of a
+  // 512x256 render of the same scene/layers/exposure - exactly what the Erik live link streams, so the exported
+  // pair looks identical to the live preview.
+  if (options.alsoExportSH) {
+    const sh = await generateAnalyticalHDRI(scene, 512, 256, cp, layers);
+    if (exposure !== 1.0) for (let i = 0; i < sh.length; i++) sh[i] *= exposure;
+    const ash = formatAsh(computeAshSH9(sh, 512, 256));
+    // small gap so the browser treats it as a second download of the same click
+    await new Promise<void>((r) => setTimeout(r, 400));
+    saveBlob(new Blob([ash], { type: 'text/plain' }), `${baseName}.ash`);
+    console.log(`[HDRI Forge] Export complete: ${baseName}.ash`);
+  }
+}
+
+function saveBlob(blob: Blob, fileName: string): void {
   const url = URL.createObjectURL(blob);
   const link = document.createElement('a');
   link.href = url;
-  link.download = `${baseName}${ext}`;
+  link.download = fileName;
   link.style.display = 'none';
   document.body.appendChild(link);
   link.click();
-
   setTimeout(() => {
     URL.revokeObjectURL(url);
     if (link.parentNode) link.parentNode.removeChild(link);
   }, 250);
-
-  console.log(`[HDRI Forge] Export complete: ${baseName}${ext}`);
 }
 
 // --------- Environment texture loader ------------------------------------------------------------------------------------------------------------------------------------------
@@ -1542,6 +1662,63 @@ export function gradientToEnvLayer(config: GradientBackgroundConfig, intensity =
   return { texture: tex, intensity, rotation: 0 };
 }
 
+// Decoding a (base64) .hdr/.exr is the slow part of every render, and it only depends on the file - so keep the
+// decoded texture until the asset's data changes. Makes dragging any grading/orientation slider cheap.
+const decodedTextureCache = new Map<string, { src: string; tex: THREE.DataTexture }>();
+const blurredTextureCache = new Map<string, { srcTex: THREE.DataTexture; blur: number; out: THREE.DataTexture }>();
+
+function halfBitsToFloat(v: number): number {
+  const sign = (v & 0x8000) ? -1 : 1;
+  const exp = (v & 0x7C00) >> 10;
+  const frac = v & 0x03FF;
+  if (exp === 0) return sign * Math.pow(2, -14) * (frac / 1024);
+  if (exp === 0x1F) return frac ? 0 : sign * 65504;
+  return sign * Math.pow(2, exp - 15) * (1 + frac / 1024);
+}
+
+/** Soften an equirect map: area-average down to a smaller map (blur 0..100 -> up to ~31x smaller), then two
+ *  light separable passes (wrapping horizontally) - sampled bilinearly this reads as a smooth defocus. */
+function blurEnvTexture(tex: THREE.DataTexture, amount: number): THREE.DataTexture {
+  const img = tex.image as unknown as { width: number; height: number; data: ArrayLike<number> };
+  const sw = img.width, sh = img.height, src = img.data;
+  const f = 1 + amount * 0.3;
+  const tw = Math.max(8, Math.round(sw / f)), th = Math.max(4, Math.round(sh / f));
+  const acc = new Float32Array(tw * th * 4);
+  const cnt = new Float32Array(tw * th);
+  const isHalf = src instanceof Uint16Array;
+  const isU8 = src instanceof Uint8Array || src instanceof Uint8ClampedArray;
+  for (let y = 0; y < sh; y++) {
+    const ty = Math.min(th - 1, Math.floor((y * th) / sh));
+    for (let x = 0; x < sw; x++) {
+      const tx = Math.min(tw - 1, Math.floor((x * tw) / sw));
+      const si = (y * sw + x) * 4, di = (ty * tw + tx) * 4;
+      for (let c = 0; c < 3; c++) {
+        const v = src[si + c];
+        acc[di + c] += isHalf ? halfBitsToFloat(v) : isU8 ? sRGBToLinear(v / 255) : v;
+      }
+      cnt[ty * tw + tx] += 1;
+    }
+  }
+  for (let i = 0; i < tw * th; i++) {
+    const n = cnt[i] || 1;
+    acc[i * 4] /= n; acc[i * 4 + 1] /= n; acc[i * 4 + 2] /= n; acc[i * 4 + 3] = 1;
+  }
+  const tmp = new Float32Array(acc.length);
+  for (let pass = 0; pass < 2; pass++) {
+    for (let y = 0; y < th; y++) for (let x = 0; x < tw; x++) { // horizontal [1 2 1], wrapping
+      const a = (y * tw + ((x + tw - 1) % tw)) * 4, b = (y * tw + x) * 4, c = (y * tw + ((x + 1) % tw)) * 4;
+      for (let k = 0; k < 3; k++) tmp[b + k] = (acc[a + k] + 2 * acc[b + k] + acc[c + k]) * 0.25;
+      tmp[b + 3] = 1;
+    }
+    for (let y = 0; y < th; y++) for (let x = 0; x < tw; x++) { // vertical [1 2 1], clamped
+      const a = (Math.max(0, y - 1) * tw + x) * 4, b = (y * tw + x) * 4, c = (Math.min(th - 1, y + 1) * tw + x) * 4;
+      for (let k = 0; k < 3; k++) acc[b + k] = (tmp[a + k] + 2 * tmp[b + k] + tmp[c + k]) * 0.25;
+      acc[b + 3] = 1;
+    }
+  }
+  return new THREE.DataTexture(acc, tw, th, THREE.RGBAFormat, THREE.FloatType);
+}
+
 export async function loadActiveHDRILayers(globalIntensity = 1.0): Promise<EnvLayer[]> {
   const assets = useHDRIAssetStore
     .getState()
@@ -1562,12 +1739,30 @@ export async function loadActiveHDRILayers(globalIntensity = 1.0): Promise<EnvLa
         const edited = await getEditedImage(asset, 2048);
         texture = edited ? imageToDataTexture(edited) : null;
       } else {
-        texture = await loadHDRITexture(hdriBase64ToArrayBuffer(asset.dataBase64 as string));
+        const src = asset.dataBase64 as string;
+        const cached = decodedTextureCache.get(asset.id);
+        if (cached && cached.src === src) {
+          texture = cached.tex;
+        } else {
+          texture = await loadHDRITexture(hdriBase64ToArrayBuffer(src));
+          if (texture) decodedTextureCache.set(asset.id, { src, tex: texture });
+        }
       }
 
       if (!texture) {
         console.warn(`[HDRI Forge] Could not decode "${asset.name}" - skipping`);
         continue;
+      }
+
+      if (asset.blur && asset.blur > 0) {
+        const bc = blurredTextureCache.get(asset.id);
+        if (bc && bc.srcTex === texture && bc.blur === asset.blur) {
+          texture = bc.out;
+        } else {
+          const out = blurEnvTexture(texture, asset.blur);
+          blurredTextureCache.set(asset.id, { srcTex: texture, blur: asset.blur, out });
+          texture = out;
+        }
       }
 
       const img = texture.image as { width?: number; height?: number; data?: { constructor: { name: string } } };
@@ -1580,6 +1775,19 @@ export async function loadActiveHDRILayers(globalIntensity = 1.0): Promise<EnvLa
         contrast: asset.contrast,
         gamma: asset.gamma,
         saturation: asset.saturation,
+        rotationX: asset.rotationX,
+        rotationZ: asset.rotationZ,
+        offsetX: asset.offsetX,
+        offsetY: asset.offsetY,
+        offsetZ: asset.offsetZ,
+        domeRadius: asset.domeRadius,
+        flipX: asset.flipX,
+        hue: asset.hue,
+        temperature: asset.temperature,
+        tint: asset.tint,
+        highlights: asset.highlights,
+        shadows: asset.shadows,
+        peakLimit: asset.peakLimit,
       });
 
       console.log(

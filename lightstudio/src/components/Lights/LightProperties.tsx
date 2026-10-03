@@ -17,6 +17,10 @@ import { CompositeSection } from './CompositeSection';
 import { BLEND_LABELS } from '../../appearance/types';
 import { BLEND_MODE_LIST } from '../../appearance/presets';
 import { scaledLightPatch } from '../../three/lightScale';
+import {
+  brightnessToIntensity, intensityToBrightness,
+  INTENSITY_SLIDER_MAX, INTENSITY_INPUT_MAX, INTENSITY_STEP,
+} from '../../utils/lightIntensity';
 
 /**
  * Collapsible inspector section with a chevron header — matches the reference
@@ -392,14 +396,15 @@ export const LightProperties: React.FC<{ lightId?: string }> = ({ lightId }) => 
           </span>
         </div>
 
-        {/* Brightness */}
+        {/* Intensity (stored as brightness 0-1000; shown as brightness / 100, slider 0-2.5, typed up to 10) */}
         <Slider
-          label="Brightness"
-          value={light.brightness}
+          label="Intensity"
+          value={brightnessToIntensity(light.brightness)}
           min={0}
-          max={1000}
-          step={1}
-          onChange={(v) => handleUpdate({ brightness: v })}
+          max={INTENSITY_SLIDER_MAX}
+          step={INTENSITY_STEP}
+          inputMax={INTENSITY_INPUT_MAX}
+          onChange={(v) => handleUpdate({ brightness: intensityToBrightness(v) })}
         />
 
         {/* Opacity */}

@@ -722,7 +722,9 @@ export const AppLayout: React.FC = () => {
             style={{
               width: rightPanelWidth,
               flexShrink: 0,
-              overflow: 'hidden',
+              // clip (not hidden): same visual clipping, but the browser can't scroll this box sideways
+              // to reveal a focused value box (the header tab bar is wider than the panel)
+              overflow: 'clip',
               borderLeft: 'none',
             }}
           >

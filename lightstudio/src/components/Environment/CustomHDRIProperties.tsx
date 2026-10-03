@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { useHDRIAssetStore } from '../../store/hdriAssetStore';
+import { useHDRIAssetStore, HDRI_ASSET_GRADING_DEFAULTS, type HDRIExtra } from '../../store/hdriAssetStore';
 import { useSceneStore } from '../../store/sceneStore';
 import { Slider } from '../UI/Slider';
 import { Toggle } from '../UI/Toggle';
@@ -63,6 +63,11 @@ export const CustomHDRIProperties: React.FC = () => {
 
   if (!asset) return null;
 
+  // Optional controls are undefined on older projects: read them with their defaults.
+  const val = (k: keyof typeof HDRI_ASSET_GRADING_DEFAULTS): number => Number(asset[k] ?? HDRI_ASSET_GRADING_DEFAULTS[k]);
+  const resetPatch = (keys: Array<keyof typeof HDRI_ASSET_GRADING_DEFAULTS>): HDRIExtra =>
+    Object.fromEntries(keys.map((k) => [k, HDRI_ASSET_GRADING_DEFAULTS[k]])) as HDRIExtra;
+
   // This asset is also the one actually driving the live 3D viewport
   // (environment.hdri is a single global slot, not per-asset) only when its
   // blob URL matches what's currently loaded there.
@@ -124,22 +129,42 @@ export const CustomHDRIProperties: React.FC = () => {
         <EditHdriSection asset={asset} />
       </CollapsibleSection>
 
-      <CollapsibleSection title="Transform">
+      <CollapsibleSection title="Rotation">
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8, padding: '4px 0' }}>
-          <Slider
-            label="Rotation (Y)"
-            value={asset.rotation}
-            min={0}
-            max={360}
-            step={1}
-            unit="°"
-            onChange={(v) => updateAsset(asset.id, { rotation: v })}
-          />
+          <Slider label="Rotation X (pitch)" value={val('rotationX')} min={-180} max={180} step={1} unit="°" onChange={(v) => updateAsset(asset.id, { rotationX: v })} />
+          <Slider label="Rotation Y (yaw)" value={asset.rotation} min={0} max={360} step={1} unit="°" onChange={(v) => updateAsset(asset.id, { rotation: v })} />
+          <Slider label="Rotation Z (roll)" value={val('rotationZ')} min={-180} max={180} step={1} unit="°" onChange={(v) => updateAsset(asset.id, { rotationZ: v })} />
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <span style={{ fontSize: 11, color: 'var(--text-sec)' }}>Flip horizontal</span>
+            <Toggle checked={!!asset.flipX} onChange={(v) => updateAsset(asset.id, { flipX: v })} />
+          </div>
+          <button className="btn-sm" style={{ width: '100%', justifyContent: 'center' }}
+            onClick={() => { updateAsset(asset.id, { ...resetPatch(['rotationX', 'rotationZ', 'flipX']), rotation: 0 }); }}>
+            Reset rotation
+          </button>
           <div style={{ fontSize: 9, color: 'var(--text-dim)', lineHeight: 1.4 }}>
-            An equirectangular HDRI represents the surroundings at infinite
-            distance - it has no meaningful Position, Scale, or X/Z tilt to
-            adjust (there is nothing for those to move relative to), only the
-            Y rotation you see here, which actually turns the environment.
+            X tilts the horizon up/down, Z rolls it sideways, Y turns the
+            environment like a turntable. Order applied: X, then Z, then Y.
+          </div>
+        </div>
+      </CollapsibleSection>
+
+      <CollapsibleSection title="Offset (dome projection)" defaultOpen={false}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, padding: '4px 0' }}>
+          <Slider label="Offset X" value={val('offsetX')} min={-50} max={50} step={0.1} unit=" m" onChange={(v) => updateAsset(asset.id, { offsetX: v })} />
+          <Slider label="Offset Y (height)" value={val('offsetY')} min={-50} max={50} step={0.1} unit=" m" onChange={(v) => updateAsset(asset.id, { offsetY: v })} />
+          <Slider label="Offset Z" value={val('offsetZ')} min={-50} max={50} step={0.1} unit=" m" onChange={(v) => updateAsset(asset.id, { offsetZ: v })} />
+          <Slider label="Dome radius" value={val('domeRadius')} min={1} max={500} step={1} unit=" m" onChange={(v) => updateAsset(asset.id, { domeRadius: v })} />
+          <button className="btn-sm" style={{ width: '100%', justifyContent: 'center' }}
+            onClick={() => updateAsset(asset.id, resetPatch(['offsetX', 'offsetY', 'offsetZ', 'domeRadius']))}>
+            Reset offset
+          </button>
+          <div style={{ fontSize: 9, color: 'var(--text-dim)', lineHeight: 1.4 }}>
+            A real environment sits at infinite distance, so by itself it has
+            nothing to offset. These controls project the map onto a dome of
+            the given radius and move the viewer inside it: nearby parts of the
+            scene shift (parallax), and a negative Y offset with a small radius
+            gives a ground-projected look. Offset 0 = unchanged.
           </div>
         </div>
       </CollapsibleSection>
@@ -171,7 +196,31 @@ export const CustomHDRIProperties: React.FC = () => {
         </div>
       </CollapsibleSection>
 
-      <CollapsibleSection title="Color Grading" defaultOpen={false}>
+      <CollapsibleSection title="Highlights &amp; Shadows" defaultOpen={false}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, padding: '4px 0' }}>
+          <Slider label="Highlights" value={val('highlights')} min={-100} max={100} step={1} onChange={(v) => updateAsset(asset.id, { highlights: v })} />
+          <Slider label="Shadows" value={val('shadows')} min={-100} max={100} step={1} onChange={(v) => updateAsset(asset.id, { shadows: v })} />
+          <Slider label="Max brightness" value={val('peakLimit')} min={0} max={2000} step={1} onChange={(v) => updateAsset(asset.id, { peakLimit: v })} />
+          <div style={{ fontSize: 9, color: 'var(--text-dim)', lineHeight: 1.4, marginTop: -2 }}>
+            Highlights pulls the bright end down (or up); Shadows lifts (or
+            crushes) the dark end. Max brightness soft-limits the very brightest
+            values so a sun or softbox hotspot can&apos;t blow out reflections
+            (0 = off, colour is preserved).
+          </div>
+        </div>
+      </CollapsibleSection>
+
+      <CollapsibleSection title="Soften">
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, padding: '4px 0' }}>
+          <Slider label="Blur" value={val('blur')} min={0} max={100} step={1} onChange={(v) => updateAsset(asset.id, { blur: v })} />
+          <div style={{ fontSize: 9, color: 'var(--text-dim)', lineHeight: 1.4, marginTop: -2 }}>
+            Softens the whole map - reflections lose fine detail and hard
+            edges (like a defocused environment). 0 = original sharpness.
+          </div>
+        </div>
+      </CollapsibleSection>
+
+      <CollapsibleSection title="Color Grading">
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8, padding: '4px 0' }}>
           <Slider
             label="Contrast"
@@ -197,6 +246,13 @@ export const CustomHDRIProperties: React.FC = () => {
             step={1}
             onChange={(v) => updateAsset(asset.id, { saturation: v })}
           />
+          <Slider label="Hue" value={val('hue')} min={-180} max={180} step={1} unit="°" onChange={(v) => updateAsset(asset.id, { hue: v })} />
+          <Slider label="Temperature" value={val('temperature')} min={-100} max={100} step={1} onChange={(v) => updateAsset(asset.id, { temperature: v })} />
+          <Slider label="Tint" value={val('tint')} min={-100} max={100} step={1} onChange={(v) => updateAsset(asset.id, { tint: v })} />
+          <button className="btn-sm" style={{ width: '100%', justifyContent: 'center' }}
+            onClick={() => updateAsset(asset.id, { contrast: 0, gamma: 1, saturation: 0, ...resetPatch(['hue', 'temperature', 'tint', 'highlights', 'shadows', 'peakLimit', 'blur']) })}>
+            Reset all grading
+          </button>
           <div style={{ fontSize: 9, color: 'var(--text-dim)', lineHeight: 1.4, marginTop: -2 }}>
             Applies to the HDRI Preview panel and exported file. The live 3D
             viewport shows this HDRI&apos;s reflections unadjusted - grading a

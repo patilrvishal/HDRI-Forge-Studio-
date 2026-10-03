@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import type { Look, LookCamera, LookSnapshot } from '../types/Look';
-import { useHDRIAssetStore } from './hdriAssetStore';
+import { useHDRIAssetStore, HDRI_EXTRA_KEYS, type HDRIAsset, type HDRIExtra } from './hdriAssetStore';
 import { useObjectHdriStore } from './objectHdriStore';
 import type { Light } from '../types/Light';
 import type { HDRIShape } from '../types/HDRIShape';
@@ -16,6 +16,13 @@ function generateId(): string {
 
 const clone = <T,>(v: T): T => JSON.parse(JSON.stringify(v)) as T;
 
+/** The optional orientation/grading controls an asset actually has set, so a Look restores them too. */
+function pickHdriExtras(a: HDRIAsset): HDRIExtra {
+  const out: Record<string, unknown> = {};
+  for (const k of HDRI_EXTRA_KEYS) if (a[k] !== undefined) out[k] = a[k];
+  return out as HDRIExtra;
+}
+
 function captureSnapshot(): LookSnapshot {
   const ls = useLightsStore.getState();
   return {
@@ -24,6 +31,7 @@ function captureSnapshot(): LookSnapshot {
     hdri: useHDRIAssetStore.getState().assets.map((a) => ({
       id: a.id, edits: clone(a.edits ?? []), sky: a.sky ? clone(a.sky) : undefined,
       intensity: a.intensity, rotation: a.rotation, opacity: a.opacity, contrast: a.contrast, gamma: a.gamma, saturation: a.saturation, active: a.active,
+      ...pickHdriExtras(a),
     })),
     objectHdri: useObjectHdriStore.getState().exportSettings(),
   };

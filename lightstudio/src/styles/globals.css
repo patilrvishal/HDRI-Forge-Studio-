@@ -2516,3 +2516,17 @@ input[type="range"]:active::-webkit-slider-thumb {
     0 0 0 2px var(--accent-dim),
     0 0 12px rgba(34, 211, 238, 0.4);
 }
+
+/* Editable value box next to a slider (UI/Slider + SliderNumberField) */
+.slider-row .slider-input, .slider-input {
+  width: 54px; flex-shrink: 0; height: 22px; padding: 0 5px; text-align: right;
+  background: var(--bg-input); border: 1px solid var(--glass-border);
+  border-radius: var(--radius-sm); color: var(--text);
+  font-family: var(--font-mono); font-size: 11px;
+  box-shadow: var(--neu-inset); transition: border-color 0.15s ease, box-shadow 0.15s ease;
+  -moz-appearance: textfield; appearance: textfield;
+}
+.slider-input::-webkit-outer-spin-button, .slider-input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+.slider-input:hover { border-color: var(--accent); }
+.slider-input:focus { outline: none; border-color: var(--accent); box-shadow: var(--neu-inset), 0 0 0 2px var(--accent-dim); }
+.slider-row .slider-unit { font-size: 10px; color: var(--text-dim); min-width: 14px; flex-shrink: 0; }

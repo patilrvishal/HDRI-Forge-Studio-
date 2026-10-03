@@ -17,6 +17,7 @@ import {
 } from '../../three/HDRIExporter';
 import { compositeShapesCanvas, shapesCanvasToEnvLayer } from '../../three/HDRIShapesLayer';
 import { promptForCustomHDRI } from '../../utils/loadCustomHDRI';
+import { useErikLiveStore } from '../../erikLive/ErikLiveSync';
 
 /** Preview always DISPLAYS at this CSS size (scaled by zoom) regardless of
  *  which resolution is selected - the canvas's actual pixel buffer is set
@@ -149,6 +150,11 @@ export const HDRIPreviewPanel: React.FC = () => {
   const exposure = useSceneStore((s) => s.renderSettings.exposure);
   const setSceneExposure = useSceneStore((s) => s.setExposure);
   const [resIndex, setResIndex] = useState(2); // default 2K
+  // The Erik live link streams at whatever resolution is selected here.
+  const setErikLiveTarget = useErikLiveStore((s) => s.setTarget);
+  useEffect(() => {
+    setErikLiveTarget(RESOLUTIONS[resIndex].w, RESOLUTIONS[resIndex].h, RESOLUTIONS[resIndex].label);
+  }, [resIndex, setErikLiveTarget]);
   const [format, setFormat] = useState<'hdr' | 'exr'>('hdr');
   const [rendering, setRendering] = useState(false);
   const [exporting, setExporting] = useState(false);
@@ -407,6 +413,7 @@ export const HDRIPreviewPanel: React.FC = () => {
         height: res.h,
         format,
         environmentGlobalIntensity: environment.intensity ?? 1.0,
+        alsoExportSH: true,
         filename: `lightforge-${res.label}`,
       });
     } catch (e) {

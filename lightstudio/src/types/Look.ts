@@ -4,6 +4,7 @@ import type { Light } from './Light';
 import type { LightCollection } from './Composite';
 import type { EditLayer, SkyEnvParams } from '../hdriedit/types';
 import type { ObjectHdriSettings } from '../store/objectHdriStore';
+import type { HDRIExtra } from '../store/hdriAssetStore';
 
 /** Snapshot of the active camera at save time - optional, since a Look
  *  saved with no active camera shouldn't force one into existence on
@@ -31,7 +32,7 @@ export interface LookCamera {
 export interface LookSnapshot {
   lights: Light[];
   collections: LightCollection[];
-  hdri: { id: string; edits?: EditLayer[]; sky?: SkyEnvParams; intensity: number; rotation: number; opacity: number; contrast: number; gamma: number; saturation: number; active: boolean }[];
+  hdri: ({ id: string; edits?: EditLayer[]; sky?: SkyEnvParams; intensity: number; rotation: number; opacity: number; contrast: number; gamma: number; saturation: number; active: boolean } & HDRIExtra)[];
   objectHdri: Record<string, ObjectHdriSettings>;
   /** Child Looks: ids of parent lights this Look removes. */
   removedLightIds?: string[];
