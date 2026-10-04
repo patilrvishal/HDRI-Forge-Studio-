@@ -66,6 +66,8 @@ interface LiveState {
   lastBytes: number;
   version: number;
   clients: number;
+  /** Apps that poll the bridge (the Blender and Maya addons) and are linked right now, e.g. "Blender 5.1". */
+  apps: string[];
   error: string;
   /** Desktop app only: the port the Erik panel must point at (5173 unless busy). */
   port: number;
@@ -79,7 +81,7 @@ interface LiveState {
 }
 
 export const useErikLiveStore = create<LiveState>((set, get) => ({
-  enabled: false, status: 'off', pass: '', lastMs: 0, lastBytes: 0, version: 0, clients: 0, error: '', port: 0,
+  enabled: false, status: 'off', pass: '', lastMs: 0, lastBytes: 0, version: 0, clients: 0, apps: [], error: '', port: 0,
   targetW: 1024, targetH: 512, targetLabel: '1K',
   setTarget: (w, h, label) => {
     const cur = get();
@@ -93,6 +95,25 @@ export const useErikLiveStore = create<LiveState>((set, get) => ({
 
 let gen = 0;
 let timer: number | null = null;
+let appsTimer: number | null = null;
+
+/**
+ * Erik holds an SSE connection, so the bridge counts it as a client. The Blender and Maya addons poll
+ * /status instead and name themselves in a header; the bridge lists whoever polled in the last few seconds.
+ * Asking it here (every 2 s, only while the link is on) is what lets the badge say "Blender 5.1 linked".
+ */
+async function refreshApps() {
+  try {
+    const base = await getBase();
+    const st = await (await fetch(`${base}/status`, { cache: 'no-store' })).json() as { viewers?: Array<{ name: string }>; clients?: number };
+    const apps = (st.viewers ?? []).map((v) => v.name).sort();
+    const cur = useErikLiveStore.getState();
+    const same = apps.length === cur.apps.length && apps.every((a, i) => a === cur.apps[i]);
+    if (!same || (typeof st.clients === 'number' && st.clients !== cur.clients)) {
+      useErikLiveStore.getState()._set({ apps, ...(typeof st.clients === 'number' ? { clients: st.clients } : {}) });
+    }
+  } catch { /* bridge not reachable: the live link itself reports that */ }
+}
 let unsubs: Array<() => void> = [];
 let upSource: EventSource | null = null;
 
@@ -265,6 +286,8 @@ function start() {
   watch((l) => useAppearanceStore.subscribe(l), () => useAppearanceStore.getState());
   watch((l) => useMatchGainStore.subscribe(l), () => useMatchGainStore.getState().gain);
   void listenToErik();
+  void refreshApps();
+  appsTimer = window.setInterval(() => { void refreshApps(); }, 2000);
   useErikLiveStore.getState()._set({ status: 'idle', error: '' });
   schedule(); // push the current state straight away
 }
@@ -274,9 +297,10 @@ function stop(resetStatus = true) {
   if (timer) { window.clearTimeout(timer); timer = null; }
   unsubs.forEach((u) => u());
   unsubs = [];
+  if (appsTimer) { window.clearInterval(appsTimer); appsTimer = null; }
   if (upSource) { upSource.close(); upSource = null; }
   if (resetStatus) {
-    useErikLiveStore.getState()._set({ status: 'off' });
+    useErikLiveStore.getState()._set({ status: 'off', apps: [] });
     useMatchGainStore.getState().reset();
   }
 }

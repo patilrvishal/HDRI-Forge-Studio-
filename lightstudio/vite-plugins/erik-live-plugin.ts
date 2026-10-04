@@ -20,6 +20,10 @@ export function erikLivePlugin(): Plugin {
   let ash = '';
   let meta = { w: 0, h: 0, ms: 0, pass: '' };
   const clients = new Set<ServerResponse>();
+  // Apps that poll /status (the Blender and Maya addons) rather than hold an SSE connection. They identify
+  // themselves with X-Forge-Client; anyone seen in the last few seconds counts as linked.
+  const viewers = new Map<string, number>();
+  const VIEWER_TTL_MS = 4000;
   // Forge page listens here for messages Erik sends back (e.g. "match reference photo" gains)
   const upClients = new Set<ServerResponse>();
 
@@ -45,9 +49,13 @@ export function erikLivePlugin(): Plugin {
         if (req.method === 'OPTIONS') { res.writeHead(204).end(); return; }
 
         if (req.method === 'GET' && url === '/status') {
+          const who = req.headers['x-forge-client'];
+          const now = Date.now();
+          if (typeof who === 'string' && who.trim()) viewers.set(who.trim().slice(0, 40), now);
+          for (const [name, seen] of viewers) if (now - seen > VIEWER_TTL_MS) viewers.delete(name);
           res.writeHead(200, { 'Content-Type': 'application/json' });
           // protocol / capabilities let a client (Erik, the Blender and Maya addons) tell "Forge is too old for me" from "I am too old for Forge".
-          res.end(JSON.stringify({ ok: true, app: 'HDRI Forge Studio', mode: 'dev', protocol: 1, capabilities: ['hdr', 'ash', 'events', 'up'], version, clients: clients.size, forge: upClients.size, hasMap: !!hdr, ...meta }));
+          res.end(JSON.stringify({ ok: true, app: 'HDRI Forge Studio', mode: 'dev', protocol: 1, capabilities: ['hdr', 'ash', 'events', 'up'], version, clients: clients.size, forge: upClients.size, hasMap: !!hdr, viewers: [...viewers].map(([name, seen]) => ({ name, ageMs: now - seen })), ...meta }));
           return;
         }
 

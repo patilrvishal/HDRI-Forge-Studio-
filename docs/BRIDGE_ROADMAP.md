@@ -62,7 +62,7 @@ Note: Forge-side commits `11f0fa7` (v0.1.9, Erik live link) and `e1c7e9f` (v0.1.
 | Blender Live HDRI / Import / Restore | Done | 23 headless checks on 4.5 and 5.1; real GUI on 5.1: first update 464 ms, final 2.2 s, 3-37 ms main-thread cost |
 | Maya Live HDRI / Import / Restore | Done | 22 checks + 6 Arnold-render checks inside Maya 2023.1; real panel buttons and QTimer path |
 | Sky orientation | Measured | Blender 0 deg, Maya 90 deg, both with a two-light mirror test and a failing control |
-| Forge shows which apps are connected | Not yet | Forge's badge still says "waiting for Erik" while Blender or Maya receive |
+| Forge shows which apps are connected | Done | Addons name themselves on status polls; both bridges list who polled in the last 4 s; the badge reads "linked · Blender 5.1.2, Maya 2023 · 2K" (seen live with both apps running) |
 | Packaging / installers | Not yet | Addons are two loose files today |
 
 Bugs the tests caught on the way: a stale version counter after a Forge restart, Windows `localhost` taking 2 s (the `::1` fallback), a Maya plug-in load failure (`__file__` undefined under Plug-in Manager), and leftover Maya file nodes after Stop.

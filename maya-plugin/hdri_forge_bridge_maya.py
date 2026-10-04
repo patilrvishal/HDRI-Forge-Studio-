@@ -1165,7 +1165,8 @@ def live_start(*_args):
     _require_core()
     _ensure_arnold()
     if _live["link"] is None:
-        _live["link"] = _core.ForgeLink(cache_dir=os.path.join(tempfile.gettempdir(), "hdri_forge_live_maya_%d" % os.getpid()))
+        _live["link"] = _core.ForgeLink(cache_dir=os.path.join(tempfile.gettempdir(), "hdri_forge_live_maya_%d" % os.getpid()),
+                                        client_name="Maya " + cmds.about(version=True))
     _live["running"] = True
     _live["link"].start()
     _start_timer()

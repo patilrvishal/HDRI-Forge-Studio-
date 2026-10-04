@@ -55,14 +55,23 @@ class ForgeLinkError(Exception):
 
 # ── small helpers ───────────────────────────────────────────────────────────
 
-def _http_get(url, timeout):
-    req = urllib.request.Request(url, headers={"Cache-Control": "no-store"})
+def _http_get(url, timeout, headers=None):
+    h = {"Cache-Control": "no-store"}
+    if headers:
+        h.update(headers)
+    req = urllib.request.Request(url, headers=h)
     with urllib.request.urlopen(req, timeout=timeout) as resp:
         return resp.read()
 
 
-def _get_json(url, timeout):
-    return json.loads(_http_get(url, timeout).decode("utf-8"))
+def _get_json(url, timeout, headers=None):
+    return json.loads(_http_get(url, timeout, headers).decode("utf-8"))
+
+
+def _clean_client_name(name):
+    """Header-safe, short, printable ASCII. Shown to the user in Forge's badge."""
+    ok = "".join(c for c in str(name) if 32 <= ord(c) < 127)[:40].strip()
+    return ok or "DCC"
 
 
 def parse_hdr_size(data):
@@ -166,8 +175,11 @@ class ForgeLink(object):
     """
 
     def __init__(self, cache_dir=None, want_ash=True, poll_interval=0.2,
-                 ports=SCAN_PORTS, probe_timeout=0.4, request_timeout=5.0, keep_files=3):
+                 ports=SCAN_PORTS, probe_timeout=0.4, request_timeout=5.0, keep_files=3,
+                 client_name="DCC"):
         self._ports = tuple(ports)
+        # Sent with every /status poll so Forge can show "Blender 5.1 linked" instead of "waiting for Erik".
+        self._client_headers = {"X-Forge-Client": _clean_client_name(client_name)}
         self._probe_timeout = probe_timeout
         self._request_timeout = request_timeout
         self._poll = poll_interval
@@ -295,7 +307,7 @@ class ForgeLink(object):
                           message="Connected to HDRI Forge Studio (%s, port %d)" % (inst["mode"], inst["port"]))
 
             try:
-                st = _get_json(base + "/status", self._request_timeout)
+                st = _get_json(base + "/status", self._request_timeout, self._client_headers)
             except Exception:
                 base = None
                 self._set(state=SEARCHING, message="Lost connection to HDRI Forge Studio. Reconnecting...")

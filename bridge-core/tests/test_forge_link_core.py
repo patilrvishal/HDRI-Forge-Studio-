@@ -46,6 +46,7 @@ class MockBridge(object):
                 s = outer.state
                 p = self.path.split("?")[0]
                 if p == core.BASE_PATH + "/status":
+                    s.setdefault("seen_clients", []).append(self.headers.get("X-Forge-Client"))
                     body = {"ok": True, "app": s["app"], "mode": s["mode"], "protocol": s["protocol"],
                             "version": s["version"], "forge": s["forge"], "hasMap": s["hdr"] is not None,
                             "w": s["w"], "h": s["h"], "final": s["final"], "pass": s["pass"], "ms": s["ms"]}
@@ -134,6 +135,29 @@ class DiscoveryTests(unittest.TestCase):
 
     def test_nothing_running_returns_empty(self):
         self.assertEqual(core.discover([1, 2], timeout=0.2), [])
+
+
+class ClientNameTests(unittest.TestCase):
+    def test_sanitises_names_for_the_header(self):
+        self.assertEqual(core._clean_client_name("Blender 5.1"), "Blender 5.1")
+        # no non-ASCII and no CR/LF, so a name can never inject a header
+        nasty = "Ma" + chr(0xE4) + "ya" + chr(13) + chr(10) + "2023"          # umlaut + CR + LF in the middle
+        self.assertEqual(core._clean_client_name(nasty), "Maya2023")
+        self.assertEqual(core._clean_client_name("x" * 100), "x" * 40)
+        self.assertEqual(core._clean_client_name("   "), "DCC")
+
+    def test_the_link_names_itself_but_discovery_probes_do_not(self):
+        bridge = MockBridge()
+        try:
+            core.discover([bridge.port], timeout=0.3)
+            self.assertEqual(set(bridge.state.get("seen_clients", [])), {None})        # probes are anonymous
+            link = core.ForgeLink(cache_dir=tempfile.mkdtemp(), ports=[bridge.port], poll_interval=0.02,
+                                  probe_timeout=0.3, client_name="Maya 2023")
+            link.start()
+            self.assertTrue(wait_for(lambda: "Maya 2023" in bridge.state.get("seen_clients", [])))
+            link.stop()
+        finally:
+            bridge.close()
 
 
 class LinkTests(unittest.TestCase):

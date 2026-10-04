@@ -8,20 +8,22 @@ const COLORS: Record<string, string> = {
 
 /** Floating toggle (dev only): turns the Erik live link on/off and shows what it's doing. */
 export const ErikLiveBadge: React.FC = () => {
-  const { enabled, status, pass, lastMs, lastBytes, clients, error, targetLabel, port, setEnabled } = useErikLiveStore();
+  const { enabled, status, pass, lastMs, lastBytes, clients, apps, error, targetLabel, port, setEnabled } = useErikLiveStore();
   const gain = useMatchGainStore((s) => s.gain);
   const resetMatch = useMatchGainStore((s) => s.reset);
   const matched = isMatchActive(gain);
+  // Erik is the SSE client(s); Blender / Maya are named, polling clients. Say who is actually linked.
+  const linked = [...(clients > 0 ? ['Erik'] : []), ...apps];
   const label =
     status === 'off' ? 'Erik Live: off'
-    : status === 'rendering' ? `Erik Live: rendering ${pass}…`
+    : status === 'rendering' ? `Erik Live: rendering ${pass}…${linked.length ? ` · ${linked.join(', ')}` : ''}`
     : status === 'error' ? 'Erik Live: error'
-    : clients > 0 ? `Erik Live: linked (${clients}) · ${targetLabel}`
-    : port && port !== 5173 ? `Erik Live: waiting for Erik (port ${port})` : 'Erik Live: waiting for Erik';
+    : linked.length > 0 ? `Erik Live: linked · ${linked.join(', ')} · ${targetLabel}`
+    : port && port !== 5173 ? `Erik Live: waiting for an app (port ${port})` : 'Erik Live: waiting for Erik, Blender or Maya';
   // desktop app: tell the user which port to type into the Erik panel when 5173 was already taken
   const portNote = port && port !== 5173 ? ` · set Erik's "Forge port" to ${port}` : '';
   const detail = status === 'error' ? error
-    : lastMs ? `${lastMs} ms · ${(lastBytes / 1024).toFixed(0)} KB${portNote}` : `Click to stream the HDRI to Erik Adjuster${portNote}`;
+    : lastMs ? `${lastMs} ms · ${(lastBytes / 1024).toFixed(0)} KB${portNote}` : `Click to stream the HDRI to Erik Adjuster, Blender or Maya${portNote}`;
   const pill: React.CSSProperties = {
     display: 'flex', alignItems: 'center', gap: 8, padding: '7px 12px', borderRadius: 999,
     border: '1px solid rgba(255,255,255,.18)', background: 'rgba(20,22,28,.88)', color: '#e5e7eb',

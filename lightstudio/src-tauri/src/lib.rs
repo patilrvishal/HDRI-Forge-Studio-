@@ -98,7 +98,12 @@ struct ErikLiveState {
   clients: Vec<Box<dyn Write + Send>>,
   /// Forge page listening for messages Erik sends back ("match reference photo" gains).
   up_clients: Vec<Box<dyn Write + Send>>,
+  /// Apps that poll /status (the Blender and Maya addons) instead of holding an SSE connection. They name
+  /// themselves in X-Forge-Client; anyone seen in the last few seconds counts as linked.
+  viewers: std::collections::HashMap<String, std::time::Instant>,
 }
+
+const ERIK_VIEWER_TTL: Duration = Duration::from_secs(4);
 
 fn erik_header(k: &str, v: &str) -> tiny_http::Header {
   tiny_http::Header::from_bytes(k.as_bytes(), v.as_bytes()).unwrap()
@@ -207,9 +212,26 @@ fn start_erik_live_server() {
           let _ = request.respond(erik_cors(tiny_http::Response::empty(204)));
         }
         (tiny_http::Method::Get, "/status") => {
+          let who = request
+            .headers()
+            .iter()
+            .find(|h| h.field.equiv("X-Forge-Client"))
+            .map(|h| h.value.as_str().trim().chars().take(40).collect::<String>())
+            .filter(|n| !n.is_empty());
           let body = {
-            let g = state.lock().unwrap();
+            let mut g = state.lock().unwrap();
+            let now = std::time::Instant::now();
+            if let Some(n) = who {
+              g.viewers.insert(n, now);
+            }
+            g.viewers.retain(|_, seen| now.duration_since(*seen) < ERIK_VIEWER_TTL);
+            let viewers: Vec<serde_json::Value> = g
+              .viewers
+              .iter()
+              .map(|(name, seen)| serde_json::json!({ "name": name, "ageMs": now.duration_since(*seen).as_millis() as u64 }))
+              .collect();
             let mut obj = g.meta.clone();
+            obj.insert("viewers".into(), serde_json::Value::Array(viewers));
             obj.insert("ok".into(), true.into());
             obj.insert("app".into(), "HDRI Forge Studio".into());
             obj.insert("mode".into(), "desktop".into());

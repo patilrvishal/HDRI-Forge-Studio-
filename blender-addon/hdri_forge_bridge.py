@@ -970,7 +970,8 @@ def _live_tick():
 
 def _live_start():
     if _live["link"] is None:
-        _live["link"] = _core.ForgeLink(cache_dir=os.path.join(bpy.app.tempdir, "hdri_forge_live"))
+        _live["link"] = _core.ForgeLink(cache_dir=os.path.join(bpy.app.tempdir, "hdri_forge_live"),
+                                        client_name="Blender " + bpy.app.version_string.split(" ")[0])
     _live["running"] = True
     _live["link"].start()
     if not bpy.app.timers.is_registered(_live_tick):
