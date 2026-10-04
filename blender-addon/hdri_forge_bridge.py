@@ -1,10 +1,10 @@
 bl_info = {
     "name":     "HDRI Forge Bridge",
     "author":   "HDRI Forge Studio",
-    "version":  (1, 2, 0),
+    "version":  (1, 3, 0),
     "blender":  (4, 0, 0),
     "location": "View3D > Sidebar > HDRI Bridge",
-    "description": "Push selected Blender objects to HDRI Forge Studio in real time",
+    "description": "Push Blender objects to HDRI Forge Studio, and watch Forge's lighting live in your World",
     "category": "3D View",
 }
 
@@ -13,6 +13,14 @@ import urllib.request, urllib.error
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from mathutils import Quaternion
 from bpy.props import StringProperty, BoolProperty, EnumProperty
+
+# forge_link_core.py is the shared, DCC-agnostic half of the live HDRI link (discovery, background
+# download, reconnect). It lives next to this file: as a package member when the addon is installed
+# as a folder, or as a sibling module when both files sit in Blender's addons directory.
+try:
+    from . import forge_link_core as _core
+except ImportError:
+    import forge_link_core as _core
 
 # Dev server (npm run dev) listens on 5173; the installed desktop app's own
 # listener (src-tauri/src/lib.rs) listens on 8973 - kept distinct so both
@@ -260,6 +268,10 @@ def _gather_world(context):
     # with a clear error rather than silently.
     world = context.scene.world
     if not (world and world.use_nodes):
+        return None
+    if world.get("hdri_forge_bridge"):
+        # This World was made by the live link from Forge's own HDRI. Pushing it back would
+        # feed Forge its own output as if it were the artist's HDRI.
         return None
     for node in world.node_tree.nodes:
         if node.type == 'TEX_ENVIRONMENT' and node.image:
@@ -821,6 +833,255 @@ class HDRIBRIDGE_OT_push_to_maya(bpy.types.Operator):
 
 
 # ── Panel ──────────────────────────────────────────────────────────────────
+# ══ Live HDRI: Forge -> Blender ════════════════════════════════════════════
+# Forge streams the HDRI it renders to a local bridge (the same stream Erik Adjuster uses).
+# forge_link_core downloads it on a background thread; this section applies each map to a World,
+# on Blender's main thread, from a timer. Nothing here edits the artist's own World: the live HDRI
+# goes into a separate World datablock, and Stop puts the previous one back.
+
+BRIDGE_TAG = "hdri_forge_bridge"          # custom property on every datablock we create
+PREV_WORLD_KEY = "hdri_forge_prev_world"  # scene property: the artist's World before we took over
+LIVE_KIND, IMPORT_KIND = "live", "import"
+_WORLD_NAMES = {LIVE_KIND: "HDRI Forge Live", IMPORT_KIND: "HDRI Forge Import"}
+
+# Forge's equirect and Blender's already agree once the axes are swapped, so the Mapping node
+# starts at 0 (it stays in the tree as a handle for rotating the sky):
+#   Forge (three, Y-up):  u = atan2(Z, X)/2pi + .5
+#   Blender (Z-up):       u = -atan2(Y, X)/2pi + .5
+#   Forge dir (X, Y, Z) is Blender dir (X, -Z, Y), so u_blender = -atan2(-Z, X)/2pi + .5 = u_forge.
+# An earlier hand derivation said "180 degrees"; that came from misremembering Blender's formula.
+# A Cycles render aimed at a known light proved it wrong (bridge-core/tests/blender_live_test.py,
+# which also keeps the 180 degree case as a control that must fail).
+FORGE_TO_BLENDER_Z_ROTATION = 0.0
+
+_live = {"link": None, "running": False, "last_status": None}
+
+
+def _bridge_worlds(kind=None):
+    return [w for w in bpy.data.worlds
+            if w.get(BRIDGE_TAG) and (kind is None or w.get(BRIDGE_TAG) == kind)]
+
+
+def _build_world_nodes(world):
+    """TexCoord -> Mapping (180 deg Z) -> Environment Texture -> Background -> Output."""
+    world.use_nodes = True
+    nt = world.node_tree
+    nt.nodes.clear()
+    coord = nt.nodes.new("ShaderNodeTexCoord")
+    mapping = nt.nodes.new("ShaderNodeMapping")
+    env = nt.nodes.new("ShaderNodeTexEnvironment")
+    bg = nt.nodes.new("ShaderNodeBackground")
+    out = nt.nodes.new("ShaderNodeOutputWorld")
+    coord.name, mapping.name, env.name, bg.name = "Forge Coord", "Forge Mapping", "Forge Env", "Forge Background"
+    coord.location, mapping.location, env.location = (-760, 0), (-560, 0), (-320, 0)
+    bg.location, out.location = (0, 0), (220, 0)
+    mapping.vector_type = 'POINT'
+    mapping.inputs['Rotation'].default_value = (0.0, 0.0, FORGE_TO_BLENDER_Z_ROTATION)
+    env.interpolation = 'Linear'
+    nt.links.new(coord.outputs['Generated'], mapping.inputs['Vector'])
+    nt.links.new(mapping.outputs['Vector'], env.inputs['Vector'])
+    nt.links.new(env.outputs['Color'], bg.inputs['Color'])
+    nt.links.new(bg.outputs['Background'], out.inputs['Surface'])
+    bg.inputs['Strength'].default_value = 1.0     # Forge already bakes exposure into the map
+
+
+def _bridge_world(scene, kind):
+    """The World we own for this kind, created on demand and made the scene's World."""
+    world = next(iter(_bridge_worlds(kind)), None)
+    if world is None:
+        world = bpy.data.worlds.new(_WORLD_NAMES[kind])
+        world[BRIDGE_TAG] = kind
+        _build_world_nodes(world)
+    if scene.world is not world:
+        if scene.world is not None and not scene.world.get(BRIDGE_TAG):
+            scene[PREV_WORLD_KEY] = scene.world.name       # remember the artist's own World
+        scene.world = world
+    return world
+
+
+def _set_world_image(world, path, label):
+    env = world.node_tree.nodes.get("Forge Env")
+    if env is None:
+        _build_world_nodes(world)
+        env = world.node_tree.nodes["Forge Env"]
+    img = env.image
+    if img is None or not img.get(BRIDGE_TAG):
+        img = bpy.data.images.load(path, check_existing=False)
+        img.name = label
+        img[BRIDGE_TAG] = True
+    else:
+        img.filepath = path
+        img.reload()
+    try:
+        img.colorspace_settings.name = 'Linear Rec.709'   # HDR data is scene-linear
+    except TypeError:
+        pass                                              # older Blender names it differently; its default is already linear for float images
+    env.image = img
+    world.update_tag()
+    return img
+
+
+def _restore_world(scene, kind=None):
+    """Put the artist's own World back and delete the Worlds/images the bridge made."""
+    cur = scene.world
+    if cur is not None and cur.get(BRIDGE_TAG) and (kind is None or cur.get(BRIDGE_TAG) == kind):
+        prev = bpy.data.worlds.get(scene.get(PREV_WORLD_KEY, ""))
+        scene.world = prev if (prev is not None and not prev.get(BRIDGE_TAG)) else None
+    for w in _bridge_worlds(kind):
+        env = w.node_tree.nodes.get("Forge Env") if w.use_nodes and w.node_tree else None
+        img = env.image if env else None
+        if scene.world is w:
+            continue
+        bpy.data.worlds.remove(w)
+        if img is not None and img.get(BRIDGE_TAG) and img.users == 0:
+            bpy.data.images.remove(img)
+    if PREV_WORLD_KEY in scene and not any(w.get(BRIDGE_TAG) for w in bpy.data.worlds):
+        del scene[PREV_WORLD_KEY]
+
+
+def _tag_redraw():
+    wm = bpy.context.window_manager
+    for win in wm.windows:
+        for area in win.screen.areas:
+            area.tag_redraw()
+
+
+def _live_tick():
+    """Main-thread timer: apply the newest map the background thread has downloaded."""
+    link = _live["link"]
+    if link is None or not _live["running"]:
+        return None
+    frame = link.take_frame()
+    if frame is not None:
+        try:
+            scene = bpy.context.scene
+            world = _bridge_world(scene, LIVE_KIND)
+            _set_world_image(world, frame.path, "HDRI Forge Live")
+        except Exception as e:                       # never let a bad frame kill the timer
+            print("HDRI Forge Bridge: could not apply frame:", e)
+        link.frame_applied(frame)
+    st = link.status()
+    key = (st["state"], st["message"], st["note"])
+    if key != _live["last_status"]:
+        _live["last_status"] = key
+        _tag_redraw()
+    return 0.1
+
+
+def _live_start():
+    if _live["link"] is None:
+        _live["link"] = _core.ForgeLink(cache_dir=os.path.join(bpy.app.tempdir, "hdri_forge_live"))
+    _live["running"] = True
+    _live["link"].start()
+    if not bpy.app.timers.is_registered(_live_tick):
+        bpy.app.timers.register(_live_tick, first_interval=0.1)
+
+
+def _live_stop(scene=None):
+    _live["running"] = False
+    link = _live["link"]
+    if link is not None:
+        link.stop()
+        link.cleanup()
+    if scene is not None:
+        _restore_world(scene, LIVE_KIND)
+    _live["last_status"] = None
+
+
+def _on_load_post(_dummy):
+    """A saved .blend must not keep a live World that points at a temp file that no longer exists."""
+    _live["running"] = False
+    for scene in bpy.data.scenes:
+        _restore_world(scene, LIVE_KIND)
+
+
+class HDRIBRIDGE_OT_live_toggle(bpy.types.Operator):
+    bl_idname = "hdribridge.live_toggle"
+    bl_label = "Live HDRI"
+    bl_description = ('Show the HDRI that HDRI Forge Studio is rendering, live, as the World. '
+                      'In Forge, turn on "Erik Live". Stop puts your own World back')
+
+    def execute(self, context):
+        if _live["running"]:
+            _live_stop(context.scene)
+        else:
+            _live_start()
+        _tag_redraw()
+        return {'FINISHED'}
+
+
+class HDRIBRIDGE_OT_import_hdri(bpy.types.Operator):
+    bl_idname = "hdribridge.import_hdri"
+    bl_label = "Import HDRI"
+    bl_description = ("Save Forge's current HDRI (and its .ash diffuse light) next to this .blend and use it as the "
+                      "World. Unlike Live HDRI this is permanent: it stays after you close Blender")
+
+    def execute(self, context):
+        if bpy.data.filepath:
+            dest = os.path.join(os.path.dirname(bpy.data.filepath), "hdri_forge")
+        else:
+            dest = os.path.join(bpy.app.tempdir, "hdri_forge_import")
+        try:
+            frame = _core.fetch_latest(dest, name="forge_hdri")
+        except _core.ForgeLinkError as e:
+            self.report({'ERROR'}, str(e))
+            return {'CANCELLED'}
+        if _live["running"]:
+            _live_stop(context.scene)               # an imported World replaces the live one
+        _restore_world(context.scene, IMPORT_KIND)  # replace an earlier import, keep the artist's World remembered
+        world = _bridge_world(context.scene, IMPORT_KIND)
+        world[BRIDGE_TAG] = IMPORT_KIND
+        img = _set_world_image(world, frame.path, os.path.basename(frame.path))
+        if bpy.data.filepath:
+            try:
+                img.filepath = bpy.path.relpath(frame.path)
+            except ValueError:
+                pass                                  # different drive: keep the absolute path
+        note = "" if bpy.data.filepath else " Save the .blend to keep this file."
+        self.report({'INFO'}, f"Imported {frame.describe()} to {frame.path}.{note}")
+        return {'FINISHED'}
+
+
+class HDRIBRIDGE_OT_restore_world(bpy.types.Operator):
+    bl_idname = "hdribridge.restore_world"
+    bl_label = "Restore my World"
+    bl_description = "Stop the live HDRI and put your own World back"
+
+    def execute(self, context):
+        _live_stop(context.scene)
+        _restore_world(context.scene)
+        _tag_redraw()
+        return {'FINISHED'}
+
+
+_STATE_ICON = {"off": 'RADIOBUT_OFF', "searching": 'TIME', "waiting": 'INFO',
+               "streaming": 'CHECKMARK', "error": 'ERROR'}
+
+
+def _draw_live(layout, context):
+    box = layout.box()
+    running = _live["running"]
+    box.label(text="Live HDRI", icon='WORLD')
+    box.operator("hdribridge.live_toggle", text="Stop live HDRI" if running else "Start live HDRI",
+                 icon='PAUSE' if running else 'PLAY', depress=running)
+    link = _live["link"]
+    if running and link is not None:
+        st = link.status()
+        col = box.column(align=True)
+        col.label(text=st["message"], icon=_STATE_ICON.get(st["state"], 'INFO'))
+        if st["state"] == "streaming":
+            col.label(text=f"{st['width']} x {st['height']}  ·  {st['ms']} ms to render  ·  {st['mode']} :{st['port']}")
+        if st["note"]:
+            col.label(text=st["note"], icon='ERROR')
+    else:
+        box.label(text='In Forge, turn on "Erik Live", then Start.')
+    row = box.row(align=True)
+    row.operator("hdribridge.import_hdri", icon='IMPORT')
+    world = context.scene.world
+    if world is not None and world.get(BRIDGE_TAG):
+        row.operator("hdribridge.restore_world", icon='LOOP_BACK')
+
+
 class HDRIBRIDGE_PT_panel(bpy.types.Panel):
     bl_label       = "HDRI Forge Bridge"
     bl_idname      = "HDRIBRIDGE_PT_panel"
@@ -869,6 +1130,9 @@ class HDRIBRIDGE_PT_panel(bpy.types.Panel):
         row.operator("hdribridge.refresh", text="", icon='FILE_REFRESH')
 
         layout.separator()
+        _draw_live(layout, context)
+
+        layout.separator()
         layout.label(text=f"Selected: {len(lights)} lights, {len(meshes)} meshes")
         layout.operator("hdribridge.push", icon='EXPORT')
 
@@ -888,6 +1152,9 @@ classes = [
     HDRIBRIDGE_OT_push,
     HDRIBRIDGE_OT_push_cameras,
     HDRIBRIDGE_OT_push_to_maya,
+    HDRIBRIDGE_OT_live_toggle,
+    HDRIBRIDGE_OT_import_hdri,
+    HDRIBRIDGE_OT_restore_world,
     HDRIBRIDGE_PT_panel,
 ]
 
@@ -895,10 +1162,20 @@ def register():
     for cls in classes:
         bpy.utils.register_class(cls)
     bpy.app.timers.register(_background_probe, first_interval=0.5)
+    if _on_load_post not in bpy.app.handlers.load_post:
+        bpy.app.handlers.load_post.append(_on_load_post)
     _start_direct_server()
 
 def unregister():
     _stop_direct_server()
+    try:
+        _live_stop(bpy.context.scene)
+    except Exception:
+        _live_stop()
+    if _on_load_post in bpy.app.handlers.load_post:
+        bpy.app.handlers.load_post.remove(_on_load_post)
+    if bpy.app.timers.is_registered(_live_tick):
+        bpy.app.timers.unregister(_live_tick)
     if bpy.app.timers.is_registered(_background_probe):
         bpy.app.timers.unregister(_background_probe)
     for cls in reversed(classes):

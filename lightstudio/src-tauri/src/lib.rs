@@ -213,6 +213,9 @@ fn start_erik_live_server() {
             obj.insert("ok".into(), true.into());
             obj.insert("app".into(), "HDRI Forge Studio".into());
             obj.insert("mode".into(), "desktop".into());
+            // protocol / capabilities: lets a client tell "Forge is too old for me" from "I am too old for Forge".
+            obj.insert("protocol".into(), 1.into());
+            obj.insert("capabilities".into(), serde_json::json!(["hdr", "ash", "events", "up"]));
             obj.insert("version".into(), g.version.into());
             obj.insert("clients".into(), g.clients.len().into());
             obj.insert("forge".into(), g.up_clients.len().into());

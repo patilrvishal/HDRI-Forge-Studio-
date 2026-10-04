@@ -46,7 +46,8 @@ export function erikLivePlugin(): Plugin {
 
         if (req.method === 'GET' && url === '/status') {
           res.writeHead(200, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify({ ok: true, app: 'HDRI Forge Studio', version, clients: clients.size, forge: upClients.size, hasMap: !!hdr, ...meta }));
+          // protocol / capabilities let a client (Erik, the Blender and Maya addons) tell "Forge is too old for me" from "I am too old for Forge".
+          res.end(JSON.stringify({ ok: true, app: 'HDRI Forge Studio', mode: 'dev', protocol: 1, capabilities: ['hdr', 'ash', 'events', 'up'], version, clients: clients.size, forge: upClients.size, hasMap: !!hdr, ...meta }));
           return;
         }
 

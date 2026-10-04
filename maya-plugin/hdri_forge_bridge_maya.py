@@ -34,9 +34,38 @@ import urllib.request
 import urllib.error
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
+import sys
+
 import maya.cmds as cmds
 import maya.api.OpenMaya as om2
 import maya.utils
+
+# forge_link_core.py is the shared, DCC-agnostic half of the live HDRI link (discovery, background
+# download, reconnect). It sits next to this plug-in file. Maya's Plug-in Manager executes a .py plug-in
+# WITHOUT defining __file__, so the location comes from the code object (which carries the real path
+# either way). Maya also keeps modules cached across unload/load, so drop any stale copy first or an
+# updated core would never be picked up.
+import inspect
+try:
+    _SELF = __file__
+except NameError:
+    _SELF = inspect.currentframe().f_code.co_filename
+_HERE = os.path.dirname(os.path.abspath(_SELF))
+if _HERE not in sys.path:
+    sys.path.insert(0, _HERE)
+sys.modules.pop("forge_link_core", None)
+try:
+    import forge_link_core as _core
+    _LinkError = _core.ForgeLinkError
+except ImportError:
+    # Everything except Live HDRI keeps working; the Live tab explains what is missing.
+    _core = None
+    _LinkError = RuntimeError
+
+
+def _require_core():
+    if _core is None:
+        raise RuntimeError("forge_link_core.py is missing. Copy it next to hdri_forge_bridge_maya.py (%s)." % _HERE)
 
 
 def maya_useNewAPI():
@@ -69,6 +98,7 @@ _direct_state = {"blender_connected": False, "last_received": None}
 _ui = {
     "status_text": None, "count_text": None,
     "blender_status_text": None, "blender_count_text": None, "blender_last_text": None,
+    "live_status": None, "live_detail": None, "live_toggle": None, "live_restore": None,
 }
 
 
@@ -242,7 +272,9 @@ def _gather_world_arnold():
     {fileName, dataBase64, strength} shape the Blender addon sends for its
     World Background HDRI - the Studio-side listener is renderer-agnostic
     and doesn't care which DCC/renderer produced it."""
-    domes = cmds.ls(type='aiSkyDomeLight')
+    # Skip the sky domes the live link made from Forge's own HDRI: pushing them back would feed
+    # Forge its own output as if it were the artist's HDRI.
+    domes = [d for d in (cmds.ls(type='aiSkyDomeLight') or []) if not _is_bridge_node(d)]
     if not domes:
         return None
     dome = domes[0]
@@ -944,15 +976,293 @@ def _refresh_blender_count(*_args):
     cmds.text(_ui["blender_count_text"], edit=True, label=f"Selected: {light_count} lights, {mesh_count} meshes")
 
 
+# ══ Live HDRI: Forge -> Maya ═══════════════════════════════════════════════
+# Forge streams the HDRI it renders to a local bridge (the same stream Erik Adjuster uses).
+# forge_link_core downloads it on a background thread; this section applies each map to an Arnold
+# aiSkyDomeLight on Maya's main thread, from a timer. The artist's own sky domes are never edited:
+# the live HDRI goes into a separate tagged dome, the artist's domes are hidden while it runs, and
+# Stop deletes ours and shows theirs again.
+
+BRIDGE_ATTR = "hdriForgeBridge"        # string attribute on every node we create (value: live / import)
+HIDDEN_ATTR = "hdriForgeHidden"        # on our dome: names of the artist's domes we hid
+LIVE_KIND, IMPORT_KIND = "live", "import"
+_DOME_NAMES = {LIVE_KIND: "HDRIForgeLive", IMPORT_KIND: "HDRIForgeImport"}
+
+# Rotation (degrees) about Y that makes Arnold's lat-long sky agree with Forge's. Both are Y-up, but Arnold puts
+# the centre of the image a quarter turn away from where Forge does, so this is measured, not assumed:
+# bridge-core/tests/maya_orient_test.py renders with Arnold, aimed at two separate lights (so a mirrored sky
+# could not pass), and keeps a +180 degree rotation as a control that must fail.
+FORGE_TO_MAYA_Y_ROTATION = 90.0
+
+_live = {"link": None, "running": False, "timer": None, "job": None, "last_status": None}
+
+
+def _is_bridge_node(node):
+    """True for a transform or shape that the live link / Import created."""
+    xform = node
+    if cmds.nodeType(node) != 'transform':
+        parents = cmds.listRelatives(node, parent=True) or []
+        xform = parents[0] if parents else node
+    return cmds.attributeQuery(BRIDGE_ATTR, node=xform, exists=True)
+
+
+def _bridge_domes(kind=None):
+    out = []
+    for shape in cmds.ls(type='aiSkyDomeLight') or []:
+        parents = cmds.listRelatives(shape, parent=True) or []
+        if not parents or not cmds.attributeQuery(BRIDGE_ATTR, node=parents[0], exists=True):
+            continue
+        if kind is None or cmds.getAttr(parents[0] + '.' + BRIDGE_ATTR) == kind:
+            out.append((parents[0], shape))
+    return out
+
+
+def _ensure_arnold():
+    if not cmds.pluginInfo('mtoa', query=True, loaded=True):
+        try:
+            cmds.loadPlugin('mtoa', quiet=True)
+        except Exception:
+            raise _LinkError("Arnold (mtoa) is not loaded. Load it in Windows > Settings/Preferences > Plug-in Manager.")
+
+
+def _hide_artist_domes(our_transform):
+    """Arnold lights every aiSkyDomeLight at once, so the artist's own must be off while ours is on."""
+    hidden = []
+    for shape in cmds.ls(type='aiSkyDomeLight') or []:
+        parents = cmds.listRelatives(shape, parent=True) or []
+        if not parents or cmds.attributeQuery(BRIDGE_ATTR, node=parents[0], exists=True):
+            continue
+        if cmds.getAttr(parents[0] + '.visibility'):
+            cmds.setAttr(parents[0] + '.visibility', 0)
+            hidden.append(parents[0])
+    if hidden:
+        if not cmds.attributeQuery(HIDDEN_ATTR, node=our_transform, exists=True):
+            cmds.addAttr(our_transform, longName=HIDDEN_ATTR, dataType='string')
+        cmds.setAttr(our_transform + '.' + HIDDEN_ATTR, json.dumps(hidden), type='string')
+
+
+def _show_artist_domes(our_transform):
+    if not cmds.attributeQuery(HIDDEN_ATTR, node=our_transform, exists=True):
+        return
+    try:
+        names = json.loads(cmds.getAttr(our_transform + '.' + HIDDEN_ATTR) or "[]")
+    except ValueError:
+        names = []
+    for n in names:
+        if cmds.objExists(n):
+            cmds.setAttr(n + '.visibility', 1)
+
+
+def _bridge_dome(kind):
+    """The sky dome we own for this kind, created on demand. Returns (transform, shape, file_node)."""
+    _ensure_arnold()
+    existing = _bridge_domes(kind)
+    if existing:
+        xform, shape = existing[0]
+    else:
+        shape = cmds.createNode('aiSkyDomeLight', name=_DOME_NAMES[kind] + "Shape")
+        xform = (cmds.listRelatives(shape, parent=True) or [shape])[0]
+        xform = cmds.rename(xform, _DOME_NAMES[kind])
+        shape = (cmds.listRelatives(xform, shapes=True) or [shape])[0]
+        cmds.addAttr(xform, longName=BRIDGE_ATTR, dataType='string')
+        cmds.setAttr(xform + '.' + BRIDGE_ATTR, kind, type='string')
+        try:
+            cmds.setAttr(shape + '.format', 2)              # lat-long
+        except Exception:
+            pass
+        cmds.setAttr(shape + '.intensity', 1.0)             # Forge already bakes exposure into the map
+        cmds.setAttr(xform + '.rotateY', FORGE_TO_MAYA_Y_ROTATION)
+        _hide_artist_domes(xform)
+    conns = cmds.listConnections(shape + '.color', source=True, destination=False, type='file') or []
+    if conns:
+        file_node = conns[0]
+    else:
+        file_node = cmds.shadingNode('file', asTexture=True, isColorManaged=True, name=_DOME_NAMES[kind] + "_file")
+        try:
+            cmds.setAttr(file_node + '.colorSpace', 'Raw', type='string')   # HDR data is already scene-linear
+        except Exception:
+            pass
+        try:
+            # Arnold would otherwise convert every streamed map to a .tx cache before using it: slow, and
+            # a new multi-megabyte file per update. Live maps are used once and thrown away.
+            cmds.setAttr(file_node + '.aiAutoTx', 0)
+        except Exception:
+            pass
+        cmds.connectAttr(file_node + '.outColor', shape + '.color', force=True)
+    return xform, shape, file_node
+
+
+def _set_dome_image(kind, path):
+    xform, shape, file_node = _bridge_dome(kind)
+    cmds.setAttr(file_node + '.fileTextureName', path, type='string')
+    return xform, shape, file_node
+
+
+def _remove_bridge_domes(kind=None):
+    """Delete the domes/files we made and show the artist's own again."""
+    for xform, shape in _bridge_domes(kind):
+        _show_artist_domes(xform)
+        files = cmds.listConnections(shape + '.color', source=True, destination=False, type='file') or []
+        cmds.delete(xform)
+        for f in files:
+            # Only ever our own file node (named by _bridge_dome). A guard like "nothing uses its output"
+            # is wrong: Maya keeps a colour-management connection on every file node, so it never passes.
+            if cmds.objExists(f) and f.startswith("HDRIForge"):
+                cmds.delete(f)
+
+
+def _live_tick(*_args):
+    """Main-thread timer: apply the newest map the background thread has downloaded."""
+    link = _live["link"]
+    if link is None or not _live["running"]:
+        return
+    frame = link.take_frame()
+    if frame is not None:
+        try:
+            _set_dome_image(LIVE_KIND, frame.path)
+        except Exception as e:                       # never let a bad frame kill the timer
+            cmds.warning("HDRI Forge Bridge: could not apply frame: %s" % e)
+            link._set(state=_core.ERROR, message=str(e))
+        link.frame_applied(frame)
+    st = link.status()
+    key = (st["state"], st["message"], st["note"])
+    if key != _live["last_status"]:
+        _live["last_status"] = key
+        _refresh_live_ui()
+
+
+def _start_timer():
+    if _live["timer"] is not None or _live["job"] is not None:
+        return
+    QtCore = None
+    for name in ("PySide2", "PySide6"):                  # Maya 2022-2024 / 2025+
+        try:
+            QtCore = __import__(name, fromlist=["QtCore"]).QtCore
+            break
+        except ImportError:
+            continue
+    if QtCore is not None:
+        t = QtCore.QTimer()
+        t.setInterval(100)
+        t.timeout.connect(_live_tick)
+        t.start()
+        _live["timer"] = t
+    else:                                               # no Qt: Maya's idle event is the next best main-thread hook
+        _live["job"] = cmds.scriptJob(event=['idle', _live_tick], protected=False)
+
+
+def _stop_timer():
+    if _live["timer"] is not None:
+        _live["timer"].stop()
+        _live["timer"] = None
+    if _live["job"] is not None:
+        if cmds.scriptJob(exists=_live["job"]):
+            cmds.scriptJob(kill=_live["job"], force=True)
+        _live["job"] = None
+
+
+def live_start(*_args):
+    _require_core()
+    _ensure_arnold()
+    if _live["link"] is None:
+        _live["link"] = _core.ForgeLink(cache_dir=os.path.join(tempfile.gettempdir(), "hdri_forge_live_maya_%d" % os.getpid()))
+    _live["running"] = True
+    _live["link"].start()
+    _start_timer()
+    _refresh_live_ui()
+
+
+def live_stop(*_args):
+    _live["running"] = False
+    _stop_timer()
+    link = _live["link"]
+    if link is not None:
+        link.stop()
+        link.cleanup()
+    _remove_bridge_domes(LIVE_KIND)
+    _live["last_status"] = None
+    _refresh_live_ui()
+
+
+def live_toggle(*_args):
+    if _live["running"]:
+        live_stop()
+    else:
+        try:
+            live_start()
+        except _LinkError as e:
+            cmds.warning("HDRI Forge Bridge: %s" % e)
+
+
+def import_hdri(*_args):
+    """Save Forge's current HDRI (and its .ash) into the project and use it as the sky. Permanent, unlike Live."""
+    try:
+        _require_core()
+        _ensure_arnold()
+        root = cmds.workspace(query=True, rootDirectory=True)
+        dest = os.path.join(root, "sourceimages", "hdri_forge") if root else os.path.join(tempfile.gettempdir(), "hdri_forge_import")
+        frame = _core.fetch_latest(dest, name="forge_hdri")
+    except _LinkError as e:
+        cmds.warning("HDRI Forge Bridge: %s" % e)
+        return None
+    if _live["running"]:
+        live_stop()                                      # an imported dome replaces the live one
+    _remove_bridge_domes(IMPORT_KIND)
+    _set_dome_image(IMPORT_KIND, frame.path)
+    cmds.inViewMessage(amg="Imported <hl>%s</hl> to %s" % (frame.describe(), frame.path), pos='midCenter', fade=True)
+    _refresh_live_ui()
+    return frame
+
+
+def restore_sky(*_args):
+    """Stop everything the bridge is doing to the sky and show the artist's own domes again."""
+    if _live["running"]:
+        live_stop()
+    _remove_bridge_domes()
+    _refresh_live_ui()
+
+
+def _refresh_live_ui():
+    ui = _ui
+    if not (ui.get("live_status") and cmds.text(ui["live_status"], exists=True)):
+        return
+    link = _live["link"]
+    if _live["running"] and link is not None:
+        st = link.status()
+        cmds.text(ui["live_status"], edit=True, label=st["message"])
+        detail = ""
+        if st["state"] == _core.STREAMING:
+            detail = "%d x %d  -  %d ms to render  -  %s :%d" % (st["width"], st["height"], st["ms"], st["mode"], st["port"])
+        if st["note"]:
+            detail = (detail + "   " if detail else "") + st["note"]
+        cmds.text(ui["live_detail"], edit=True, label=detail)
+    else:
+        cmds.text(ui["live_status"], edit=True, label='In Forge, turn on "Erik Live", then Start.')
+        cmds.text(ui["live_detail"], edit=True, label="")
+    cmds.button(ui["live_toggle"], edit=True, label="Stop live HDRI" if _live["running"] else "Start live HDRI")
+    cmds.button(ui["live_restore"], edit=True, enable=bool(_bridge_domes()))
+
+
 def show_ui(*_args):
     if cmds.window(WINDOW_NAME, exists=True):
         cmds.deleteUI(WINDOW_NAME)
 
-    window = cmds.window(WINDOW_NAME, title=PLUGIN_NAME, widthHeight=(320, 300), sizeable=False)
+    window = cmds.window(WINDOW_NAME, title=PLUGIN_NAME, widthHeight=(360, 300), sizeable=False)
     cmds.columnLayout(adjustableColumn=True, rowSpacing=6, columnAttach=('both', 12))
     cmds.separator(height=8, style='none')
 
     tabs = cmds.tabLayout(innerMarginWidth=8, innerMarginHeight=8)
+
+    # ── Tab 0: Live HDRI (Forge -> Maya) ──
+    live_tab = cmds.columnLayout(adjustableColumn=True, rowSpacing=8)
+    _ui["live_toggle"] = cmds.button(label="Start live HDRI", height=32, command=live_toggle)
+    _ui["live_status"] = cmds.text(label='In Forge, turn on "Erik Live", then Start.', align='left', font='boldLabelFont')
+    _ui["live_detail"] = cmds.text(label="", align='left')
+    cmds.separator(height=4, style='in')
+    cmds.text(label="Import saves the current HDRI + .ash into sourceimages/hdri_forge.", align='left')
+    cmds.button(label="Import HDRI", height=28, command=import_hdri)
+    _ui["live_restore"] = cmds.button(label="Restore my sky", height=28, command=restore_sky, enable=False)
+    cmds.setParent('..')  # end live_tab
 
     # ── Tab 1: HDRI Forge Studio ──
     studio_tab = cmds.columnLayout(adjustableColumn=True, rowSpacing=8)
@@ -984,7 +1294,7 @@ def show_ui(*_args):
 
     cmds.tabLayout(
         tabs, edit=True,
-        tabLabel=((studio_tab, 'HDRI Forge Studio'), (blender_tab, 'Blender')),
+        tabLabel=((live_tab, 'Live HDRI'), (studio_tab, 'HDRI Forge Studio'), (blender_tab, 'Blender')),
     )
 
     cmds.setParent('..')  # end tabs
@@ -993,6 +1303,7 @@ def show_ui(*_args):
 
     _refresh_status()
     _refresh_blender_status()
+    _refresh_live_ui()
     # Keep the selection counts fresh whenever Maya's selection changes while
     # this window is open. Tied to the window's lifetime via a scriptJob that
     # kills itself if the window has been closed.
@@ -1009,7 +1320,7 @@ def _on_selection_changed(*_args):
 # ─── Plug-in registration ───────────────────────────────────────────────────
 def initializePlugin(plugin):
     vendor = "HDRI Forge Studio"
-    version = "1.1.0"
+    version = "1.2.0"
     plugin_fn = om2.MFnPlugin(plugin, vendor, version)
 
     if cmds.menu(MENU_NAME, exists=True):
@@ -1021,6 +1332,10 @@ def initializePlugin(plugin):
 
 
 def uninitializePlugin(plugin):
+    try:
+        live_stop()
+    except Exception:
+        pass
     _stop_direct_server()
     if cmds.window(WINDOW_NAME, exists=True):
         cmds.deleteUI(WINDOW_NAME)
