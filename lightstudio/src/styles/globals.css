@@ -11,33 +11,40 @@
      darker neutrals with a genuine cool-neutral (not blue-tinted) base,
      and a dual-hue accent instead of a single flat blue.
      ═══════════════════════════════════════════════════════════════════ */
-  --bg-deep: #08090b;
-  --bg-panel: #101113;
-  --bg-card: #17181c;
-  --bg-input: #0b0c0e;
-  --bg-elevated: #1e2024;
-  /* ── Cyan → violet "photon" accent system ─────────────────── */
-  --accent: #22d3ee;
-  --accent-2: #818cf8;
-  --accent-bright: #67e8f9;
-  --accent-dim: rgba(34, 211, 238, 0.26);
-  --accent-bg: rgba(34, 211, 238, 0.10);
-  --purple: #818cf8;
-  --purple-glow: rgba(129, 140, 248, 0.4);
-  --pink: #22d3ee;
-  --pink-glow: rgba(34, 211, 238, 0.35);
-  --neon-gradient: linear-gradient(135deg, #22d3ee 0%, #818cf8 100%);
+  /* ═══════════════════════════════════════════════════════════════════
+     "Amber Glass" — warm charcoal base with a frosted-glass + soft
+     neumorphic surface language and an orange glow accent, modeled on the
+     glass/neumorphism/glow reference set. Surfaces are translucent and
+     blurred (glass), controls read as softly extruded (neumorphic), and
+     active/hover states carry a warm orange glow.
+     ═══════════════════════════════════════════════════════════════════ */
+  --bg-deep: #141416;
+  --bg-panel: #1b1b1f;
+  --bg-card: #232327;
+  --bg-input: #18181b;
+  --bg-elevated: #2a2a30;
+  /* ── Amber-orange accent system ───────────────────────────── */
+  --accent: #ff7d2e;
+  --accent-2: #ff9d4d;
+  --accent-bright: #ffa457;
+  --accent-dim: rgba(255, 125, 46, 0.28);
+  --accent-bg: rgba(255, 125, 46, 0.11);
+  --purple: #ff9d4d;
+  --purple-glow: rgba(255, 125, 46, 0.4);
+  --pink: #ff7d2e;
+  --pink-glow: rgba(255, 125, 46, 0.35);
+  --neon-gradient: linear-gradient(135deg, #ff8a3d 0%, #ff5722 100%);
   /* ── Track / thumb ────────────────────────────────────────── */
-  --track: #24262b;
-  --thumb: #22d3ee;
+  --track: #26262b;
+  --thumb: #ff7d2e;
   /* ── Text hierarchy ──────────────────────────────────────── */
-  --text: #eef1f3;
-  --text-sec: #98a0a8;
-  --text-dim: #5a6169;
+  --text: #f2f0ee;
+  --text-sec: #a0a0a8;
+  --text-dim: #63636c;
   /* ── Borders ──────────────────────────────────────────────── */
-  --border: #24262b;
-  --border-light: #33363c;
-  --border-glow: rgba(34, 211, 238, 0.22);
+  --border: #2a2a30;
+  --border-light: #3a3a42;
+  --border-glow: rgba(255, 125, 46, 0.24);
   /* ── Semantic ─────────────────────────────────────────────── */
   --danger: #fb7185;
   --success: #34d399;
@@ -46,13 +53,26 @@
   --font-ui: 'Inter', system-ui, -apple-system, sans-serif;
   --font-display: 'Space Grotesk', 'Inter', system-ui, sans-serif;
   --font-mono: 'JetBrains Mono', 'SF Mono', monospace;
-  --radius: 14px;
-  --radius-sm: 9px;
-  /* ── Glow utilities — sharper, more saturated "photon" glow ── */
-  --glow-sm: 0 0 10px rgba(34, 211, 238, 0.24);
-  --glow-md: 0 0 18px rgba(34, 211, 238, 0.28);
-  --glow-lg: 0 0 30px rgba(34, 211, 238, 0.3);
+  --radius: 16px;
+  --radius-sm: 11px;
+  /* ── Glow utilities — warm orange glow ────────────────────── */
+  --glow-sm: 0 0 10px rgba(255, 125, 46, 0.30);
+  --glow-md: 0 0 20px rgba(255, 125, 46, 0.36);
+  --glow-lg: 0 0 34px rgba(255, 125, 46, 0.42);
   --panel-glow: 0 0 1px var(--border-glow), inset 0 0 0 1px rgba(255,255,255,0.03);
+  /* ── Glass surface language ───────────────────────────────── */
+  --glass-bg: rgba(30, 30, 34, 0.60);
+  --glass-bg-strong: rgba(26, 26, 30, 0.78);
+  --glass-border: rgba(255, 255, 255, 0.09);
+  --glass-blur: 18px;
+  --glass-highlight: inset 0 1px 0 rgba(255, 255, 255, 0.07);
+  /* ── Neumorphic soft-extrusion shadows ────────────────────── */
+  --neu-raised: 5px 5px 13px rgba(0, 0, 0, 0.48), -4px -4px 11px rgba(255, 255, 255, 0.025);
+  --neu-raised-sm: 3px 3px 7px rgba(0, 0, 0, 0.42), -2px -2px 6px rgba(255, 255, 255, 0.022);
+  --neu-inset: inset 3px 3px 7px rgba(0, 0, 0, 0.5), inset -3px -3px 7px rgba(255, 255, 255, 0.028);
+  /* Floating glass chrome - toolbars that sit directly on top of the 3D
+     viewport or a canvas (GizmoToolbar, HDRI Preview's zoom controls). */
+  --bg-floating-glass: rgba(26, 26, 30, 0.68);
 }
 
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -100,18 +120,20 @@ select {
 }
 
 .panel {
-  background: var(--bg-panel);
-  border-color: var(--border);
+  background: var(--glass-bg);
+  -webkit-backdrop-filter: blur(var(--glass-blur));
+  backdrop-filter: blur(var(--glass-blur));
+  border-color: var(--glass-border);
   display: flex;
   flex-direction: column;
-  box-shadow: var(--panel-glow);
+  box-shadow: var(--panel-glow), var(--glass-highlight);
   transition: box-shadow 0.3s ease;
 }
 .panel-header {
   display: flex; align-items: center; justify-content: space-between;
-  padding: 9px 13px; border-bottom: 1px solid var(--border);
+  padding: 9px 13px; border-bottom: 1px solid var(--glass-border);
   min-height: 34px; flex-shrink: 0;
-  background: linear-gradient(180deg, rgba(34, 211, 238, 0.045) 0%, transparent 100%);
+  background: linear-gradient(180deg, rgba(255, 125, 46, 0.05) 0%, transparent 100%);
 }
 .panel-header h3 {
   font-family: var(--font-display);
@@ -141,15 +163,20 @@ select {
 
 .btn-sm {
   display: inline-flex; align-items: center; gap: 4px;
-  padding: 4px 11px; border-radius: var(--radius-sm); font-size: 11px;
+  padding: 5px 12px; border-radius: var(--radius-sm); font-size: 11px;
   color: var(--text-sec); background: var(--bg-card);
-  border: 1px solid var(--border); transition: all 0.2s ease;
+  border: 1px solid var(--glass-border); transition: all 0.2s ease;
+  box-shadow: var(--neu-raised-sm), var(--glass-highlight);
 }
 .btn-sm:hover {
   border-color: var(--accent);
   color: var(--accent-bright);
-  box-shadow: var(--glow-sm);
+  box-shadow: var(--neu-raised-sm), var(--glow-sm);
   transform: translateY(-1px);
+}
+.btn-sm:active {
+  transform: translateY(0);
+  box-shadow: var(--neu-inset);
 }
 
 .btn-primary {
@@ -169,43 +196,47 @@ select {
 .field-row { display: flex; align-items: center; gap: 6px; margin-bottom: 4px; }
 .field-label { font-size: 11px; color: var(--text-sec); min-width: 58px; flex-shrink: 0; }
 .field-input {
-  flex: 1; height: 24px; padding: 0 6px;
-  background: var(--bg-input); border: 1px solid var(--border);
+  flex: 1; height: 25px; padding: 0 8px;
+  background: var(--bg-input); border: 1px solid var(--glass-border);
   border-radius: var(--radius-sm); color: var(--text);
   font-family: var(--font-mono); font-size: 12px; transition: all 0.2s ease;
+  box-shadow: var(--neu-inset);
 }
 .field-input:focus {
   border-color: var(--accent);
-  box-shadow: 0 0 0 2px var(--accent-dim);
+  box-shadow: var(--neu-inset), 0 0 0 2px var(--accent-dim);
 }
 .field-select {
-  flex: 1; height: 24px; padding: 0 6px;
-  background: var(--bg-input); border: 1px solid var(--border);
+  flex: 1; height: 25px; padding: 0 8px;
+  background: var(--bg-input); border: 1px solid var(--glass-border);
   border-radius: var(--radius-sm); color: var(--text); font-size: 11px; cursor: pointer;
   transition: all 0.2s ease;
+  box-shadow: var(--neu-inset);
 }
 .field-select:focus {
   border-color: var(--accent);
-  box-shadow: 0 0 0 2px var(--accent-dim);
+  box-shadow: var(--neu-inset), 0 0 0 2px var(--accent-dim);
 }
 
 .toggle-track {
-  position: relative; width: 34px; height: 18px;
+  position: relative; width: 36px; height: 19px;
   background: var(--track); border: 1px solid var(--border-light);
-  border-radius: 10px;
+  border-radius: 11px;
   cursor: pointer; transition: all 0.25s ease; flex-shrink: 0;
+  box-shadow: var(--neu-inset);
 }
 .toggle-track.on {
   background: var(--neon-gradient);
   border-color: transparent;
-  box-shadow: var(--glow-sm);
+  box-shadow: var(--glow-md), inset 0 0 8px rgba(255, 255, 255, 0.25);
 }
 .toggle-track::after {
   content: ''; position: absolute; top: 2px; left: 2px;
-  width: 12px; height: 12px; background: var(--text);
+  width: 13px; height: 13px; background: var(--text);
   border-radius: 50%; transition: transform 0.25s cubic-bezier(0.34, 1.56, 0.64, 1);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
 }
-.toggle-track.on::after { transform: translateX(16px); background: #051012; }
+.toggle-track.on::after { transform: translateX(17px); background: #fff; }
 
 .tooltip { position: relative; }
 .tooltip::after {
@@ -230,9 +261,12 @@ select {
    underline and soft glow rather than the old carved-groove skeuomorphism. */
 .tab-bar {
   display: flex; align-items: stretch; gap: 2px; padding: 3px;
-  background: var(--bg-deep);
-  border: 1px solid var(--border);
+  background: var(--glass-bg-strong);
+  -webkit-backdrop-filter: blur(var(--glass-blur));
+  backdrop-filter: blur(var(--glass-blur));
+  border: 1px solid var(--glass-border);
   border-radius: var(--radius-sm);
+  box-shadow: var(--neu-inset), var(--glass-highlight);
 }
 .tab-item {
   position: relative;
@@ -247,7 +281,7 @@ select {
 .tab-item.active {
   color: var(--accent-bright);
   background: var(--accent-bg);
-  box-shadow: inset 0 0 0 1px var(--border-glow), 0 0 0 1px rgba(34,211,238,0.05), var(--glow-sm);
+  box-shadow: inset 0 0 0 1px var(--border-glow), 0 0 0 1px rgba(255,125,46,0.06), var(--glow-sm);
 }
 .tab-item.active::after {
   content: '';
@@ -262,14 +296,14 @@ select {
    --theme-accent elsewhere. Default palette = Purple.
    ═══════════════════════════════════════════════════════════════════════ */
 :root {
-  /* Photon (default) - matches the new cyan/violet base accent so the
-     redesign is what you see on first load, not something buried behind
-     the theme dropdown. */
-  --theme-accent: #22d3ee;
-  --theme-accent-bright: #67e8f9;
-  --theme-accent-bg: rgba(34, 211, 238, 0.14);
-  --theme-accent-glow: rgba(34, 211, 238, 0.5);
-  --theme-accent-glow-strong: rgba(34, 211, 238, 0.2);
+  /* Amber (default) - matches the new orange base accent so the redesign
+     is what you see on first load, not something buried behind the theme
+     dropdown. */
+  --theme-accent: #ff7d2e;
+  --theme-accent-bright: #ffa457;
+  --theme-accent-bg: rgba(255, 125, 46, 0.14);
+  --theme-accent-glow: rgba(255, 125, 46, 0.5);
+  --theme-accent-glow-strong: rgba(255, 125, 46, 0.2);
 }
 
 /* Purple - the old default, now an explicit selectable option */
@@ -315,6 +349,64 @@ body[data-theme="red-grey"] {
   --theme-accent-bg: rgba(179, 71, 77, 0.16);
   --theme-accent-glow: rgba(179, 71, 77, 0.5);
   --theme-accent-glow-strong: rgba(179, 71, 77, 0.2);
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   Light mode — opt-in via the header's sun/moon toggle (body[data-mode]),
+   independent of the accent-color ThemeSwitcher above so the two combine
+   freely. Placed AFTER all six accent presets on purpose: this selector
+   has the same specificity as body[data-theme="X"], so source order
+   decides the tiebreak when both attributes are set - this needs to win.
+
+   A genuine light palette, not an inverted dark one: cool near-white
+   ground (never pure #fff against pure-black text), and the "glow"
+   language rebuilt as soft elevation shadows - a saturated glow reads as
+   a pale wash on a light surface, not a glow.
+
+   --accent-bright / --theme-accent-bright are the one accent pairing that
+   DOES need a light-mode override, not left alone like the rest: every
+   preset tunes them to read as a bright highlight on a near-black ground
+   (the "white-orange" preset's bright value is literally #fff3e0), and
+   they get used directly as TEXT color for active-tab labels - on a white
+   ground that text goes from a signature highlight to unreadable. One
+   shared dark-cyan value here trades "matches whichever accent hue is
+   selected" for "readable regardless of which of the 6 presets is active",
+   which is the right tradeoff for text.
+   ═══════════════════════════════════════════════════════════════════════ */
+body[data-mode="light"] {
+  /* Warm cream "soft-glass" light mode, modeled on the reference's ivory
+     ground with white frosted-glass cards and soft neumorphic elevation.
+     The orange accent stays; glow becomes soft warm elevation shadow
+     (a saturated glow reads as a pale wash on a light surface). */
+  --bg-deep: #ece9e2;
+  --bg-panel: #f6f4ef;
+  --bg-card: #fbfaf7;
+  --bg-input: #efece5;
+  --bg-elevated: #ffffff;
+  --track: #ddd8cf;
+  --text: #211f1b;
+  --text-sec: #6b6459;
+  --text-dim: #9a9284;
+  --border: #e0dbd1;
+  --border-light: #cfc9bd;
+  --border-glow: rgba(255, 125, 46, 0.22);
+  --accent-dim: rgba(255, 125, 46, 0.24);
+  --accent-bg: rgba(255, 125, 46, 0.10);
+  --glow-sm: 0 1px 3px rgba(120, 90, 60, 0.10), 0 0 8px rgba(255, 125, 46, 0.14);
+  --glow-md: 0 3px 8px rgba(120, 90, 60, 0.12), 0 0 14px rgba(255, 125, 46, 0.16);
+  --glow-lg: 0 5px 16px rgba(120, 90, 60, 0.14), 0 0 22px rgba(255, 125, 46, 0.18);
+  --panel-glow: 0 1px 3px rgba(120, 90, 60, 0.07), inset 0 0 0 1px rgba(255, 255, 255, 0.5);
+  --accent-bright: #e2620f;
+  --theme-accent-bright: #e2620f;
+  --bg-floating-glass: rgba(251, 250, 247, 0.82);
+  /* Glass + neumorphic tokens rebuilt for a light ground */
+  --glass-bg: rgba(250, 248, 244, 0.62);
+  --glass-bg-strong: rgba(246, 244, 239, 0.82);
+  --glass-border: rgba(255, 255, 255, 0.7);
+  --glass-highlight: inset 0 1px 0 rgba(255, 255, 255, 0.8);
+  --neu-raised: 5px 5px 12px rgba(150, 130, 105, 0.18), -4px -4px 11px rgba(255, 255, 255, 0.9);
+  --neu-raised-sm: 3px 3px 7px rgba(150, 130, 105, 0.15), -2px -2px 6px rgba(255, 255, 255, 0.85);
+  --neu-inset: inset 3px 3px 6px rgba(150, 130, 105, 0.16), inset -3px -3px 6px rgba(255, 255, 255, 0.75);
 }
 
 .tab-icon { color: var(--text-dim); transition: color 0.15s ease, filter 0.15s ease; }
@@ -2424,3 +2516,17 @@ input[type="range"]:active::-webkit-slider-thumb {
     0 0 0 2px var(--accent-dim),
     0 0 12px rgba(34, 211, 238, 0.4);
 }
+
+/* Editable value box next to a slider (UI/Slider + SliderNumberField) */
+.slider-row .slider-input, .slider-input {
+  width: 54px; flex-shrink: 0; height: 22px; padding: 0 5px; text-align: right;
+  background: var(--bg-input); border: 1px solid var(--glass-border);
+  border-radius: var(--radius-sm); color: var(--text);
+  font-family: var(--font-mono); font-size: 11px;
+  box-shadow: var(--neu-inset); transition: border-color 0.15s ease, box-shadow 0.15s ease;
+  -moz-appearance: textfield; appearance: textfield;
+}
+.slider-input::-webkit-outer-spin-button, .slider-input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+.slider-input:hover { border-color: var(--accent); }
+.slider-input:focus { outline: none; border-color: var(--accent); box-shadow: var(--neu-inset), 0 0 0 2px var(--accent-dim); }
+.slider-row .slider-unit { font-size: 10px; color: var(--text-dim); min-width: 14px; flex-shrink: 0; }

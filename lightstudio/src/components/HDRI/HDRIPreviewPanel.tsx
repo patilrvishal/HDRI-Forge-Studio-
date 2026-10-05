@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import * as THREE from 'three';
 import { useLightsStore } from '../../store/lightsStore';
+import { useObjectHdriStore } from '../../store/objectHdriStore';
 import { cartesianToSpherical, sphericalToCartesian } from '../../utils/math';
 import { useSceneStore } from '../../store/sceneStore';
 import { useHDRIAssetStore } from '../../store/hdriAssetStore';
@@ -16,6 +17,7 @@ import {
 } from '../../three/HDRIExporter';
 import { compositeShapesCanvas, shapesCanvasToEnvLayer } from '../../three/HDRIShapesLayer';
 import { promptForCustomHDRI } from '../../utils/loadCustomHDRI';
+import { useErikLiveStore } from '../../erikLive/ErikLiveSync';
 
 /** Preview always DISPLAYS at this CSS size (scaled by zoom) regardless of
  *  which resolution is selected - the canvas's actual pixel buffer is set
@@ -124,6 +126,7 @@ export const HDRIPreviewPanel: React.FC = () => {
     ((window as unknown as { __lightforgeScene?: { scene: THREE.Scene } }).__lightforgeScene) ?? null;
 
   const lights = useLightsStore((s) => s.lights);
+  const objectHdriVersion = useObjectHdriStore((s) => s.version);
   const selectedLightId = useLightsStore((s) => s.selectedLightId);
   const updateLightTransform = useLightsStore((s) => s.updateLightTransform);
   const updateLight = useLightsStore((s) => s.updateLight);
@@ -134,6 +137,7 @@ export const HDRIPreviewPanel: React.FC = () => {
   const shapes = useHDRIShapesStore((s) => s.shapes);
   const selectedShapeId = useHDRIShapesStore((s) => s.selectedShapeId);
   const updateShape = useHDRIShapesStore((s) => s.updateShape);
+  const moveShapeAndGroup = useHDRIShapesStore((s) => s.moveShapeAndGroup);
   const selectedShapeData = shapes.find((s) => s.id === selectedShapeId) ?? null;
 
   const livePreview = useHDRIShapesStore((s) => s.livePreview);
@@ -146,6 +150,11 @@ export const HDRIPreviewPanel: React.FC = () => {
   const exposure = useSceneStore((s) => s.renderSettings.exposure);
   const setSceneExposure = useSceneStore((s) => s.setExposure);
   const [resIndex, setResIndex] = useState(2); // default 2K
+  // The Erik live link streams at whatever resolution is selected here.
+  const setErikLiveTarget = useErikLiveStore((s) => s.setTarget);
+  useEffect(() => {
+    setErikLiveTarget(RESOLUTIONS[resIndex].w, RESOLUTIONS[resIndex].h, RESOLUTIONS[resIndex].label);
+  }, [resIndex, setErikLiveTarget]);
   const [format, setFormat] = useState<'hdr' | 'exr'>('hdr');
   const [rendering, setRendering] = useState(false);
   const [exporting, setExporting] = useState(false);
@@ -365,7 +374,7 @@ export const HDRIPreviewPanel: React.FC = () => {
     return () => {
       if (timerRef.current) window.clearTimeout(timerRef.current);
     };
-  }, [livePreview, lights, environment, hdriAssets, shapes, resIndex, renderPreview]);
+  }, [livePreview, lights, environment, hdriAssets, shapes, resIndex, renderPreview, objectHdriVersion]);
 
   /** One-off render on request (e.g. right after a Blender/Maya bridge push),
    *  regardless of the livePreview toggle - skips the initial mount so this
@@ -404,6 +413,7 @@ export const HDRIPreviewPanel: React.FC = () => {
         height: res.h,
         format,
         environmentGlobalIntensity: environment.intensity ?? 1.0,
+        alsoExportSH: true,
         filename: `lightforge-${res.label}`,
       });
     } catch (e) {
@@ -485,7 +495,7 @@ export const HDRIPreviewPanel: React.FC = () => {
     if (!uv) return;
     draggingRef.current = true;
     (e.target as HTMLCanvasElement).setPointerCapture(e.pointerId);
-    updateShape(selectedShapeId, uv);
+    moveShapeAndGroup(selectedShapeId, uv.u, uv.v);
   };
 
   const handleCanvasPointerMove = (e: React.PointerEvent<HTMLCanvasElement>) => {
@@ -503,7 +513,7 @@ export const HDRIPreviewPanel: React.FC = () => {
     if (!selectedShapeId || selectedShapeData?.locked) return;
     const uv = uvFromEvent(e);
     if (!uv) return;
-    updateShape(selectedShapeId, uv);
+    moveShapeAndGroup(selectedShapeId, uv.u, uv.v);
   };
 
   const handleCanvasPointerUp = (e: React.PointerEvent<HTMLCanvasElement>) => {
@@ -632,7 +642,7 @@ export const HDRIPreviewPanel: React.FC = () => {
             display: 'flex',
             alignItems: 'center',
             gap: 2,
-            background: 'rgba(20,20,26,0.85)',
+            background: 'var(--bg-floating-glass)',
             border: '1px solid var(--border)',
             borderRadius: 4,
             padding: 2,
@@ -781,9 +791,9 @@ export const HDRIPreviewPanel: React.FC = () => {
           <div style={{ borderTop: '1px solid var(--border)', paddingTop: 8, marginTop: 2 }}>
             <div className="section-header" style={{ marginBottom: 6 }}>Transform — {selectedShapeData.name}</div>
             <MiniSlider label="Position X" value={selectedShapeData.u} min={0} max={1} step={0.001}
-              onChange={(v) => updateShape(selectedShapeData.id, { u: v })} />
+              onChange={(v) => moveShapeAndGroup(selectedShapeData.id, v, selectedShapeData.v)} />
             <MiniSlider label="Position Y" value={selectedShapeData.v} min={0} max={1} step={0.001}
-              onChange={(v) => updateShape(selectedShapeData.id, { v })} />
+              onChange={(v) => moveShapeAndGroup(selectedShapeData.id, selectedShapeData.u, v)} />
             {selectedShapeData.type !== 'circle' && (
               <MiniSlider label="Rotation" value={selectedShapeData.rotation} min={0} max={360} step={1} unit="°"
                 onChange={(v) => updateShape(selectedShapeData.id, { rotation: v })} />

@@ -76,6 +76,7 @@ export interface RenderSettings {
   shadowQuality: 'none' | 'low' | 'medium' | 'high';
   bloom: BloomSettings;
   ao: AOSettings;
+  gi: GISettings;
   ground: GroundSettings;
   vignette: VignetteSettings;
   colorGrading: ColorGradingSettings;
@@ -90,6 +91,17 @@ export interface RenderSettings {
 export interface VignetteSettings {
   enabled: boolean;
   intensity: number; // 0 - 1
+}
+
+/** Real-time global illumination via a single spherical-harmonics light
+ *  probe, periodically re-baked from a small cubemap capture centered on
+ *  the loaded model. Approximates one bounce of indirect light from the
+ *  environment AND the rest of the scene (ground, other objects) onto the
+ *  model - unlike scene.environment IBL alone, which only sees the HDRI/
+ *  gradient, never light bouncing off e.g. the reflective floor. */
+export interface GISettings {
+  enabled: boolean;
+  intensity: number; // 0 - 2
 }
 
 export interface ColorGradingSettings {
@@ -122,6 +134,9 @@ export const DEFAULT_RENDER_SETTINGS: RenderSettings = {
   shadowQuality: 'high',
   bloom: { enabled: true, intensity: 0.55, threshold: 0.7, radius: 0.6 },
   ao: { enabled: true, radius: 0.8, intensity: 0.6 },
+  // Off by default - a real GPU readback every bake, so it should be an
+  // explicit opt-in rather than a silent cost on every fresh scene.
+  gi: { enabled: false, intensity: 1.0 },
   ground: {
     // Off by default - a floor should be an explicit choice, not a surprise
     // that shows up in every fresh scene (and in every HDRI export).

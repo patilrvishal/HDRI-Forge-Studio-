@@ -1,5 +1,5 @@
 /**
- * HDRIExporter - Analytical HDRI generation for LightForge Studio.
+ * HDRIExporter - Analytical HDRI generation for HDRI Forge Studio.
  *
  * Generates true HDR (.hdr / .exr) equirectangular images from scene lights
  * using PURE MATHEMATICS - no CubeCamera, no proxy meshes, no WebGL rendering.
@@ -31,8 +31,20 @@
 import * as THREE from 'three';
 import { hdriBase64ToArrayBuffer } from '../store/hdriDataStore';
 import { useHDRIAssetStore } from '../store/hdriAssetStore';
+import { useHDRIShapesStore } from '../store/hdriShapesStore';
 import { useSceneStore } from '../store/sceneStore';
 import { RGBELoader } from 'three/addons/loaders/RGBELoader.js';
+import { EXRLoader } from 'three/addons/loaders/EXRLoader.js';
+import { isEXRBuffer } from '../utils/hdriFormat';
+import { HdriObjectCaster } from './HDRIObjects';
+import { compositeShapesCanvas, shapesCanvasToEnvLayer } from './HDRIShapesLayer';
+import { encodeEXRRGBA } from '../appearance/exr';
+import { getEditedImage, hasEdits, imageToDataTexture } from '../hdriedit/envSource';
+import { applyFilters, type FilterSpec } from '../filters/filters';
+import { blendValue } from '../appearance/evaluate';
+import type { AppearanceBlend } from '../appearance/types';
+import { encodeHDRRLE, computeAshSH9, formatAsh } from '../erikLive/hdriLiveEncode';
+import { getMatchGain } from '../erikLive/matchGain';
 
 // --------- Types ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 
@@ -59,7 +71,37 @@ interface ExtractedLight {
   groundColor?: THREE.Color;
   /** RectAreaLight only - 0..1, see the alpha-composite note in evaluateLightRadiance. */
   opacity?: number;
+  /** RectAreaLight only - Light Appearance RGBA texture (linear float, row 0 = top). */
+  tex?: { data: Float32Array; width: number; height: number };
+  /** RectAreaLight only - 0-100 emission spread (100 = Lambert, lower = tighter beam). */
+  spread?: number;
+  /** Composite this light belongs to and the composite's filter stack. */
+  compositeId?: string;
+  compositeFilters?: FilterSpec[];
+  compositeBlend?: AppearanceBlend;
+  /** Light list position (0 = top): top lights are painted over the ones below. */
+  layerIndex?: number;
+  blendMode?: AppearanceBlend;
+  blendInvert?: boolean;
 }
+
+/** Bilinear sample of a light appearance texture at (u,v) in 0..1, v=0 at the top. */
+function sampleLightTex(t: { data: Float32Array; width: number; height: number }, u: number, v: number, out: number[]): void {
+  const w = t.width, h = t.height;
+  const fx = Math.min(w - 1, Math.max(0, u * w - 0.5));
+  const fy = Math.min(h - 1, Math.max(0, v * h - 0.5));
+  const x0 = Math.floor(fx), y0 = Math.floor(fy);
+  const x1 = Math.min(w - 1, x0 + 1), y1 = Math.min(h - 1, y0 + 1);
+  const tx = fx - x0, ty = fy - y0;
+  const d = t.data;
+  const i00 = (y0 * w + x0) * 4, i10 = (y0 * w + x1) * 4, i01 = (y1 * w + x0) * 4, i11 = (y1 * w + x1) * 4;
+  for (let k = 0; k < 4; k++) {
+    const a = d[i00 + k] + (d[i10 + k] - d[i00 + k]) * tx;
+    const b = d[i01 + k] + (d[i11 + k] - d[i01 + k]) * tx;
+    out[k] = a + (b - a) * ty;
+  }
+}
+const _texOut = [0, 0, 0, 0];
 
 /**
  * One environment HDRI layer contributing to the export/preview.
@@ -92,47 +134,115 @@ export interface EnvLayer {
   /** -100..100, default 0 (no change). Desaturate toward luminance at
    *  -100, oversaturate at +100. */
   saturation?: number;
+  /** Rotation around X (pitch) and Z (roll), DEGREES. (Y is `rotation`, radians.) */
+  rotationX?: number;
+  rotationZ?: number;
+  /** Viewer offset inside the projection dome, metres, and the dome radius
+   *  (see HDRIAsset.offsetX). No effect unless an offset is non-zero. */
+  offsetX?: number;
+  offsetY?: number;
+  offsetZ?: number;
+  domeRadius?: number;
+  /** Mirror left/right. */
+  flipX?: boolean;
+  /** -180..180 degrees. */
+  hue?: number;
+  /** -100..100 cool..warm. */
+  temperature?: number;
+  /** -100..100 green..magenta. */
+  tint?: number;
+  /** -100..100, luminance-weighted tone controls. */
+  highlights?: number;
+  shadows?: number;
+  /** 0 = off; else soft-limit on peak radiance. */
+  peakLimit?: number;
 }
 
-/** Apply gamma -> contrast -> saturation to a linear RGB color, in that
- *  order (gamma reshapes the curve first, contrast pivots around the
- *  resulting mid-grey, saturation is a post-process on top of both) -
- *  shared by every place that samples a graded EnvLayer, so the HDRI
- *  Preview panel and the exported file always agree on the exact math. */
-function applyColorGrading(
-  color: THREE.Color,
-  contrast: number | undefined,
-  gamma: number | undefined,
-  saturation: number | undefined,
-): THREE.Color {
+type Grade = Pick<EnvLayer, 'contrast' | 'gamma' | 'saturation' | 'hue' | 'temperature' | 'tint' | 'highlights' | 'shadows' | 'peakLimit'>;
+
+function needsGrading(l: Grade): boolean {
+  return !!(l.contrast || l.saturation || (l.gamma !== undefined && l.gamma !== 1) || l.hue || l.temperature || l.tint
+    || l.highlights || l.shadows || l.peakLimit);
+}
+
+/** Grade a linear RGB colour: gamma -> contrast -> highlights/shadows -> white balance (temperature/tint) ->
+ *  hue -> saturation -> peak limit, in that order. Shared by every place that samples a graded EnvLayer, so
+ *  the HDRI Preview panel, the exported file and the Erik live link always agree on the exact math. All steps
+ *  are no-ops at their default values. */
+function applyColorGrading(color: THREE.Color, l: Grade): THREE.Color {
   let r = color.r, g = color.g, b = color.b;
 
-  if (gamma !== undefined && gamma !== 1) {
-    const invGamma = 1 / Math.max(0.01, gamma);
+  if (l.gamma !== undefined && l.gamma !== 1) {
+    const invGamma = 1 / Math.max(0.01, l.gamma);
     r = Math.pow(Math.max(0, r), invGamma);
     g = Math.pow(Math.max(0, g), invGamma);
     b = Math.pow(Math.max(0, b), invGamma);
   }
 
-  if (contrast) {
+  if (l.contrast) {
     // -100..100 -> a multiplicative factor pivoted at 0.5 (mid-grey in
     // display space) - values above 1.0 stay proportionally more extreme
     // instead of clamping, since this operates in unbounded HDR space.
-    const factor = (100 + contrast) / 100;
+    const factor = (100 + l.contrast) / 100;
     r = (r - 0.5) * factor + 0.5;
     g = (g - 0.5) * factor + 0.5;
     b = (b - 0.5) * factor + 0.5;
   }
 
-  if (saturation) {
+  if (l.highlights || l.shadows) {
+    // Weight by luminance relative to mid-grey (0.18): ~1 for darks, ~0 for brights.
+    const lum = Math.max(0, r * 0.2126 + g * 0.7152 + b * 0.0722);
+    const x = lum / 0.18;
+    const wShadow = 1 / (1 + x * x);
+    const wHigh = 1 - wShadow;
+    const s = (1 + ((l.shadows ?? 0) / 100) * 0.8 * wShadow) * (1 + ((l.highlights ?? 0) / 100) * 0.8 * wHigh);
+    r *= s; g *= s; b *= s;
+  }
+
+  if (l.temperature || l.tint) {
+    const t = (l.temperature ?? 0) / 100;
+    const u = (l.tint ?? 0) / 100;
+    r *= (1 + 0.35 * t) * (1 + 0.1 * u);
+    b *= (1 - 0.35 * t) * (1 + 0.1 * u);
+    g *= 1 - 0.3 * u;
+  }
+
+  if (l.hue) {
+    const a = (l.hue * Math.PI) / 180;
+    const c = Math.cos(a), s = Math.sin(a);
+    const nr = r * (0.213 + c * 0.787 - s * 0.213) + g * (0.715 - c * 0.715 - s * 0.715) + b * (0.072 - c * 0.072 + s * 0.928);
+    const ng = r * (0.213 - c * 0.213 + s * 0.143) + g * (0.715 + c * 0.285 + s * 0.140) + b * (0.072 - c * 0.072 - s * 0.283);
+    const nb = r * (0.213 - c * 0.213 - s * 0.787) + g * (0.715 - c * 0.715 + s * 0.715) + b * (0.072 + c * 0.928 + s * 0.072);
+    r = nr; g = ng; b = nb;
+  }
+
+  if (l.saturation) {
     const lum = r * 0.2126 + g * 0.7152 + b * 0.0722;
-    const factor = (100 + saturation) / 100;
+    const factor = (100 + l.saturation) / 100;
     r = lum + (r - lum) * factor;
     g = lum + (g - lum) * factor;
     b = lum + (b - lum) * factor;
   }
 
-  return new THREE.Color(Math.max(0, r), Math.max(0, g), Math.max(0, b));
+  r = Math.max(0, r); g = Math.max(0, g); b = Math.max(0, b);
+
+  if (l.peakLimit && l.peakLimit > 0) {
+    // Soft knee at 80% of the limit, hue-preserving (scales all channels together).
+    const cap = l.peakLimit, knee = cap * 0.8;
+    const m = Math.max(r, g, b);
+    if (m > knee) {
+      const m2 = knee + (cap - knee) * Math.tanh((m - knee) / (cap - knee));
+      const k = m2 / m;
+      r *= k; g *= k; b *= k;
+    }
+  }
+
+  return new THREE.Color(r, g, b);
+}
+
+/** Thrown by generateAnalyticalHDRI when options.isCancelled() reports true. */
+export class HDRICancelled extends Error {
+  constructor() { super('HDRI render cancelled'); this.name = 'HDRICancelled'; }
 }
 
 /** Options for the main downloadHDRI() entry point. */
@@ -150,6 +260,8 @@ export interface HDRIExportOptions {
   environmentLayers?: EnvLayer[];
   /** Global multiplier applied on top of each layer's own intensity. */
   environmentGlobalIntensity?: number;
+  /** Also download a matching Erik spherical-harmonics (.ash) file for diffuse lighting. */
+  alsoExportSH?: boolean;
   /** Legacy single-texture fields - used only if no layers are found. */
   includeEnvironment?: boolean;
   environmentTexture?: THREE.Texture | null;
@@ -191,6 +303,18 @@ const GAUSSIAN_SOFTNESS = 1.5;
  *   Too dark                -> raise it (2, 5, 10)
  */
 const EXPORT_EXPOSURE = 200.0;
+
+/**
+ * Let other tasks (UI events, a newer edit cancelling this render) run. MessageChannel instead of setTimeout(0):
+ * timers are throttled to ~1/s while the window is hidden or covered, which would stall a live render for minutes.
+ */
+function yieldToEventLoop(): Promise<void> {
+  return new Promise<void>((resolve) => {
+    const ch = new MessageChannel();
+    ch.port1.onmessage = () => { ch.port1.close(); resolve(); };
+    ch.port2.postMessage(0);
+  });
+}
 
 // --------- FUNCTION 1: pixelToDirection ------------------------------------------------------------------------------------------------------------------------------------
 
@@ -456,24 +580,40 @@ function evaluateLightRadiance(
       const ny = Math.abs(ly) / Math.tan(Math.min(halfH, 1.55));
       if (nx > 1 || ny > 1) break; // outside the rectangle's true footprint
 
-      const feather = Math.max(0, Math.min(1, (light.edgeSoftness ?? 50) / 100));
-      const featherLo = 1 - feather;
-      const edge = Math.max(nx, ny); // Chebyshev distance = box falloff
-      const coverage = feather < 0.01 ? 1 : 1 - smoothstepHDRI((edge - featherLo) / Math.max(0.001, 1 - featherLo));
+      let coverage: number;
+      let tr = 1, tg = 1, tb = 1;
+      if (light.tex) {
+        // Light Appearance: the RGBA texture defines both the shape (alpha) and the
+        // colour/brightness pattern. u runs to the viewer's right = the light's -X.
+        const tanW = Math.tan(Math.min(halfW, 1.55));
+        const tanH = Math.tan(Math.min(halfH, 1.55));
+        sampleLightTex(light.tex, 0.5 - 0.5 * (lx / tanW), 0.5 - 0.5 * (ly / tanH), _texOut);
+        coverage = Math.max(0, Math.min(1, _texOut[3]));
+        tr = _texOut[0]; tg = _texOut[1]; tb = _texOut[2];
+      } else {
+        const feather = Math.max(0, Math.min(1, (light.edgeSoftness ?? 50) / 100));
+        const featherLo = 1 - feather;
+        const edge = Math.max(nx, ny); // Chebyshev distance = box falloff
+        coverage = feather < 0.01 ? 1 : 1 - smoothstepHDRI((edge - featherLo) / Math.max(0.001, 1 - featherLo));
+      }
       if (coverage <= 0) break;
 
-      // Cosine emission factor (Lambert's law for the area surface)
-      const cosEmit = Math.max(0, -(centerDir.x * lightNormal.x + centerDir.y * lightNormal.y + centerDir.z * lightNormal.z));
+      // Cosine emission factor (Lambert's law for the area surface). Spread < 100 narrows
+      // the lobe: cos^n with n = 1 at 100 rising to 11 at 0.
+      let cosEmit = Math.max(0, -(centerDir.x * lightNormal.x + centerDir.y * lightNormal.y + centerDir.z * lightNormal.z));
+      if (light.spread !== undefined && light.spread < 100) {
+        cosEmit = Math.pow(cosEmit, 1 + (100 - Math.max(0, light.spread)) / 10);
+      }
 
       // Radiance: intensity * cosEmit / solidAngle * coverage. Area lights
       // in studio HDRI should be 200-2000 range (Stage 3).
       const solidAngle = 4 * halfW * halfH;
       const safeSA = Math.max(1e-6, solidAngle);
-      const radiance = (light.intensity * cosEmit * coverage * 0.5 * EXPORT_EXPOSURE) / safeSA;
+      const radiance = (light.intensity * cosEmit * (light.tex ? 1 : coverage) * 0.5 * EXPORT_EXPOSURE) / safeSA;
 
-      result.r = light.color.r * radiance;
-      result.g = light.color.g * radiance;
-      result.b = light.color.b * radiance;
+      result.r = light.color.r * radiance * tr;
+      result.g = light.color.g * radiance * tg;
+      result.b = light.color.b * radiance * tb;
       result.coverage = coverage;
       break;
     }
@@ -605,11 +745,23 @@ export async function generateAnalyticalHDRI(
   height: number,
   capturePoint: THREE.Vector3,
   envLayers: EnvLayer[] = [],
+  options: {
+    includeAreaModeLights?: boolean;
+    /** Polled between row batches; return true to abandon this render (throws HDRICancelled). */
+    isCancelled?: () => boolean;
+    /** Rows between event-loop yields (default 100). Smaller keeps the UI responsive in live mode. */
+    yieldEveryRows?: number;
+  } = {},
 ): Promise<Float32Array> {
+  const yieldEvery = Math.max(1, options.yieldEveryRows ?? 100);
   const pixels = new Float32Array(width * height * 4);
 
   // Extract all lights from scene
-  const lights = extractLightsFromScene(scene);
+  const allLights = extractLightsFromScene(scene, !!options.includeAreaModeLights);
+  // Lights in a Composite that carries filters are rendered as one image, filtered, then laid on top.
+  const isFiltered = (l: ExtractedLight) => !!l.compositeId && !!l.compositeFilters;
+  const lights = allLights.filter((l) => !isFiltered(l));
+  const groupLights = allLights.filter(isFiltered);
   console.log('[LightForge] Found lights:', lights.length);
 lights.forEach((l, i) => {
     console.log(`[LightForge] Light ${i}: type=${l.type} R=${l.color.r.toFixed(3)} G=${l.color.g.toFixed(3)} B=${l.color.b.toFixed(3)} intensity=${l.intensity}`);
@@ -620,6 +772,33 @@ lights.forEach((l, i) => {
   // multiply on the final summed radiance (so it darkens whatever's actually
   // there - env, other lights - the same way a real drop shadow layer would).
   const shadowPatches = buildLightShadowPatches(lights, capturePoint);
+
+  // Objects the user switched to 'Include in HDRI': ray-cast per pixel so their
+  // real silhouette is painted and lights behind them are occluded.
+  // Per-layer orientation setup, done once (not per pixel).
+  const D2R = Math.PI / 180;
+  const scratchDir = new THREE.Vector3();
+  const prep = envLayers.map((l) => {
+    const rx = (l.rotationX ?? 0) * D2R, rz = (l.rotationZ ?? 0) * D2R;
+    let m: number[] | null = null;
+    if (rx || rz) {
+      // dirTex = Rz(-rz) * Rx(-rx) * dir  (X first, then Z; the Y yaw is applied last, inside sampleEnvTexture)
+      const cx = Math.cos(-rx), sx = Math.sin(-rx), cz = Math.cos(-rz), sz = Math.sin(-rz);
+      m = [cz, -sz * cx, sz * sx, sz, cz * cx, -cz * sx, 0, sx, cx];
+    }
+    let off: { o: number[]; R: number; c: number } | null = null;
+    const ox = l.offsetX ?? 0, oy = l.offsetY ?? 0, oz = l.offsetZ ?? 0;
+    if (ox || oy || oz) {
+      const R = Math.max(0.01, l.domeRadius ?? 50);
+      let o = [ox, oy, oz];
+      const len = Math.hypot(ox, oy, oz);
+      if (len >= R * 0.98) o = o.map((v) => (v / len) * R * 0.98); // keep the viewer inside the dome
+      off = { o, R, c: o[0] * o[0] + o[1] * o[1] + o[2] * o[2] - R * R };
+    }
+    return { m, off, flip: !!l.flipX, grade: needsGrading(l) };
+  });
+  const objCaster = HdriObjectCaster.build(scene);
+  const lightDist = lights.map((l) => (l.type === 'directional' || l.type === 'hemisphere' ? Infinity : l.position.distanceTo(capturePoint)));
   // For each pixel, calculate analytical radiance
   for (let y = 0; y < height; y++) {
     // Pre-compute solid angle for this row
@@ -648,10 +827,32 @@ lights.forEach((l, i) => {
       // the "everything else disappears" bug fixed earlier this session.
       for (let i = 0; i < envLayers.length; i++) {
         const layer = envLayers[i];
-        const raw = sampleEnvTexture(layer.texture, dir, layer.rotation, layer.intensity);
-        const e = (layer.contrast || layer.saturation || (layer.gamma !== undefined && layer.gamma !== 1))
-          ? applyColorGrading(raw, layer.contrast, layer.gamma, layer.saturation)
-          : raw;
+        const pp = prep[i];
+        // Orientation pipeline per pixel: dome offset (parallax) -> X/Z rotation -> flip -> Y yaw (inside sampleEnvTexture).
+        let sd = dir;
+        if (pp.off || pp.m || pp.flip) {
+          let dx = dir.x, dy = dir.y, dz = dir.z;
+          if (pp.off) {
+            const o = pp.off.o;
+            const bq = o[0] * dx + o[1] * dy + o[2] * dz;
+            const t = -bq + Math.sqrt(Math.max(0, bq * bq - pp.off.c));
+            const px = o[0] + t * dx, py = o[1] + t * dy, pz = o[2] + t * dz;
+            const inv = 1 / Math.max(1e-9, Math.hypot(px, py, pz, 0));
+            dx = px * inv; dy = py * inv; dz = pz * inv;
+          }
+          if (pp.m) {
+            const m = pp.m;
+            const nx = m[0] * dx + m[1] * dy + m[2] * dz;
+            const ny = m[3] * dx + m[4] * dy + m[5] * dz;
+            const nz = m[6] * dx + m[7] * dy + m[8] * dz;
+            dx = nx; dy = ny; dz = nz;
+          }
+          if (pp.flip) dz = -dz;
+          scratchDir.set(dx, dy, dz);
+          sd = scratchDir;
+        }
+        const raw = sampleEnvTexture(layer.texture, sd, layer.rotation, layer.intensity);
+        const e = pp.grade ? applyColorGrading(raw, layer) : raw;
 
         if (layer.opacity !== undefined) {
           const alpha = Math.max(0, Math.min(1, layer.opacity / 100));
@@ -685,17 +886,41 @@ lights.forEach((l, i) => {
       // Every other light type has no physical footprint (a point/spot/
       // directional/hemisphere light is just a glow, not a card), so they
       // stay purely additive, same as before.
-      for (let i = 0; i < lights.length; i++) {
-        const c = evaluateLightRadiance(lights[i], dir, capturePoint);
-        if (c.coverage !== undefined) {
-          const alpha = Math.max(0, Math.min(1, c.coverage * (lights[i].opacity ?? 1)));
-          r = r * (1 - alpha) + c.r * alpha;
-          g = g * (1 - alpha) + c.g * alpha;
-          b = b * (1 - alpha) + c.b * alpha;
-        } else {
-          r += c.r;
-          g += c.g;
-          b += c.b;
+      const objHit = objCaster ? objCaster.cast(capturePoint, dir) : null;
+      // Pass 0: lights behind an included object (or every light when none is hit),
+      // pass 1: the object itself, pass 2: lights in front of it.
+      for (let pass = 0; pass < 3; pass++) {
+        if (pass === 1) {
+          if (objHit) {
+            r = r * (1 - objHit.alpha) + objHit.r * objHit.alpha;
+            g = g * (1 - objHit.alpha) + objHit.g * objHit.alpha;
+            b = b * (1 - objHit.alpha) + objHit.b * objHit.alpha;
+          }
+          continue;
+        }
+        if (pass === 2 && !objHit) break;
+        for (let i = 0; i < lights.length; i++) {
+          if (objHit && (lightDist[i] > objHit.dist) !== (pass === 0)) continue;
+          const c = evaluateLightRadiance(lights[i], dir, capturePoint);
+          if (c.coverage !== undefined) {
+            const alpha = Math.max(0, Math.min(1, c.coverage * (lights[i].opacity ?? 1)));
+            const bm = lights[i].blendMode ?? 'normal';
+            let cr = c.r, cg = c.g, cb = c.b;
+            if (lights[i].blendInvert) { cr = Math.max(0, 1 - cr); cg = Math.max(0, 1 - cg); cb = Math.max(0, 1 - cb); }
+            if (bm === 'normal') {
+              r = r * (1 - alpha) + cr * alpha;
+              g = g * (1 - alpha) + cg * alpha;
+              b = b * (1 - alpha) + cb * alpha;
+            } else {
+              r += (blendValue(bm, r, cr) - r) * alpha;
+              g += (blendValue(bm, g, cg) - g) * alpha;
+              b += (blendValue(bm, b, cb) - b) * alpha;
+            }
+          } else {
+            r += c.r;
+            g += c.g;
+            b += c.b;
+          }
         }
       }
 
@@ -731,11 +956,67 @@ lights.forEach((l, i) => {
       pixels[idx + 3] = 1.0;
     }
 
-    // Log progress every 100 rows + yield to event loop
-    if (y % 100 === 0) {
-      const pct = Math.round((y / height) * 100);
-      console.log(`[LightForge HDRI] ${pct}% complete`);
-      await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    // Yield to the event loop periodically (and let a live render be cancelled)
+    if (y % yieldEvery === 0) {
+      if (yieldEvery === 100) {
+        console.log(`[HDRI Forge] ${Math.round((y / height) * 100)}% complete`);
+      }
+      await yieldToEventLoop();
+      if (options.isCancelled?.()) throw new HDRICancelled();
+    }
+  }
+
+  // Composite groups with filters: render each group's lights alone into a premultiplied
+  // image, run its Diffusion / Motion filters on the whole thing, then composite over the map.
+  if (groupLights.length) {
+    const groups = new Map<string, ExtractedLight[]>();
+    for (const l of groupLights) {
+      const k = l.compositeId as string;
+      if (!groups.has(k)) groups.set(k, []);
+      groups.get(k)!.push(l);
+    }
+    for (const members of groups.values()) {
+      const filters = members[0].compositeFilters as FilterSpec[];
+      const rgb = new Float32Array(width * height * 4);
+      const alpha = new Float32Array(width * height * 4);
+      for (let y = 0; y < height; y++) {
+        for (let x = 0; x < width; x++) {
+          const dir = pixelToDirection(x, y, width, height);
+          let r = 0, g = 0, b = 0, a = 0;
+          for (const l of members) {
+            const c = evaluateLightRadiance(l, dir, capturePoint);
+            if (c.coverage !== undefined) {
+              const al = Math.max(0, Math.min(1, c.coverage * (l.opacity ?? 1)));
+              r = r * (1 - al) + c.r * al; g = g * (1 - al) + c.g * al; b = b * (1 - al) + c.b * al; a = a * (1 - al) + al;
+            } else { r += c.r; g += c.g; b += c.b; }
+          }
+          const i = (y * width + x) * 4;
+          rgb[i] = r; rgb[i + 1] = g; rgb[i + 2] = b; rgb[i + 3] = 1;
+          alpha[i] = alpha[i + 1] = alpha[i + 2] = a; alpha[i + 3] = 1;
+        }
+        if (y % 64 === 0) await yieldToEventLoop();
+      }
+      const blend = members[0].compositeBlend ?? 'normal';
+      const frgb = filters.some((f) => f.enabled) ? applyFilters({ data: rgb, width, height }, filters, true) : rgb;
+      // the coverage image is blurred the same way but must not be renormalised
+      const afilters = filters.map((f) => ({ ...f, params: { ...f.params, energy: false } })) as FilterSpec[];
+      const fal = filters.some((f) => f.enabled) ? applyFilters({ data: alpha, width, height }, afilters, true) : alpha;
+      for (let i = 0; i < width * height; i++) {
+        const a = Math.max(0, Math.min(1, fal[i * 4]));
+        if (blend === 'normal') {
+          pixels[i * 4] = pixels[i * 4] * (1 - a) + frgb[i * 4];
+          pixels[i * 4 + 1] = pixels[i * 4 + 1] * (1 - a) + frgb[i * 4 + 1];
+          pixels[i * 4 + 2] = pixels[i * 4 + 2] * (1 - a) + frgb[i * 4 + 2];
+        } else {
+          // other blend modes work on the un-premultiplied colour of the group
+          const inv = a > 1e-6 ? 1 / a : 0;
+          for (let c = 0; c < 3; c++) {
+            const base = pixels[i * 4 + c];
+            const top = frgb[i * 4 + c] * inv;
+            pixels[i * 4 + c] = base + (blendValue(blend, base, top) - base) * a;
+          }
+        }
+      }
     }
   }
 
@@ -748,14 +1029,14 @@ lights.forEach((l, i) => {
     if (m > 0.001) nonBlackCount++;
   }
   const totalPixels = width * height;
-  console.log(`[LightForge HDRI] Max pixel value: ${maxVal.toFixed(1)}`);
-  console.log(`[LightForge HDRI] Non-black pixels: ${nonBlackCount} / ${totalPixels} (${((nonBlackCount / totalPixels) * 100).toFixed(1)}%)`);
-  console.log(`[LightForge HDRI] True HDR: ${maxVal > 1.0}`);
+  console.log(`[HDRI Forge] Max pixel value: ${maxVal.toFixed(1)}`);
+  console.log(`[HDRI Forge] Non-black pixels: ${nonBlackCount} / ${totalPixels} (${((nonBlackCount / totalPixels) * 100).toFixed(1)}%)`);
+  console.log(`[HDRI Forge] True HDR: ${maxVal > 1.0}`);
   if (maxVal <= 1.0) {
-    console.warn('[LightForge HDRI] WARNING: Max pixel value <= 1.0 - output is LDR, not HDR!');
+    console.warn('[HDRI Forge] WARNING: Max pixel value <= 1.0 - output is LDR, not HDR!');
   }
   if (nonBlackCount === 0) {
-    console.error('[LightForge HDRI] ERROR: All pixels are black! No lights found or all lights out of range.');
+    console.error('[HDRI Forge] ERROR: All pixels are black! No lights found or all lights out of range.');
   }
 
   return pixels;
@@ -777,8 +1058,10 @@ lights.forEach((l, i) => {
  * @param scene - The THREE.Scene to traverse.
  * @returns Array of extracted light data objects.
  */
-function extractLightsFromScene(scene: THREE.Scene): ExtractedLight[] {
+function extractLightsFromScene(scene: THREE.Scene, includeAreaMode = false): ExtractedLight[] {
   const lights: ExtractedLight[] = [];
+  let tag: { compositeId?: string; compositeFilters?: FilterSpec[]; compositeBlend?: AppearanceBlend; layerIndex?: number; blendMode?: AppearanceBlend; blendInvert?: boolean } = {};
+  const push = (l: ExtractedLight) => { lights.push({ ...l, ...tag }); };
   const worldPos = new THREE.Vector3();
   const worldQuat = new THREE.Quaternion();
 
@@ -791,11 +1074,12 @@ function extractLightsFromScene(scene: THREE.Scene): ExtractedLight[] {
     // Skip AmbientLight - no position/direction, adds uniform light to all pixels
     if (child instanceof THREE.AmbientLight) return;
 
+    tag = { compositeId: child.userData.compositeId, compositeFilters: child.userData.compositeFilters as FilterSpec[] | undefined, compositeBlend: child.userData.compositeBlend as AppearanceBlend | undefined, layerIndex: child.userData.layerIndex as number | undefined, blendMode: child.userData.blendMode as AppearanceBlend | undefined, blendInvert: child.userData.blendInvert as boolean | undefined };
     child.getWorldPosition(worldPos);
 
     // ------ PointLight ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------
     if (child instanceof THREE.PointLight) {
-      lights.push({
+      push({
         type: 'point',
         color: child.color.clone(),
         intensity: child.intensity,
@@ -809,7 +1093,7 @@ function extractLightsFromScene(scene: THREE.Scene): ExtractedLight[] {
     if (child instanceof THREE.SpotLight) {
       const dir = new THREE.Vector3();
       child.getWorldDirection(dir);
-      lights.push({
+      push({
         type: 'spot',
         color: child.color.clone(),
         intensity: child.intensity,
@@ -826,7 +1110,7 @@ function extractLightsFromScene(scene: THREE.Scene): ExtractedLight[] {
     if (child instanceof THREE.DirectionalLight) {
       const dir = new THREE.Vector3();
       child.getWorldDirection(dir);
-      lights.push({
+      push({
         type: 'directional',
         color: child.color.clone(),
         intensity: child.intensity,
@@ -838,13 +1122,21 @@ function extractLightsFromScene(scene: THREE.Scene): ExtractedLight[] {
 
     // ------ RectAreaLight ------------------------------------------------------------------------------------------------------------------------------------------------------------------
     if (child instanceof THREE.RectAreaLight) {
+      // Area Light mode lights are real 3D emitters - they are delivered as textures,
+      // not painted into the HDRI, unless the caller asks for them.
+      if (child.userData.areaMode && !includeAreaMode) return;
+      const tex = child.userData.appearanceTex as ExtractedLight['tex'];
       child.getWorldQuaternion(worldQuat);
       const right = new THREE.Vector3(1, 0, 0).applyQuaternion(worldQuat);
       const up = new THREE.Vector3(0, 1, 0).applyQuaternion(worldQuat);
       const normal = new THREE.Vector3(0, 0, -1).applyQuaternion(worldQuat);
-      lights.push({
+      push({
         type: 'area',
-        color: child.color.clone(),
+        // With a texture the RectAreaLight colour carries the texture's mean; the exporter
+        // samples the texture itself, so use the untouched tint here.
+        color: tex && child.userData.baseColor ? (child.userData.baseColor as THREE.Color).clone() : child.color.clone(),
+        tex,
+        spread: typeof child.userData.spread === 'number' ? child.userData.spread : undefined,
         intensity: child.intensity,
         position: worldPos.clone(),
         width: child.width,
@@ -870,6 +1162,9 @@ function extractLightsFromScene(scene: THREE.Scene): ExtractedLight[] {
       return;
     }
   });
+
+  // Light list order is paint order: the top of the list renders over the lights below it.
+  lights.sort((a, b) => (b.layerIndex ?? 0) - (a.layerIndex ?? 0));
 
   return lights;
 }
@@ -1045,7 +1340,7 @@ function sRGBToLinear(c: number): number {
  *
  * Header format (exact):
  *   #?RADIANCE\n
- *   SOFTWARE=LightForge Studio\n
+ *   SOFTWARE=HDRI Forge Studio\n
  *   FORMAT=32-bit_rle_rgbe\n
  *   EXPOSURE=1.0\n
  *   \n
@@ -1063,29 +1358,11 @@ export function encodeHDR(
   width: number,
   height: number,
 ): ArrayBuffer {
-  const headerText =
-    '#?RADIANCE\n' +
-    'SOFTWARE=LightForge Studio\n' +
-    'FORMAT=32-bit_rle_rgbe\n' +
-    'EXPOSURE=1.0\n' +
-    `\n-Y ${height} +X ${width}\n`;
-  const headerBytes = new TextEncoder().encode(headerText);
-
-  const pixelDataSize = width * height * 4;
-  const pixelData = new Uint8Array(pixelDataSize);
-
-  for (let i = 0; i < width * height; i++) {
-    const r = pixels[i * 4];
-    const g = pixels[i * 4 + 1];
-    const b = pixels[i * 4 + 2];
-    rgbFloatToRGBE(r, g, b, pixelData, i * 4);
-  }
-
-  const buffer = new ArrayBuffer(headerBytes.length + pixelDataSize);
-  const view = new Uint8Array(buffer);
-  view.set(headerBytes, 0);
-  view.set(pixelData, headerBytes.length);
-  return buffer;
+  // Writes real new-style RLE scanlines to match the FORMAT=32-bit_rle_rgbe header.
+  // The previous version wrote flat scanlines under that same header, which the Erik
+  // engine rendered as a black viewport. Decoded values are identical; files are smaller.
+  const rle = encodeHDRRLE(pixels, width, height);
+  return rle.buffer.slice(rle.byteOffset, rle.byteOffset + rle.byteLength) as ArrayBuffer;
 }
 
 /**
@@ -1159,156 +1436,10 @@ export function encodeEXR(
   width: number,
   height: number,
 ): ArrayBuffer {
-  const CHANNEL_NAMES = ['B', 'G', 'R'] as const;
-  const PIXEL_TYPE_FLOAT = 2;
-  const NUM_CHANNELS = 3;
-  const BYTES_PER_PIXEL = NUM_CHANNELS * 4;
-  const SCANLINE_DATA_SIZE = width * BYTES_PER_PIXEL;
-
-  // ------ Low-level write helpers ------------------------------------------------------------------------------------------------------------------------------------------
-  const intToBytes = (val: number): number[] => [
-    val & 0xff,
-    (val >>> 8) & 0xff,
-    (val >>> 16) & 0xff,
-    (val >>> 24) & 0xff,
-  ];
-
-  const floatToBytes = (val: number): number[] => {
-    const buf = new ArrayBuffer(4);
-    new DataView(buf).setFloat32(0, val, true);
-    return [...new Uint8Array(buf)];
-  };
-
-  const writeName = (arr: number[], str: string): void => {
-    const bytes = new TextEncoder().encode(str);
-    for (const b of bytes) arr.push(b);
-    arr.push(0);
-  };
-
-  const writeChannelEntry = (arr: number[], name: string): void => {
-    const bytes = new TextEncoder().encode(name);
-    for (const b of bytes) arr.push(b);
-    arr.push(0);
-    const nameLen = bytes.length + 1;
-    const pad = (4 - (nameLen % 4)) % 4;
-    for (let i = 0; i < pad; i++) arr.push(0);
-    // pixel_type(i32) + pLinear(u32) + x_sampling(u32) + y_sampling(u32)
-    for (const v of intToBytes(PIXEL_TYPE_FLOAT)) arr.push(v);
-    for (const v of intToBytes(0)) arr.push(v);
-    for (const v of intToBytes(1)) arr.push(v);
-    for (const v of intToBytes(1)) arr.push(v);
-  };
-
-  const writeAttrValue = (arr: number[], valueBytes: number[]): void => {
-    for (const v of intToBytes(valueBytes.length)) arr.push(v);
-    for (const b of valueBytes) arr.push(b);
-    const pad = (4 - (valueBytes.length % 4)) % 4;
-    for (let i = 0; i < pad; i++) arr.push(0);
-  };
-
-  // ------ Build header attributes ------------------------------------------------------------------------------------------------------------------------------------------
-  const hdr: number[] = [];
-
-  // 1) channels (chlist)
-  writeName(hdr, 'channels');
-  writeName(hdr, 'chlist');
-  const channelData: number[] = [];
-  for (const chName of CHANNEL_NAMES) {
-    writeChannelEntry(channelData, chName);
-  }
-  channelData.push(0);
-  writeAttrValue(hdr, channelData);
-
-  // 2) compression
-  writeName(hdr, 'compression');
-  writeName(hdr, 'compression');
-  writeAttrValue(hdr, [0]);
-
-  // 3) dataWindow (box2i)
-  writeName(hdr, 'dataWindow');
-  writeName(hdr, 'box2i');
-  writeAttrValue(hdr, [
-    ...intToBytes(0), ...intToBytes(0),
-    ...intToBytes(width - 1), ...intToBytes(height - 1),
-  ]);
-
-  // 4) displayWindow (box2i)
-  writeName(hdr, 'displayWindow');
-  writeName(hdr, 'box2i');
-  writeAttrValue(hdr, [
-    ...intToBytes(0), ...intToBytes(0),
-    ...intToBytes(width - 1), ...intToBytes(height - 1),
-  ]);
-
-  // 5) lineOrder
-  writeName(hdr, 'lineOrder');
-  writeName(hdr, 'lineOrder');
-  writeAttrValue(hdr, [0]);
-
-  // 6) pixelAspectRatio
-  writeName(hdr, 'pixelAspectRatio');
-  writeName(hdr, 'float');
-  writeAttrValue(hdr, floatToBytes(1.0));
-
-  // 7) screenWindowCenter (v2f)
-  writeName(hdr, 'screenWindowCenter');
-  writeName(hdr, 'v2f');
-  writeAttrValue(hdr, [...floatToBytes(0.0), ...floatToBytes(0.0)]);
-
-  // 8) screenWindowWidth
-  writeName(hdr, 'screenWindowWidth');
-  writeName(hdr, 'float');
-  writeAttrValue(hdr, floatToBytes(1.0));
-
-  // End of header
-  hdr.push(0);
-  while (hdr.length % 8 !== 0) hdr.push(0);
-
-  const fileHeaderSize = 8;
-  const headerSize = hdr.length;
-  const offsetTableSize = height * 8;
-  const scanlineDataStart = fileHeaderSize + headerSize + offsetTableSize;
-  const scanlineBlockSize = 4 + 4 + SCANLINE_DATA_SIZE;
-
-  // ------ Offset table ------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-  const offsets: number[] = [];
-  for (let y = 0; y < height; y++) {
-    offsets.push(scanlineDataStart + y * scanlineBlockSize);
-  }
-
-  // ------ Scanline pixel data ---------------------------------------------------------------------------------------------------------------------------------------------------
-  const scanlines: number[] = [];
-  for (let y = 0; y < height; y++) {
-    for (const v of intToBytes(y)) scanlines.push(v);
-    for (const v of intToBytes(SCANLINE_DATA_SIZE)) scanlines.push(v);
-    for (let x = 0; x < width; x++) {
-      const srcIdx = (y * width + x) * 4;
-      for (const b of floatToBytes(pixels[srcIdx + 2])) scanlines.push(b); // B
-      for (const b of floatToBytes(pixels[srcIdx + 1])) scanlines.push(b); // G
-      for (const b of floatToBytes(pixels[srcIdx])) scanlines.push(b);     // R
-    }
-  }
-
-  // ------ Assemble file ---------------------------------------------------------------------------------------------------------------------------------------------------------------------
-  const totalSize = fileHeaderSize + headerSize + offsetTableSize + scanlines.length;
-  const file = new Uint8Array(totalSize);
-  const dv = new DataView(file.buffer);
-
-  dv.setUint32(0, 20000630, true);
-  dv.setUint32(4, 2, true);
-
-  file.set(new Uint8Array(hdr), 8);
-
-  const offsetBase = fileHeaderSize + headerSize;
-  for (let y = 0; y < height; y++) {
-    const off = offsets[y];
-    dv.setUint32(offsetBase + y * 8, off & 0xffffffff, true);
-    dv.setUint32(offsetBase + y * 8 + 4, Math.floor(off / 0x100000000) & 0xffffffff, true);
-  }
-
-  file.set(new Uint8Array(scanlines), scanlineDataStart);
-
-  return file.buffer;
+  // Delegates to the shared writer: planar per-scanline channels (B,G,R) as the format
+  // requires. The previous inline writer interleaved channels per pixel, which readers
+  // such as three.js EXRLoader could not parse.
+  return encodeEXRRGBA(pixels, width, height, false);
 }
 
 // --------- FUNCTION 8: downloadHDRI ---------------------------------------------------------------------------------------------------------------------------------------------
@@ -1339,13 +1470,21 @@ export async function downloadHDRI(
     options.environmentLayers ??
     (await loadActiveHDRILayers(options.environmentGlobalIntensity ?? 1.0));
 
-  // Gradient background acts as its own environment layer, same as a real
-  // loaded HDRI, so the exported file matches what the HDRI Preview panel
-  // shows instead of coming out black whenever no real .hdr is active.
+  // Gradient background AND HDRI Shapes act as their own environment layer(s),
+  // same as a real loaded HDRI, so the exported file matches what the HDRI
+  // Preview panel shows instead of coming out black (or silently missing any
+  // painted shapes) whenever no real .hdr is active. Mirrors the exact same
+  // shapes-take-priority-over-plain-gradient logic HDRIPreviewPanel uses when
+  // building its own live-preview layer stack, so preview and export never drift.
   if (!options.environmentLayers) {
     const gb = useSceneStore.getState().environment.gradientBackground;
-    if (gb?.enabled) {
-      layers.push(gradientToEnvLayer(gb, options.environmentGlobalIntensity ?? 1.0));
+    const currentShapes = useHDRIShapesStore.getState().shapes;
+    const globalIntensity = options.environmentGlobalIntensity ?? 1.0;
+    if (currentShapes.length > 0) {
+      const canvas = compositeShapesCanvas(currentShapes, gb?.enabled ? gb : null);
+      layers.push(shapesCanvasToEnvLayer(canvas, globalIntensity));
+    } else if (gb?.enabled) {
+      layers.push(gradientToEnvLayer(gb, globalIntensity));
     }
   }
 
@@ -1360,7 +1499,7 @@ export async function downloadHDRI(
   }
 
   console.log(
-    `[LightForge HDRI] Generating ${width}x${height} ${format.toUpperCase()} - ` +
+    `[HDRI Forge] Generating ${width}x${height} ${format.toUpperCase()} - ` +
     `${layers.length} env layer(s)`,
   );
 
@@ -1372,11 +1511,14 @@ export async function downloadHDRI(
   // the file remains true HDR - just scaled, the same way exposure works as
   // a linear stops multiplier on a real camera.
   const exposure = options.viewExposure ?? useSceneStore.getState().renderSettings.exposure;
-  if (exposure !== 1.0) {
-    for (let i = 0; i < pixels.length; i++) {
-      pixels[i] *= exposure;
+  // "Match reference photo" (sent by Erik while the live link is on) is baked in too, so the file equals the live look.
+  const mg = getMatchGain();
+  const er = exposure * mg[0], eg = exposure * mg[1], eb = exposure * mg[2];
+  if (er !== 1.0 || eg !== 1.0 || eb !== 1.0) {
+    for (let i = 0; i < pixels.length; i += 4) {
+      pixels[i] *= er; pixels[i + 1] *= eg; pixels[i + 2] *= eb; pixels[i + 3] *= exposure;
     }
-    console.log(`[LightForge HDRI] Baked View Exposure ${exposure.toFixed(2)}x into exported data`);
+    console.log(`[HDRI Forge] Baked View Exposure ${exposure.toFixed(2)}x (match gain ${mg.map((v) => v.toFixed(3)).join('/')}) into exported data`);
   }
 
   const baseName = filename ?? `lightforge_hdri_${Date.now()}`;
@@ -1388,33 +1530,49 @@ export async function downloadHDRI(
       ? encodeHDR(pixels, width, height)
       : encodeEXR(pixels, width, height);
 
-  const blob = new Blob([buffer], { type: mimeType });
+  saveBlob(new Blob([buffer], { type: mimeType }), `${baseName}${ext}`);
+  console.log(`[HDRI Forge] Export complete: ${baseName}${ext}`);
+
+  // Matching diffuse-lighting file for the Erik Adjuster (Spherical Harmonics asset). Defined as the SH of a
+  // 512x256 render of the same scene/layers/exposure - exactly what the Erik live link streams, so the exported
+  // pair looks identical to the live preview.
+  if (options.alsoExportSH) {
+    const sh = await generateAnalyticalHDRI(scene, 512, 256, cp, layers);
+    if (er !== 1.0 || eg !== 1.0 || eb !== 1.0) for (let i = 0; i < sh.length; i += 4) { sh[i] *= er; sh[i + 1] *= eg; sh[i + 2] *= eb; }
+    const ash = formatAsh(computeAshSH9(sh, 512, 256));
+    // small gap so the browser treats it as a second download of the same click
+    await new Promise<void>((r) => setTimeout(r, 400));
+    saveBlob(new Blob([ash], { type: 'text/plain' }), `${baseName}.ash`);
+    console.log(`[HDRI Forge] Export complete: ${baseName}.ash`);
+  }
+}
+
+function saveBlob(blob: Blob, fileName: string): void {
   const url = URL.createObjectURL(blob);
   const link = document.createElement('a');
   link.href = url;
-  link.download = `${baseName}${ext}`;
+  link.download = fileName;
   link.style.display = 'none';
   document.body.appendChild(link);
   link.click();
-
   setTimeout(() => {
     URL.revokeObjectURL(url);
     if (link.parentNode) link.parentNode.removeChild(link);
   }, 250);
-
-  console.log(`[LightForge HDRI] Export complete: ${baseName}${ext}`);
 }
 
 // --------- Environment texture loader ------------------------------------------------------------------------------------------------------------------------------------------
 
 /**
- * Load a raw .hdr ArrayBuffer into a THREE.DataTexture via RGBELoader.
+ * Load a raw .hdr or .exr ArrayBuffer into a THREE.DataTexture, picking the
+ * loader from the file's actual magic bytes (see utils/hdriFormat) since
+ * this buffer arrives with no filename attached.
  */
 function loadHDRITexture(buffer: ArrayBuffer): Promise<THREE.DataTexture | null> {
   return new Promise<THREE.DataTexture | null>((resolve) => {
     const blob = new Blob([buffer], { type: 'application/octet-stream' });
     const url = URL.createObjectURL(blob);
-    const loader = new RGBELoader();
+    const loader = isEXRBuffer(buffer) ? new EXRLoader() : new RGBELoader();
     loader.load(
       url,
       (texture) => {
@@ -1520,13 +1678,70 @@ export function gradientToEnvLayer(config: GradientBackgroundConfig, intensity =
   return { texture: tex, intensity, rotation: 0 };
 }
 
+// Decoding a (base64) .hdr/.exr is the slow part of every render, and it only depends on the file - so keep the
+// decoded texture until the asset's data changes. Makes dragging any grading/orientation slider cheap.
+const decodedTextureCache = new Map<string, { src: string; tex: THREE.DataTexture }>();
+const blurredTextureCache = new Map<string, { srcTex: THREE.DataTexture; blur: number; out: THREE.DataTexture }>();
+
+function halfBitsToFloat(v: number): number {
+  const sign = (v & 0x8000) ? -1 : 1;
+  const exp = (v & 0x7C00) >> 10;
+  const frac = v & 0x03FF;
+  if (exp === 0) return sign * Math.pow(2, -14) * (frac / 1024);
+  if (exp === 0x1F) return frac ? 0 : sign * 65504;
+  return sign * Math.pow(2, exp - 15) * (1 + frac / 1024);
+}
+
+/** Soften an equirect map: area-average down to a smaller map (blur 0..100 -> up to ~31x smaller), then two
+ *  light separable passes (wrapping horizontally) - sampled bilinearly this reads as a smooth defocus. */
+function blurEnvTexture(tex: THREE.DataTexture, amount: number): THREE.DataTexture {
+  const img = tex.image as unknown as { width: number; height: number; data: ArrayLike<number> };
+  const sw = img.width, sh = img.height, src = img.data;
+  const f = 1 + amount * 0.3;
+  const tw = Math.max(8, Math.round(sw / f)), th = Math.max(4, Math.round(sh / f));
+  const acc = new Float32Array(tw * th * 4);
+  const cnt = new Float32Array(tw * th);
+  const isHalf = src instanceof Uint16Array;
+  const isU8 = src instanceof Uint8Array || src instanceof Uint8ClampedArray;
+  for (let y = 0; y < sh; y++) {
+    const ty = Math.min(th - 1, Math.floor((y * th) / sh));
+    for (let x = 0; x < sw; x++) {
+      const tx = Math.min(tw - 1, Math.floor((x * tw) / sw));
+      const si = (y * sw + x) * 4, di = (ty * tw + tx) * 4;
+      for (let c = 0; c < 3; c++) {
+        const v = src[si + c];
+        acc[di + c] += isHalf ? halfBitsToFloat(v) : isU8 ? sRGBToLinear(v / 255) : v;
+      }
+      cnt[ty * tw + tx] += 1;
+    }
+  }
+  for (let i = 0; i < tw * th; i++) {
+    const n = cnt[i] || 1;
+    acc[i * 4] /= n; acc[i * 4 + 1] /= n; acc[i * 4 + 2] /= n; acc[i * 4 + 3] = 1;
+  }
+  const tmp = new Float32Array(acc.length);
+  for (let pass = 0; pass < 2; pass++) {
+    for (let y = 0; y < th; y++) for (let x = 0; x < tw; x++) { // horizontal [1 2 1], wrapping
+      const a = (y * tw + ((x + tw - 1) % tw)) * 4, b = (y * tw + x) * 4, c = (y * tw + ((x + 1) % tw)) * 4;
+      for (let k = 0; k < 3; k++) tmp[b + k] = (acc[a + k] + 2 * acc[b + k] + acc[c + k]) * 0.25;
+      tmp[b + 3] = 1;
+    }
+    for (let y = 0; y < th; y++) for (let x = 0; x < tw; x++) { // vertical [1 2 1], clamped
+      const a = (Math.max(0, y - 1) * tw + x) * 4, b = (y * tw + x) * 4, c = (Math.min(th - 1, y + 1) * tw + x) * 4;
+      for (let k = 0; k < 3; k++) acc[b + k] = (tmp[a + k] + 2 * tmp[b + k] + tmp[c + k]) * 0.25;
+      acc[b + 3] = 1;
+    }
+  }
+  return new THREE.DataTexture(acc, tw, th, THREE.RGBAFormat, THREE.FloatType);
+}
+
 export async function loadActiveHDRILayers(globalIntensity = 1.0): Promise<EnvLayer[]> {
   const assets = useHDRIAssetStore
     .getState()
-    .assets.filter((a) => a.active && a.dataBase64);
+    .assets.filter((a) => a.active && (a.dataBase64 || a.kind === 'sky'));
 
   if (assets.length === 0) {
-    console.log('[LightForge HDRI] No active HDRI assets - exporting lights only');
+    console.log('[HDRI Forge] No active HDRI assets - exporting lights only');
     return [];
   }
 
@@ -1534,12 +1749,36 @@ export async function loadActiveHDRILayers(globalIntensity = 1.0): Promise<EnvLa
 
   for (const asset of assets) {
     try {
-      const buffer = hdriBase64ToArrayBuffer(asset.dataBase64 as string);
-      const texture = await loadHDRITexture(buffer);
+      let texture: THREE.DataTexture | null;
+      if (hasEdits(asset)) {
+        // Edit HDRI Environments: sample the edited float image instead of the raw file.
+        const edited = await getEditedImage(asset, 2048);
+        texture = edited ? imageToDataTexture(edited) : null;
+      } else {
+        const src = asset.dataBase64 as string;
+        const cached = decodedTextureCache.get(asset.id);
+        if (cached && cached.src === src) {
+          texture = cached.tex;
+        } else {
+          texture = await loadHDRITexture(hdriBase64ToArrayBuffer(src));
+          if (texture) decodedTextureCache.set(asset.id, { src, tex: texture });
+        }
+      }
 
       if (!texture) {
-        console.warn(`[LightForge HDRI] Could not decode "${asset.name}" - skipping`);
+        console.warn(`[HDRI Forge] Could not decode "${asset.name}" - skipping`);
         continue;
+      }
+
+      if (asset.blur && asset.blur > 0) {
+        const bc = blurredTextureCache.get(asset.id);
+        if (bc && bc.srcTex === texture && bc.blur === asset.blur) {
+          texture = bc.out;
+        } else {
+          const out = blurEnvTexture(texture, asset.blur);
+          blurredTextureCache.set(asset.id, { srcTex: texture, blur: asset.blur, out });
+          texture = out;
+        }
       }
 
       const img = texture.image as { width?: number; height?: number; data?: { constructor: { name: string } } };
@@ -1552,17 +1791,30 @@ export async function loadActiveHDRILayers(globalIntensity = 1.0): Promise<EnvLa
         contrast: asset.contrast,
         gamma: asset.gamma,
         saturation: asset.saturation,
+        rotationX: asset.rotationX,
+        rotationZ: asset.rotationZ,
+        offsetX: asset.offsetX,
+        offsetY: asset.offsetY,
+        offsetZ: asset.offsetZ,
+        domeRadius: asset.domeRadius,
+        flipX: asset.flipX,
+        hue: asset.hue,
+        temperature: asset.temperature,
+        tint: asset.tint,
+        highlights: asset.highlights,
+        shadows: asset.shadows,
+        peakLimit: asset.peakLimit,
       });
 
       console.log(
-        `[LightForge HDRI] Env layer "${asset.name}" - ` +
+        `[HDRI Forge] Env layer "${asset.name}" - ` +
         `${img?.width}x${img?.height}, ` +
         `type ${img?.data?.constructor?.name}, ` +
         `intensity ${(asset.intensity * globalIntensity).toFixed(2)}, ` +
         `rotation ${asset.rotation}deg`,
       );
     } catch (e) {
-      console.warn(`[LightForge HDRI] Error loading "${asset.name}":`, e);
+      console.warn(`[HDRI Forge] Error loading "${asset.name}":`, e);
     }
   }
 

@@ -1,5 +1,7 @@
+import type { LightAppearance } from '../appearance/types';
+
 // Light types for the studio
-export type LightType = 
+export type LightType =
   | 'point' 
   | 'spot' 
   | 'area' 
@@ -80,6 +82,50 @@ export interface Light {
    *  area-type lights (area/overhead) - same control set as an HDRI Shape's
    *  drop shadow, applied as a darkening patch offset from the light. */
   dropShadow?: LightDropShadow;
+  /** When set, this light is an OBJECT LIGHT: it follows the scene object with this
+   *  key (see three/objectBinding.ts) - the object's face becomes the emitting
+   *  rectangle and the object glows. Position, rotation and size are derived. */
+  objectKey?: string;
+  /** Which face of the object emits ('auto' = the face pointing at the model). */
+  objectSide?: 'auto' | '+x' | '-x' | '+y' | '-y' | '+z' | '-z';
+  /** Make the object itself glow in the viewport / path tracer. Default true. */
+  objectGlow?: boolean;
+  /** What the light looks like (content layers + blends). Undefined = classic
+   *  flat light shaped only by Edge Softness. Applies to area-type and object lights. */
+  appearance?: LightAppearance;
+  /** HDR Textured Area Light settings (area-type lights only). */
+  areaTex?: TexturedAreaSettings;
+  /** How the light is blended over the map beneath it in the HDRI (default normal). */
+  blendMode?: import('../appearance/types').AppearanceBlend;
+  /** Invert the light's colours before blending. */
+  blendInvert?: boolean;
+}
+
+/**
+ * Area Light mode: instead of being painted into the HDRI, the light becomes a real
+ * 3D rectangle carrying its appearance as an RGBA texture.
+ */
+export interface TexturedAreaSettings {
+  /** Area Light mode on/off. */
+  enabled: boolean;
+  /** Emitter is visible to the camera (off = still lights, but is not seen). */
+  camVisibility: boolean;
+  /** Smart Dolly: distance factor. Moves the light closer / further AND scales its size so the
+   *  light it delivers stays consistent (1 = where LightPaint put it). */
+  smartDolly: number;
+  /** Dolly Multiplier: moves the light without changing its size. */
+  dollyMultiplier: number;
+  /** Multiplier on the area light texture resolution (export and preview). */
+  textureScale: number;
+  /** 0-100. 100 = wide (Lambert) emission, lower = tighter beam. */
+  spread: number;
+  /** On: the size follows the dolly so the light keeps the same size in reflections on flat surfaces.
+   *  Off: the size follows the dolly so the light fills the same solid angle (same illumination). */
+  maintainReflectionSize: boolean;
+}
+
+export function createDefaultTexturedArea(): TexturedAreaSettings {
+  return { enabled: false, camVisibility: true, smartDolly: 1, dollyMultiplier: 1, spread: 100, maintainReflectionSize: true, textureScale: 1 };
 }
 
 export interface LightDropShadow {
