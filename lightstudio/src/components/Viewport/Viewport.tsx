@@ -29,6 +29,7 @@ import { solveLightPaint, smoothNormalAt, computeLightDistance, pickLightForRefl
 import { useCurvePaintStore } from '../../store/curvePaintStore';
 import { cartesianToSpherical } from '../../utils/math';
 import { CameraBookmarks } from './CameraBookmarks';
+import { ImportCameras } from './ImportCameras';
 import { ModelingOverlay } from '../Modeling/ModelingOverlay';
 import { ModelingController } from '../../modeling/ModelingController';
 import { setModelingController } from '../../modeling/bridge';
@@ -1654,7 +1655,7 @@ export const Viewport: React.FC<ViewportProps> = ({ sceneManagerRef, onScreensho
 
           {/* Raw position/target/fov snapshots, unrelated to cameraStore - would
               silently do nothing useful against a locked Angle Hunt camera. */}
-          {workspaceMode === '360' && <CameraBookmarks sceneManagerRef={sceneManagerRef} />}
+          {workspaceMode === '360' ? <CameraBookmarks sceneManagerRef={sceneManagerRef} /> : <ImportCameras standalone />}
 
           <ModelingOverlay />
 

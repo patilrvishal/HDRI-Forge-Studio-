@@ -1,4 +1,4 @@
-﻿import { create } from 'zustand';
+import { create } from 'zustand';
 
 export interface SceneCamera {
   id: string;
@@ -22,7 +22,7 @@ export interface SceneCamera {
   dofBlades: number;
   /** Where this camera came from - purely informational (a badge in
    *  CameraPanel), never gates behavior. */
-  source: 'manual' | 'blender' | 'maya';
+  source: 'manual' | 'blender' | 'maya' | 'erik';
   /** Which workspace(s) this camera shows up in - a camera defaults to both,
    *  so a pushed or manually-created camera is immediately usable in 360
    *  Workspace and Angle Hunt Mode; the user narrows it via CameraPanel to

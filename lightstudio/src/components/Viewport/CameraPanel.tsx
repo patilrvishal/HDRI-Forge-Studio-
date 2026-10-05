@@ -1,7 +1,8 @@
-﻿import React, { useCallback } from 'react';
+import React, { useCallback } from 'react';
 import { useCameraStore, type SceneCamera } from '../../store/cameraStore';
 import { useLightsStore } from '../../store/lightsStore';
 import { Toggle } from '../UI/Toggle';
+import { sourceOf, syncCamera, CAMERA_SOURCE_LABEL } from '../../bridge/cameraImport';
 
 interface TargetOption {
   id: string;
@@ -12,9 +13,12 @@ const SOURCE_LABEL: Record<SceneCamera['source'], string> = {
   manual: '',
   blender: 'Blender',
   maya: 'Maya',
+  erik: 'Erik',
 };
 
 export const CameraPanel: React.FC = () => {
+  const [syncMsg, setSyncMsg] = React.useState<{ id: string; text: string; ok: boolean } | null>(null);
+  const [syncing, setSyncing] = React.useState(false);
   const cameras = useCameraStore((s) => s.cameras);
   const activeCameraId = useCameraStore((s) => s.activeCameraId);
   const addCamera = useCameraStore((s) => s.addCamera);
@@ -158,6 +162,33 @@ export const CameraPanel: React.FC = () => {
               color: 'var(--text-sec)',
             }}
           />
+
+          {sourceOf(active.id) && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+              <button
+                disabled={syncing}
+                onClick={async () => {
+                  setSyncing(true);
+                  try {
+                    const n = await syncCamera(active.id);
+                    setSyncMsg({ id: active.id, text: `Synced "${n}" from ${CAMERA_SOURCE_LABEL[sourceOf(active.id)!.source]}`, ok: true });
+                  } catch (e) {
+                    setSyncMsg({ id: active.id, text: (e as Error).message, ok: false });
+                  } finally { setSyncing(false); }
+                }}
+                title={`Re-read this camera's position, rotation and lens from ${CAMERA_SOURCE_LABEL[sourceOf(active.id)!.source]}. Other cameras are not touched.`}
+                style={{
+                  fontSize: 11, padding: '5px 8px', borderRadius: 4, cursor: syncing ? 'wait' : 'pointer',
+                  background: 'var(--accent)', color: '#fff', border: 'none',
+                }}
+              >
+                {syncing ? 'Syncing…' : `Sync camera from ${CAMERA_SOURCE_LABEL[sourceOf(active.id)!.source]}`}
+              </button>
+              {syncMsg && syncMsg.id === active.id && (
+                <div style={{ fontSize: 10, color: syncMsg.ok ? 'var(--text-dim)' : '#e5706a' }}>{syncMsg.text}</div>
+              )}
+            </div>
+          )}
 
           <div>
             <div style={{ fontSize: 10, color: 'var(--text-dim)', marginBottom: 3 }}>

@@ -31,7 +31,10 @@ interface BridgeLightData {
   size_y?: number;
 }
 
-interface BridgeCameraData {
+export interface BridgeCameraData {
+  /** Optional extras sent by the Import/Sync endpoints. */
+  focalLength?: number;
+  active?: boolean;
   /** Stable per-DCC-object id (Blender object name / Maya transform's short
    *  name) - lets multiple named shots coexist instead of piling into one
    *  slot, and lets a later push for the same DCC camera update it in place. */
@@ -59,7 +62,7 @@ interface BridgePayload {
    *  and needs remapping to Three.js's Y-up; Maya is already Y-up and needs
    *  none. Missing/unrecognized defaults to 'blender' for older addon builds
    *  that predate this field. */
-  source?: 'blender' | 'maya';
+  source?: 'blender' | 'maya' | 'erik';
   lights?: BridgeLightData[];
   /** Pushed exclusively by the dedicated "Push Camera(s)" button - the mesh/
    *  lights/world push never includes camera data. */
@@ -72,7 +75,7 @@ interface BridgePayload {
 // Blender is Z-up: X=X  Y=Z  Z=-Y maps it to Three.js's Y-up. Maya is already
 // Y-up/right-handed like Three.js, so its coordinates pass through unchanged.
 function toThreePos(b: Vec3, source: BridgePayload['source']): THREE.Vector3 {
-  if (source === 'maya') {
+  if (source === 'maya' || source === 'erik') {
     return new THREE.Vector3(b.x, b.y, b.z);
   }
   return new THREE.Vector3(b.x, b.z, -b.y);
@@ -161,11 +164,11 @@ function applyLights(lightsData: BridgeLightData[], source: BridgePayload['sourc
 // Namespaced by the DCC's own stable id, so multiple named shots coexist
 // instead of piling into one slot - a later push for the SAME DCC camera
 // updates it in place; a different camera gets its own entry.
-function bridgeCameraStoreId(bc: BridgeCameraData, source: BridgePayload['source']): string {
+export function bridgeCameraStoreId(bc: BridgeCameraData, source: BridgePayload['source']): string {
   return `bridge-${source ?? 'blender'}-${bc.id}`;
 }
 
-function applyCameras(camerasData: BridgeCameraData[], source: BridgePayload['source']) {
+export function applyCameras(camerasData: BridgeCameraData[], source: BridgePayload['source']) {
   const { cameras, addCamera, updateCamera, activeCameraId, setActiveCamera } = useCameraStore.getState();
   const mode = useViewportModeStore.getState().mode;
 
@@ -184,6 +187,7 @@ function applyCameras(camerasData: BridgeCameraData[], source: BridgePayload['so
       rotation: { x: bc.rotation.x, y: bc.rotation.y, z: bc.rotation.z },
       targetId: null,
       fov: bc.fov,
+      ...(bc.focalLength !== undefined ? { focalLength: bc.focalLength } : {}),
       source: source ?? 'blender',
       workspaces: ['360', 'angleHunt'],
       ...(bc.clipStart !== undefined ? { clipStart: bc.clipStart } : {}),
@@ -192,7 +196,10 @@ function applyCameras(camerasData: BridgeCameraData[], source: BridgePayload['so
 
     const existing = cameras.find((c) => c.id === storeId);
     if (existing) {
-      updateCamera(storeId, updates);
+      // Refreshing a camera that's already here must not undo the user's own
+      // renaming or workspace assignment - only the DCC-owned transform/lens.
+      const { name: _n, workspaces: _w, ...dccOwned } = updates;
+      updateCamera(storeId, dccOwned);
     } else {
       // addCamera also sets itself active as a side effect - corrected below
       // so a batch push of N cameras doesn't hijack the viewport N times.

@@ -90,6 +90,7 @@ CANDIDATES = [
 # the Studio's ports so all three can run at once without colliding.
 BLENDER_RECEIVE_PORT = 8975
 MAYA_RECEIVE_PORT = 8976
+CAMERAS_PATH = "/__hdri_bridge_cameras"
 BLENDER_DIRECT_URL = f"http://localhost:{BLENDER_RECEIVE_PORT}/__hdri_bridge_push"
 BRIDGE_PATH = "/__hdri_bridge_push"
 
@@ -416,6 +417,43 @@ def _gather_all_or_selected_cameras():
     return result
 
 
+def _gather_scene_cameras(only_id=None):
+    """Every camera in the scene (or one), for Forge's Import / Sync Cameras.
+    Ignores selection - the artist chooses inside Forge. Main thread only."""
+    result = []
+    default_cams = {'persp', 'top', 'front', 'side'}
+    for shape in cmds.ls(type='camera', long=True) or []:
+        parents = cmds.listRelatives(shape, parent=True, fullPath=True)
+        if not parents:
+            continue
+        t = parents[0]
+        short = t.split('|')[-1]
+        if short in default_cams and only_id is None:
+            continue  # Maya's four built-in viewport cameras aren't shots
+        if only_id is not None and t != only_id and short != only_id:
+            continue
+        dag_path = _dag_path_for(t)
+        try:
+            vfov = cmds.camera(t, query=True, verticalFieldOfView=True)
+        except Exception:
+            vfov = 40.0
+        entry = {
+            'id': t, 'name': short,
+            'position': _world_translation(dag_path),
+            'rotation': quat_to_euler_deg(_world_quaternion(dag_path)),
+            'fov': vfov,
+            'clipStart': cmds.getAttr(t + '.nearClipPlane'),
+            'clipEnd': cmds.getAttr(t + '.farClipPlane'),
+            'active': bool(cmds.getAttr(shape + '.renderable')),
+        }
+        try:
+            entry['focalLength'] = cmds.getAttr(shape + '.focalLength')
+        except Exception:
+            pass
+        result.append(entry)
+    return result
+
+
 # ─── Per-object OBJ import (direct-bridge mesh receiving) ──────────────────
 # Maya's own OBJ importer merges every object in a file into a single mesh
 # regardless of any option flag passed to it (verified empirically - 'mo=0',
@@ -715,9 +753,32 @@ class _DirectBridgeHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def end_headers(self):
+        self.send_header('Access-Control-Allow-Origin', '*')
+        self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
+        self.send_header('Access-Control-Allow-Headers', '*')
+        BaseHTTPRequestHandler.end_headers(self)
+
+    def do_OPTIONS(self):
+        self.send_response(204)
+        self.end_headers()
+
+    def _serve_cameras(self):
+        from urllib.parse import urlparse, parse_qs
+        only_id = parse_qs(urlparse(self.path).query).get('id', [None])[0]
+        try:
+            # cmds calls must run on Maya's main thread; this blocks until done.
+            cams = maya.utils.executeInMainThreadWithResult(_gather_scene_cameras, only_id)
+            self._send_json(200, {'ok': True, 'app': 'Maya', 'source': 'maya', 'cameras': cams})
+        except Exception as e:
+            self._send_json(500, {'ok': False, 'error': str(e)})
+
     def do_GET(self):
-        if self.path == BRIDGE_PATH:
+        path = self.path.split('?')[0]
+        if path == BRIDGE_PATH:
             self._send_json(200, {'ok': True, 'app': 'Maya', 'mode': 'maya'})
+        elif path == CAMERAS_PATH:
+            self._serve_cameras()
         else:
             self.send_response(404)
             self.end_headers()

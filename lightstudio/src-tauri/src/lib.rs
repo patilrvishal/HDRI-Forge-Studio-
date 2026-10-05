@@ -94,6 +94,8 @@ struct ErikLiveState {
   version: u64,
   hdr: Vec<u8>,
   ash: String,
+  /// Camera list Erik posts for Forge's "Import cameras" (raw JSON text).
+  cameras: String,
   meta: serde_json::Map<String, serde_json::Value>,
   clients: Vec<Box<dyn Write + Send>>,
   /// Forge page listening for messages Erik sends back ("match reference photo" gains).
@@ -237,7 +239,7 @@ fn start_erik_live_server() {
             obj.insert("mode".into(), "desktop".into());
             // protocol / capabilities: lets a client tell "Forge is too old for me" from "I am too old for Forge".
             obj.insert("protocol".into(), 1.into());
-            obj.insert("capabilities".into(), serde_json::json!(["hdr", "ash", "events", "up"]));
+            obj.insert("capabilities".into(), serde_json::json!(["hdr", "ash", "events", "up", "cameras"]));
             obj.insert("version".into(), g.version.into());
             obj.insert("clients".into(), g.clients.len().into());
             obj.insert("forge".into(), g.up_clients.len().into());
@@ -309,6 +311,35 @@ fn start_erik_live_server() {
             let _ = request.respond(erik_cors(
               tiny_http::Response::from_string(ash).with_header(erik_header("Content-Type", "text/plain")),
             ));
+          }
+        }
+        (tiny_http::Method::Get, "/cameras") => {
+          let c = state.lock().unwrap().cameras.clone();
+          let body = if c.is_empty() { "{\"cameras\":[]}".to_string() } else { c };
+          let _ = request.respond(erik_json(tiny_http::Response::from_string(body)));
+        }
+        (tiny_http::Method::Post, "/cameras") => {
+          let mut body = Vec::new();
+          let read_ok = std::io::Read::read_to_end(&mut request.as_reader().take(4_000_001), &mut body).is_ok();
+          let parsed = if read_ok && body.len() <= 4_000_000 {
+            serde_json::from_slice::<serde_json::Value>(&body).ok()
+          } else {
+            None
+          };
+          match parsed.as_ref().and_then(|v| v.get("cameras")).and_then(|c| c.as_array()) {
+            Some(list) => {
+              let count = list.len();
+              let text = serde_json::json!({ "cameras": list }).to_string();
+              state.lock().unwrap().cameras = text;
+              let _ = request.respond(erik_json(tiny_http::Response::from_string(format!(
+                "{{\"ok\":true,\"count\":{count}}}"
+              ))));
+            }
+            None => {
+              let _ = request.respond(erik_cors(
+                tiny_http::Response::from_string("{\"ok\":false,\"error\":\"expected {cameras:[...]}\"}").with_status_code(400),
+              ));
+            }
           }
         }
         (tiny_http::Method::Post, "/push") => {

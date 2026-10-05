@@ -154,3 +154,21 @@ Stretch for the same day: Phase 1 polish (status UI, reconnect, Remove Bridge Wo
 * Time from install to first live HDRI in the DCC: under 60 seconds, zero typed settings.
 * Edit-to-visible latency in the DCC: under 300 ms first pass.
 * Zero main-thread stalls, zero orphaned nodes after "Remove".
+
+## Import cameras and per-camera sync (v0.1.12)
+
+Bottom-left **Import cameras** button (360 Workspace bar and Angle Hunt): choose
+Erik / Blender / Maya, tick the cameras you want, import only those. Each imported
+camera has a **Sync camera from <app>** button in its properties (Scene tab, Camera
+filter). It re-reads only that camera's transform and lens; other cameras, the
+camera's name and its workspace assignment are left alone.
+
+| Source | How Forge reads it | Status |
+|---|---|---|
+| Blender | `GET http://127.0.0.1:8975/__hdri_bridge_cameras[?id=name]` (add-on, main-thread safe) | verified live: list, selective import, exact position, single-camera sync |
+| Maya | `GET http://127.0.0.1:8976/__hdri_bridge_cameras[?id=name]` (plug-in, `executeInMainThreadWithResult`) | gather logic verified in mayapy; HTTP path not yet run in GUI Maya |
+| Erik | `GET /__erik_live/cameras` on the Forge bridge; Erik POSTs `{ "cameras": [...] }` there | Forge side verified with posted test cameras; **Erik overlay sender not written yet** |
+
+Camera object (all sources): `id`, `name`, `position {x,y,z}`, `rotation {x,y,z}` (Three.js
+Euler degrees), `fov` (vertical, degrees), optional `clipStart`, `clipEnd`, `focalLength`.
+Blender positions are Z-up and converted by Forge; Maya and Erik are Y-up pass-through.

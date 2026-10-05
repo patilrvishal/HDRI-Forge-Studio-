@@ -38,6 +38,7 @@ CANDIDATES = [
 # MAYA_RECEIVE_PORT - distinct from the Studio's ports so all three can run
 # at once without colliding.
 BLENDER_RECEIVE_PORT = 8975
+CAMERAS_PATH = "/__hdri_bridge_cameras"
 MAYA_RECEIVE_PORT = 8976
 MAYA_DIRECT_URL = f"http://localhost:{MAYA_RECEIVE_PORT}/__hdri_bridge_push"
 BRIDGE_PATH = "/__hdri_bridge_push"
@@ -257,6 +258,29 @@ def _gather_all_or_selected_cameras(context):
         entry['name'] = cam_obj.name
         entry['clipStart'] = cam_obj.data.clip_start
         entry['clipEnd'] = cam_obj.data.clip_end
+        result.append(entry)
+    return result
+
+
+def _gather_scene_cameras(only_id=None):
+    """Every camera in the current scene (or just one), for Forge's Import /
+    Sync Cameras. Runs on the main thread. Unlike the push button this ignores
+    the selection - the artist picks which ones to import inside Forge."""
+    scene = bpy.context.scene
+    result = []
+    for o in scene.objects:
+        if o.type != 'CAMERA' or (only_id is not None and o.name != only_id):
+            continue
+        entry = _gather_camera(o)
+        cd = o.data
+        entry.update({
+            'id': o.name, 'name': o.name,
+            'clipStart': cd.clip_start, 'clipEnd': cd.clip_end,
+            'focalLength': cd.lens, 'sensorWidth': cd.sensor_width,
+            'sensorHeight': cd.sensor_height,
+            'shiftX': cd.shift_x, 'shiftY': cd.shift_y,
+            'active': o == scene.camera,
+        })
         result.append(entry)
     return result
 
@@ -587,9 +611,46 @@ class _DirectBridgeHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def _cors(self):
+        self.send_header('Access-Control-Allow-Origin', '*')
+        self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
+        self.send_header('Access-Control-Allow-Headers', '*')
+
+    def end_headers(self):
+        self._cors()
+        super().end_headers()
+
+    def do_OPTIONS(self):
+        self.send_response(204)
+        self.end_headers()
+
+    def _serve_cameras(self):
+        from urllib.parse import urlparse, parse_qs
+        only_id = parse_qs(urlparse(self.path).query).get('id', [None])[0]
+        box = {'done': threading.Event(), 'data': None}
+
+        def _on_main():
+            try:
+                box['data'] = {'ok': True, 'app': 'Blender', 'source': 'blender',
+                               'cameras': _gather_scene_cameras(only_id)}
+            except Exception as e:
+                box['data'] = {'ok': False, 'error': str(e)}
+            box['done'].set()
+            return None
+
+        # bpy data may only be read on the main thread - hand the work over and wait.
+        bpy.app.timers.register(_on_main, first_interval=0.0)
+        if not box['done'].wait(5.0):
+            self._send_json(504, {'ok': False, 'error': 'Blender main thread busy'})
+        else:
+            self._send_json(200, box['data'])
+
     def do_GET(self):
-        if self.path == BRIDGE_PATH:
+        path = self.path.split('?')[0]
+        if path == BRIDGE_PATH:
             self._send_json(200, {'ok': True, 'app': 'Blender', 'mode': 'blender'})
+        elif path == CAMERAS_PATH:
+            self._serve_cameras()
         else:
             self.send_response(404)
             self.end_headers()

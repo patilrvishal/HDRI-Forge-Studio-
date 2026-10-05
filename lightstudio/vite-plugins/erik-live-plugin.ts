@@ -26,6 +26,8 @@ export function erikLivePlugin(): Plugin {
   const VIEWER_TTL_MS = 4000;
   // Forge page listens here for messages Erik sends back (e.g. "match reference photo" gains)
   const upClients = new Set<ServerResponse>();
+  // Camera list Erik posts for Forge's "Import cameras" (kept as raw JSON text).
+  let camerasJson = '{"cameras":[]}';
 
   const cors = (res: ServerResponse) => {
     res.setHeader('Access-Control-Allow-Origin', '*');
@@ -55,7 +57,7 @@ export function erikLivePlugin(): Plugin {
           for (const [name, seen] of viewers) if (now - seen > VIEWER_TTL_MS) viewers.delete(name);
           res.writeHead(200, { 'Content-Type': 'application/json' });
           // protocol / capabilities let a client (Erik, the Blender and Maya addons) tell "Forge is too old for me" from "I am too old for Forge".
-          res.end(JSON.stringify({ ok: true, app: 'HDRI Forge Studio', mode: 'dev', protocol: 1, capabilities: ['hdr', 'ash', 'events', 'up'], version, clients: clients.size, forge: upClients.size, hasMap: !!hdr, viewers: [...viewers].map(([name, seen]) => ({ name, ageMs: now - seen })), ...meta }));
+          res.end(JSON.stringify({ ok: true, app: 'HDRI Forge Studio', mode: 'dev', protocol: 1, capabilities: ['hdr', 'ash', 'events', 'up', 'cameras'], version, clients: clients.size, forge: upClients.size, hasMap: !!hdr, viewers: [...viewers].map(([name, seen]) => ({ name, ageMs: now - seen })), ...meta }));
           return;
         }
 
@@ -106,6 +108,31 @@ export function erikLivePlugin(): Plugin {
           if (!ash) { res.writeHead(404).end('no sh yet'); return; }
           res.writeHead(200, { 'Content-Type': 'text/plain' });
           res.end(ash);
+          return;
+        }
+
+        if (url === '/cameras' && (req.method === 'GET' || req.method === 'POST')) {
+          if (req.method === 'GET') {
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(camerasJson);
+            return;
+          }
+          const chunks: Buffer[] = [];
+          let size = 0;
+          req.on('data', (c: Buffer) => { size += c.length; if (size <= 4_000_000) chunks.push(c); });
+          req.on('end', () => {
+            try {
+              if (size > 4_000_000) throw new Error('too large');
+              const parsed = JSON.parse(Buffer.concat(chunks).toString('utf8'));
+              if (!parsed || !Array.isArray(parsed.cameras)) throw new Error('expected {cameras:[...]}');
+              camerasJson = JSON.stringify({ cameras: parsed.cameras });
+              res.writeHead(200, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({ ok: true, count: parsed.cameras.length }));
+            } catch (e) {
+              res.writeHead(400, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({ ok: false, error: String((e as Error).message) }));
+            }
+          });
           return;
         }
 
