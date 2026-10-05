@@ -1,6 +1,23 @@
 import { applyCameras, bridgeCameraStoreId, type BridgeCameraData } from './BlenderBridgeListener';
 import { useCameraStore } from '../store/cameraStore';
 
+/** Erik cameras are authored around the car at Erik's own scale and origin, but Forge
+ *  rescales the .erik car to 4 units and re-centres it. Apply the same uniform scale and
+ *  shift to the camera positions (rotation is unchanged by both) so each camera keeps its
+ *  position relative to the car. With no Erik car loaded, positions pass through as-is. */
+function placeRelativeToCar(cams: BridgeCameraData[], source: CameraSource): BridgeCameraData[] {
+  if (source !== 'erik') return cams;
+  const model = (window as unknown as { __getErikModel?: () => { scale: { x: number }; position: { x: number; y: number; z: number } } | null })
+    .__getErikModel?.();
+  if (!model) return cams;
+  const s = model.scale.x;
+  const p = model.position;
+  return cams.map((c) => ({
+    ...c,
+    position: { x: c.position.x * s + p.x, y: c.position.y * s + p.y, z: c.position.z * s + p.z },
+  }));
+}
+
 /** Apps Forge can pull cameras from. */
 export type CameraSource = 'erik' | 'blender' | 'maya';
 
@@ -90,7 +107,7 @@ export async function listSourceCameras(source: CameraSource): Promise<RemoteCam
 /** Import only the chosen cameras (new ones are added, previously imported ones are refreshed). */
 export function importSelectedCameras(source: CameraSource, cams: RemoteCamera[], ids: Set<string>): number {
   const chosen = cams.filter((c) => ids.has(c.id));
-  if (chosen.length) applyCameras(chosen, source);
+  if (chosen.length) applyCameras(placeRelativeToCar(chosen, source), source);
   return chosen.length;
 }
 
@@ -124,6 +141,6 @@ export async function syncCamera(cameraId: string): Promise<string> {
   }
   if (!cam) throw new Error(`Camera "${src.remoteId}" no longer exists in ${CAMERA_SOURCE_LABEL[src.source]}.`);
   // applyCameras updates by store id, so only this camera changes; the active camera is restored.
-  applyCameras([cam], src.source);
+  applyCameras(placeRelativeToCar([cam], src.source), src.source);
   return cam.name;
 }

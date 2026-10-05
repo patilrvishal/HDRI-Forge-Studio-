@@ -175,6 +175,9 @@ export const Viewport: React.FC<ViewportProps> = ({ sceneManagerRef, onScreensho
 
     const erikLoader = new ErikLoader(sceneManager.scene, sceneManager.renderer);
     erikLoaderRef.current = erikLoader;
+    // Camera import places Erik cameras relative to the car, so it needs the car's
+    // current scale/offset (Forge re-centres and rescales every model it loads).
+    (window as unknown as { __getErikModel?: () => unknown }).__getErikModel = () => erikLoader.getCurrentModel();
 
     // Material Manager
     const materialManager = new MaterialManager();
