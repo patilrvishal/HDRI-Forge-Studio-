@@ -166,8 +166,8 @@ camera's name and its workspace assignment are left alone.
 | Source | How Forge reads it | Status |
 |---|---|---|
 | Blender | `GET http://127.0.0.1:8975/__hdri_bridge_cameras[?id=name]` (add-on, main-thread safe) | verified live: list, selective import, exact position, single-camera sync |
-| Maya | `GET http://127.0.0.1:8976/__hdri_bridge_cameras[?id=name]` (plug-in, `executeInMainThreadWithResult`) | gather logic verified in mayapy; HTTP path not yet run in GUI Maya |
-| Erik | `GET /__erik_live/cameras` on the Forge bridge; Erik POSTs `{ "cameras": [...] }` there | Forge side verified with posted test cameras; **Erik overlay sender not written yet** |
+| Maya | `GET http://127.0.0.1:8976/__hdri_bridge_cameras[?id=name]` (plug-in, `executeInMainThreadWithResult`) | verified in GUI Maya 2023: list, import, exact positions, id lookup |
+| Erik | `GET /__erik_live/cameras` on the Forge bridge; Erik POSTs `{ "cameras": [...] }` there | Erik overlay `forge-cameras.js` (Erik_My_Version) sends them; converted and imported a real 34-camera project, all aim at their targets. Send from Erik's own panel not clicked end to end (my test browser blocked Erik-to-localhost calls) |
 
 Camera object (all sources): `id`, `name`, `position {x,y,z}`, `rotation {x,y,z}` (Three.js
 Euler degrees), `fov` (vertical, degrees), optional `clipStart`, `clipEnd`, `focalLength`.
