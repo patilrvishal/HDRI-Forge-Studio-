@@ -50,8 +50,19 @@ function blendChannel(mode: HDRIShapeBlendMode, src: number, dst: number): numbe
   }
 }
 
-const LAYER_W = 1024;
-const LAYER_H = 512;
+/** The shape layer is rasterised at the OUTPUT resolution (clamped here), not a fixed size. A fixed 1024x512
+ *  layer sampled up to 2K/4K/8K turned every shape pixel into a visible block, so exporting at a higher
+ *  resolution never made the edges any cleaner. 4096 wide keeps the 8-bit canvas around 33 MB. */
+const LAYER_MIN_W = 1024;
+const LAYER_MAX_W = 4096;
+export function shapesLayerWidth(targetW?: number): number {
+  const w = Math.max(LAYER_MIN_W, Math.min(LAYER_MAX_W, Math.round(targetW || LAYER_MIN_W)));
+  return w - (w % 2);
+}
+/** Anti-aliased band starts this far inside the edge; only pixels past it pay for the footprint estimate. */
+const AA_NEAR = 0.6;
+/** Pixels further outside the edge than this cannot receive any coverage. */
+const AA_REJECT = 1.25;
 
 /** #rrggbb -> [r,g,b] 0-255. */
 function hexToRgb(hex: string): [number, number, number] {
@@ -153,7 +164,18 @@ function paintPatch(data: Uint8ClampedArray, shape: Patch, w: number, h: number)
   const rowStart = Math.max(0, Math.floor((phiMin / Math.PI) * h) - 1);
   const rowEnd = Math.min(h - 1, Math.ceil((phiMax / Math.PI) * h) + 1);
 
-  const featherLo = isCircle || isStrip ? 1 - feather : 1 - feather;
+  // Edge metric at any direction: 1.0 is the shape's true boundary, < 1 inside. Used both for the pixel itself and
+  // for its neighbours, so the anti-aliasing width is the real per-pixel change of this metric at this spot
+  // (the same idea as fwidth() in a shader) and automatically follows the projection and the output resolution.
+  const edgeAt = (dx: number, dy: number, dz: number): number => {
+    const c = dx * cx + dy * cy + dz * cz;
+    if (c <= 0.02) return Infinity;
+    const lx = (dx * rx + dy * ry + dz * rz) / c;
+    const ly = (dx * ux + dy * uy + dz * uz) / c;
+    if (isCircle) return Math.hypot(lx, ly) / tanRadius;
+    if (isStrip) return Math.abs(ly) / tanHalfH;
+    return Math.max(Math.abs(lx) / tanHalfW, Math.abs(ly) / tanHalfH);
+  };
 
   for (let py = rowStart; py <= rowEnd; py++) {
     for (let px = 0; px < w; px++) {
@@ -161,29 +183,22 @@ function paintPatch(data: Uint8ClampedArray, shape: Patch, w: number, h: number)
       const cosc = dx * cx + dy * cy + dz * cz;
       if (cosc <= 0.02) continue; // behind the patch's own hemisphere
 
-      const lx = (dx * rx + dy * ry + dz * rz) / cosc;
-      const ly = (dx * ux + dy * uy + dz * uz) / cosc;
+      const edge = edgeAt(dx, dy, dz);
+      if (edge > AA_REJECT) continue;
 
-      let coverage: number;
-      if (isCircle) {
-        const nr = Math.hypot(lx, ly) / tanRadius;
-        if (nr > 1) continue;
-        coverage = feather < 0.01 ? 1 : 1 - smoothstep(featherLo, 1, nr);
-      } else {
-        const nx = Math.abs(lx) / tanHalfW;
-        const ny = Math.abs(ly) / tanHalfH;
-        if (isStrip) {
-          // A strip runs the full band horizontally - only the polar (y)
-          // extent is bounded/feathered, matching its original "horizontal
-          // band" purpose but now correctly curved by the projection.
-          if (ny > 1) continue;
-          coverage = feather < 0.01 ? 1 : 1 - smoothstep(featherLo, 1, ny);
-        } else {
-          if (nx > 1 || ny > 1) continue;
-          const edge = Math.max(nx, ny); // Chebyshev distance = box falloff
-          coverage = feather < 0.01 ? 1 : 1 - smoothstep(featherLo, 1, edge);
-        }
+      // Width of one pixel in edge units. Hard edges (softness ~0) used to skip this and became a 1-bit mask,
+      // which is the staircase seen in reflections; now they always get a ~1 pixel anti-aliased transition
+      // centred on the true boundary, while a larger Softness still dominates and gives a real feather.
+      let aa = 0;
+      if (edge > AA_NEAR) {
+        const [ax, ay, az] = directionAt(px + 1, py, w, h);
+        const [bx, by, bz] = directionAt(px, py + 1, w, h);
+        const ex = edgeAt(ax, ay, az);
+        const ey = edgeAt(bx, by, bz);
+        aa = Math.max(Number.isFinite(ex) ? Math.abs(ex - edge) : 0, Number.isFinite(ey) ? Math.abs(ey - edge) : 0);
       }
+      const half = aa * 0.5;
+      const coverage = 1 - smoothstep(1 - Math.max(feather, half), 1 + half, edge);
 
       const a = baseAlpha * coverage;
       if (a <= 0) continue;
@@ -286,7 +301,10 @@ function smoothstep(lo: number, hi: number, x: number): number {
 export function compositeShapesCanvas(
   shapes: HDRIShape[],
   gradient: GradientBackgroundConfig | null,
+  targetWidth?: number,
 ): HTMLCanvasElement {
+  const LAYER_W = shapesLayerWidth(targetWidth);
+  const LAYER_H = LAYER_W / 2;
   const canvas = document.createElement('canvas');
   canvas.width = LAYER_W;
   canvas.height = LAYER_H;

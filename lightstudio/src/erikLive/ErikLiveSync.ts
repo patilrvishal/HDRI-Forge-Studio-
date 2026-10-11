@@ -19,7 +19,7 @@ import {
   generateAnalyticalHDRI, loadActiveHDRILayers, gradientToEnvLayer, HDRICancelled,
   type EnvLayer,
 } from '../three/HDRIExporter';
-import { compositeShapesCanvas, shapesCanvasToEnvLayer } from '../three/HDRIShapesLayer';
+import { compositeShapesCanvas, shapesCanvasToEnvLayer, shapesLayerWidth } from '../three/HDRIShapesLayer';
 import { useLightsStore } from '../store/lightsStore';
 import { useSceneStore } from '../store/sceneStore';
 import { useHDRIAssetStore } from '../store/hdriAssetStore';
@@ -137,12 +137,12 @@ async function listenToErik(): Promise<void> {
 }
 
 let layerCache: { assets: unknown; intensity: number; layers: EnvLayer[] } | null = null;
-let shapeCache: { shapes: unknown; gb: unknown; intensity: number; layer: EnvLayer } | null = null;
+let shapeCache: { shapes: unknown; gb: unknown; intensity: number; w: number; layer: EnvLayer } | null = null;
 
 const getScene = (): THREE.Scene | null =>
   ((window as unknown as { __lightforgeScene?: { scene: THREE.Scene } }).__lightforgeScene)?.scene ?? null;
 
-async function buildLayers(): Promise<EnvLayer[]> {
+async function buildLayers(passW: number): Promise<EnvLayer[]> {
   const sceneState = useSceneStore.getState();
   const intensity = sceneState.environment.intensity ?? 1.0;
   const assets = useHDRIAssetStore.getState().assets;
@@ -155,9 +155,11 @@ async function buildLayers(): Promise<EnvLayer[]> {
   const gb = sceneState.environment.gradientBackground;
   const shapes = useHDRIShapesStore.getState().shapes;
   if (shapes.length > 0) {
-    if (!shapeCache || shapeCache.shapes !== shapes || shapeCache.gb !== gb || shapeCache.intensity !== intensity) {
-      const canvas = compositeShapesCanvas(shapes, gb?.enabled ? gb : null);
-      shapeCache = { shapes, gb, intensity, layer: shapesCanvasToEnvLayer(canvas, intensity) };
+    // The shape layer is rasterised at the pass width (capped inside), so the final pass has clean edges at full size.
+    const layerW = shapesLayerWidth(passW);
+    if (!shapeCache || shapeCache.shapes !== shapes || shapeCache.gb !== gb || shapeCache.intensity !== intensity || shapeCache.w !== layerW) {
+      const canvas = compositeShapesCanvas(shapes, gb?.enabled ? gb : null, passW);
+      shapeCache = { shapes, gb, intensity, w: layerW, layer: shapesCanvasToEnvLayer(canvas, intensity) };
     }
     layers.push(shapeCache.layer);
   } else if (gb?.enabled) {
@@ -189,7 +191,7 @@ async function renderAndPush(pass: Pass, my: number): Promise<boolean> {
   const mg = getMatchGain();
   const mseq = useMatchGainStore.getState().seq;
   st._set({ status: 'rendering', pass: pass.label });
-  const layers = await buildLayers();
+  const layers = await buildLayers(pass.w);
   if (my !== gen) return false;
 
   let pixels: Float32Array;

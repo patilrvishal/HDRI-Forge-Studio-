@@ -309,7 +309,7 @@ export const HDRIPreviewPanel: React.FC = () => {
         // Shapes are painted directly onto the gradient's own canvas (true
         // alpha-over) so a black shape actually blocks what's beneath it,
         // instead of being summed as a separate additive layer.
-        const canvas = compositeShapesCanvas(currentShapes, gb?.enabled ? gb : null);
+        const canvas = compositeShapesCanvas(currentShapes, gb?.enabled ? gb : null, RESOLUTIONS[resIndexOverride ?? resIndex].w);
         layers.push(shapesCanvasToEnvLayer(canvas, environment.intensity ?? 1.0));
       } else if (gb?.enabled) {
         layers.push(gradientToEnvLayer(gb, environment.intensity ?? 1.0));

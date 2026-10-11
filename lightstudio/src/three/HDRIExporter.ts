@@ -386,6 +386,19 @@ function softFalloff(angle: number, radius: number): number {
   return 1.0 - s;
 }
 
+/** Pixel being evaluated, set by the render loops so a light can look at its neighbours for edge anti-aliasing. w = 0 means unknown. */
+const _aaPix = { x: 0, y: 0, w: 0, h: 0 };
+const _aaDir = [0, 0, 0];
+/** Same mapping as pixelToDirection, written into a scratch array (no allocation per call). */
+function pixelDirInto(x: number, y: number, w: number, h: number, out: number[]): void {
+  const theta = ((x + 0.5) / w - 0.5) * 2 * Math.PI;
+  const phi = ((y + 0.5) / h) * Math.PI;
+  const sp = Math.sin(phi);
+  out[0] = sp * Math.cos(theta);
+  out[1] = Math.cos(phi);
+  out[2] = sp * Math.sin(theta);
+}
+
 // --------- FUNCTION 2: evaluateLightRadiance ---------------------------------------------------------------------------------------------------------------------
 
 /**
@@ -578,7 +591,9 @@ function evaluateLightRadiance(
       const halfH = Math.max(0.02, Math.atan2(rectH / 2, dist));
       const nx = Math.abs(lx) / Math.tan(Math.min(halfW, 1.55));
       const ny = Math.abs(ly) / Math.tan(Math.min(halfH, 1.55));
-      if (nx > 1 || ny > 1) break; // outside the rectangle's true footprint
+      const edge = Math.max(nx, ny); // Chebyshev distance = box falloff
+      // Outside the footprint. Plain lights keep a small margin so the anti-aliased edge can reach past the boundary.
+      if (light.tex ? (nx > 1 || ny > 1) : edge > 1.25) break;
 
       let coverage: number;
       let tr = 1, tg = 1, tb = 1;
@@ -592,9 +607,28 @@ function evaluateLightRadiance(
         tr = _texOut[0]; tg = _texOut[1]; tb = _texOut[2];
       } else {
         const feather = Math.max(0, Math.min(1, (light.edgeSoftness ?? 50) / 100));
-        const featherLo = 1 - feather;
-        const edge = Math.max(nx, ny); // Chebyshev distance = box falloff
-        coverage = feather < 0.01 ? 1 : 1 - smoothstepHDRI((edge - featherLo) / Math.max(0.001, 1 - featherLo));
+        // One-pixel anti-aliased edge even at Edge Softness 0 (it used to be a 1-bit mask = staircase in reflections).
+        // The width is the real per-pixel change of the edge metric here, so it follows resolution and projection.
+        let aa = 0;
+        if (edge > 0.6 && _aaPix.w > 0) {
+          const tanW = Math.tan(Math.min(halfW, 1.55));
+          const tanH = Math.tan(Math.min(halfH, 1.55));
+          const edgeAtPixel = (px: number, py: number): number => {
+            pixelDirInto(px, py, _aaPix.w, _aaPix.h, _aaDir);
+            const c = _aaDir[0] * centerDir.x + _aaDir[1] * centerDir.y + _aaDir[2] * centerDir.z;
+            if (c <= 0.02) return NaN;
+            const ax = (_aaDir[0] * lightRight.x + _aaDir[1] * lightRight.y + _aaDir[2] * lightRight.z) / c;
+            const ay = (_aaDir[0] * lightUp.x + _aaDir[1] * lightUp.y + _aaDir[2] * lightUp.z) / c;
+            return Math.max(Math.abs(ax) / tanW, Math.abs(ay) / tanH);
+          };
+          const ex = edgeAtPixel(_aaPix.x + 1, _aaPix.y);
+          const ey = edgeAtPixel(_aaPix.x, _aaPix.y + 1);
+          aa = Math.max(Number.isNaN(ex) ? 0 : Math.abs(ex - edge), Number.isNaN(ey) ? 0 : Math.abs(ey - edge));
+        }
+        const half = aa * 0.5;
+        const lo = 1 - Math.max(feather, half);
+        const hi = 1 + half;
+        coverage = 1 - smoothstepHDRI((edge - lo) / Math.max(1e-4, hi - lo));
       }
       if (coverage <= 0) break;
 
@@ -886,6 +920,7 @@ lights.forEach((l, i) => {
       // Every other light type has no physical footprint (a point/spot/
       // directional/hemisphere light is just a glow, not a card), so they
       // stay purely additive, same as before.
+      _aaPix.x = x; _aaPix.y = y; _aaPix.w = width; _aaPix.h = height;
       const objHit = objCaster ? objCaster.cast(capturePoint, dir) : null;
       // Pass 0: lights behind an included object (or every light when none is hit),
       // pass 1: the object itself, pass 2: lights in front of it.
@@ -966,6 +1001,7 @@ lights.forEach((l, i) => {
     }
   }
 
+  _aaPix.w = 0;
   // Composite groups with filters: render each group's lights alone into a premultiplied
   // image, run its Diffusion / Motion filters on the whole thing, then composite over the map.
   if (groupLights.length) {
@@ -982,6 +1018,7 @@ lights.forEach((l, i) => {
       for (let y = 0; y < height; y++) {
         for (let x = 0; x < width; x++) {
           const dir = pixelToDirection(x, y, width, height);
+          _aaPix.x = x; _aaPix.y = y; _aaPix.w = width; _aaPix.h = height;
           let r = 0, g = 0, b = 0, a = 0;
           for (const l of members) {
             const c = evaluateLightRadiance(l, dir, capturePoint);
@@ -1267,14 +1304,7 @@ function sampleEnvTexture(
 
   // ------ PATH B: Uint8Array DataTexture ---------------------------------------------------------------------------------------------------------------------------
   if (rawData instanceof Uint8Array || rawData instanceof Uint8ClampedArray) {
-    const px = Math.max(0, Math.min(texW - 1, Math.floor(u * texW)));
-    const py = Math.max(0, Math.min(texH - 1, Math.floor(v * texH)));
-    const idx = (py * texW + px) * 4;
-    return new THREE.Color(
-      sRGBToLinear(rawData[idx]   / 255) * intensity,
-      sRGBToLinear(rawData[idx+1] / 255) * intensity,
-      sRGBToLinear(rawData[idx+2] / 255) * intensity,
-    );
+    return sampleU8Bilinear(rawData, texW, texH, u, v, intensity);
   }
 
   // ------ PATH C: HTMLImageElement / HTMLVideoElement (draw to canvas) ------------------------------------
@@ -1305,19 +1335,44 @@ function sampleEnvTexture(
 
   // ------ PATH D: ImageData ---------------------------------------------------------------------------------------------------------------------------------------------------------------------
   if (img instanceof ImageData) {
-    const px = Math.max(0, Math.min(texW - 1, Math.floor(u * texW)));
-    const py = Math.max(0, Math.min(texH - 1, Math.floor(v * texH)));
-    const idx = (py * texW + px) * 4;
-    return new THREE.Color(
-      sRGBToLinear(img.data[idx]   / 255) * intensity,
-      sRGBToLinear(img.data[idx+1] / 255) * intensity,
-      sRGBToLinear(img.data[idx+2] / 255) * intensity,
-    );
+    return sampleU8Bilinear(img.data, texW, texH, u, v, intensity);
   }
 
   return new THREE.Color(0, 0, 0);
 }
 
+
+const _srgbLut = (() => {
+  const t = new Float32Array(256);
+  for (let i = 0; i < 256; i++) {
+    const c = i / 255;
+    t[i] = c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
+  }
+  return t;
+})();
+
+/**
+ * Bilinear sample of an 8-bit sRGB equirect image, blended in LINEAR light. The old nearest-neighbour lookup made
+ * a 1024-wide layer show as blocks when read at 2K/4K/8K. Wraps horizontally (equirect seam), clamps at the poles.
+ */
+function sampleU8Bilinear(
+  d: ArrayLike<number>, texW: number, texH: number, u: number, v: number, intensity: number,
+): THREE.Color {
+  const px = u * texW - 0.5;
+  const py = Math.max(0, Math.min(texH - 1, v * texH - 0.5));
+  const fx = px - Math.floor(px);
+  const x0 = ((Math.floor(px) % texW) + texW) % texW;
+  const x1 = (x0 + 1) % texW;
+  const y0 = Math.floor(py);
+  const y1 = Math.min(texH - 1, y0 + 1);
+  const fy = py - y0;
+  const i00 = (y0 * texW + x0) * 4, i10 = (y0 * texW + x1) * 4;
+  const i01 = (y1 * texW + x0) * 4, i11 = (y1 * texW + x1) * 4;
+  const w00 = (1 - fx) * (1 - fy), w10 = fx * (1 - fy), w01 = (1 - fx) * fy, w11 = fx * fy;
+  const ch = (k: number): number =>
+    (_srgbLut[d[i00 + k]] * w00 + _srgbLut[d[i10 + k]] * w10 + _srgbLut[d[i01 + k]] * w01 + _srgbLut[d[i11 + k]] * w11) * intensity;
+  return new THREE.Color(ch(0), ch(1), ch(2));
+}
 
 /**
  * Convert sRGB gamma value to linear (Stage 5: linear color space mandatory).
@@ -1481,7 +1536,7 @@ export async function downloadHDRI(
     const currentShapes = useHDRIShapesStore.getState().shapes;
     const globalIntensity = options.environmentGlobalIntensity ?? 1.0;
     if (currentShapes.length > 0) {
-      const canvas = compositeShapesCanvas(currentShapes, gb?.enabled ? gb : null);
+      const canvas = compositeShapesCanvas(currentShapes, gb?.enabled ? gb : null, width);
       layers.push(shapesCanvasToEnvLayer(canvas, globalIntensity));
     } else if (gb?.enabled) {
       layers.push(gradientToEnvLayer(gb, globalIntensity));
