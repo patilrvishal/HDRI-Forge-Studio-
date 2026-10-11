@@ -37,7 +37,7 @@ import { RGBELoader } from 'three/addons/loaders/RGBELoader.js';
 import { EXRLoader } from 'three/addons/loaders/EXRLoader.js';
 import { isEXRBuffer } from '../utils/hdriFormat';
 import { HdriObjectCaster } from './HDRIObjects';
-import { compositeShapesCanvas, shapesCanvasToEnvLayer } from './HDRIShapesLayer';
+import { compositeShapesCanvas, shapesCanvasToEnvLayer, EDGE_MIN_PX } from './HDRIShapesLayer';
 import { encodeEXRRGBA } from '../appearance/exr';
 import { getEditedImage, hasEdits, imageToDataTexture } from '../hdriedit/envSource';
 import { applyFilters, type FilterSpec } from '../filters/filters';
@@ -625,7 +625,7 @@ function evaluateLightRadiance(
           const ey = edgeAtPixel(_aaPix.x, _aaPix.y + 1);
           aa = Math.max(Number.isNaN(ex) ? 0 : Math.abs(ex - edge), Number.isNaN(ey) ? 0 : Math.abs(ey - edge));
         }
-        const half = aa * 0.5;
+        const half = aa * EDGE_MIN_PX * 0.5;
         const lo = 1 - Math.max(feather, half);
         const hi = 1 + half;
         coverage = 1 - smoothstepHDRI((edge - lo) / Math.max(1e-4, hi - lo));

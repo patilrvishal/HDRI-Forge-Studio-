@@ -59,6 +59,10 @@ export function shapesLayerWidth(targetW?: number): number {
   const w = Math.max(LAYER_MIN_W, Math.min(LAYER_MAX_W, Math.round(targetW || LAYER_MIN_W)));
   return w - (w % 2);
 }
+/** Every edge is at least this many output pixels wide, however hard the shape is set. A hard edge sampled at a low
+ *  resolution (1K, or magnified in a glass reflection) shows as a staircase; a few pixels of ramp turns that into a
+ *  soft edge that sharpens by itself as the resolution goes up (0.9 deg at 1K, 0.2 deg at 4K, 0.1 deg at 8K). */
+export const EDGE_MIN_PX = 2.5;
 /** Anti-aliased band starts this far inside the edge; only pixels past it pay for the footprint estimate. */
 const AA_NEAR = 0.6;
 /** Pixels further outside the edge than this cannot receive any coverage. */
@@ -197,7 +201,7 @@ function paintPatch(data: Uint8ClampedArray, shape: Patch, w: number, h: number)
         const ey = edgeAt(bx, by, bz);
         aa = Math.max(Number.isFinite(ex) ? Math.abs(ex - edge) : 0, Number.isFinite(ey) ? Math.abs(ey - edge) : 0);
       }
-      const half = aa * 0.5;
+      const half = aa * EDGE_MIN_PX * 0.5;
       const coverage = 1 - smoothstep(1 - Math.max(feather, half), 1 + half, edge);
 
       const a = baseAlpha * coverage;
