@@ -8,6 +8,14 @@ import { getRawModelDataBase64 } from '../store/modelDataStore';
 import { getRawHDRIDataBase64 } from '../store/hdriDataStore';
 import type { AnimationState } from '../types/Animation';
 import type { SceneState } from '../types/Scene';
+import { getModelingController } from '../modeling/bridge';
+import { useObjectHdriStore, type ObjectHdriSettings } from '../store/objectHdriStore';
+import { useAppearanceStore } from '../appearance/appearanceStore';
+import type { LightCollection } from '../types/Composite';
+import type { SerializedImage } from '../appearance/imageImport';
+import type { EditableObjectJSON } from '../modeling/EditableObject';
+import { useHDRIShapesStore } from '../store/hdriShapesStore';
+import type { HDRIShape, HDRIShapeGroup } from '../types/HDRIShape';
 
 // ── Scene file schema ───────────────────────────────────────────────────────
 
@@ -69,6 +77,8 @@ export interface SceneFile {
       customHeight: number;
       autoSave: boolean;
       autoSaveInterval: number;
+    /** Global illumination settings (present in newer scene files). */
+    gi?: object;
     };
     showGrid: boolean;
     turntable: { active: boolean; speed: number };
@@ -93,13 +103,24 @@ export interface SceneFile {
   materials: unknown[] | null;
   // ── HDRI Assets ──────────────────────────────────────────────────────────
   hdriAssets: unknown[] | null;
+  // ── Meshes built with the modelling tools (primitives + edit mode) ────────
+  modeling?: EditableObjectJSON[];
+  // ── Per-object HDRI include/exclude settings ──────────────────────────────
+  objectHdri?: Record<string, ObjectHdriSettings>;
+  // ── Images used by Light Appearance content (Image / Sky clouds) ──────────
+  appearanceImages?: SerializedImage[];
+  // ── Light groups (Composites) ──────────────────────────────────────────────
+  collections?: LightCollection[];
+  // ── HDRI Shapes (drawn map shapes) and their composite groups ─────────────
+  hdriShapes?: HDRIShape[];
+  hdriShapeGroups?: HDRIShapeGroup[];
 }
 
 // ── SceneExporter ──────────────────────────────────────────────────────────
 
 export class SceneExporter {
   private static readonly FILE_VERSION = '1.0';
-  private static readonly APP_NAME = 'LightForge Studio';
+  private static readonly APP_NAME = 'HDRI Forge Studio';
   private static readonly APP_VERSION = '1.0.0';
   private static readonly FILE_EXTENSION = '.lightscene';
   private static readonly MIME_TYPE = 'application/json';
@@ -139,6 +160,7 @@ export class SceneExporter {
           shadowQuality: sceneState.renderSettings.shadowQuality,
           bloom: { ...sceneState.renderSettings.bloom },
           ao: { ...sceneState.renderSettings.ao },
+          gi: { ...(sceneState.renderSettings as unknown as { gi: object }).gi },
           ground: { ...sceneState.renderSettings.ground },
           vignette: { ...sceneState.renderSettings.vignette },
           colorGrading: { ...sceneState.renderSettings.colorGrading },
@@ -163,6 +185,14 @@ export class SceneExporter {
       })),
       materials: useMaterialEditorStore.getState().exportMaterials(),
       hdriAssets: useHDRIAssetStore.getState().exportAssets(),
+      modeling: getModelingController()?.serialize() ?? [],
+      objectHdri: useObjectHdriStore.getState().exportSettings(),
+      appearanceImages: useAppearanceStore.getState().exportImages(lightsState.lights.map((l) => l.appearance)),
+      collections: JSON.parse(JSON.stringify(lightsState.collections)),
+      ...(() => {
+        const { shapes, groups } = useHDRIShapesStore.getState().exportShapes();
+        return { hdriShapes: shapes, hdriShapeGroups: groups };
+      })(),
     };
   }
 
@@ -216,7 +246,7 @@ export class SceneExporter {
       useSceneStore.getState().loadSceneState({
         modelName: sceneData.modelName,
         camera: sceneData.camera,
-        environment: sceneData.environment as SceneFile['scene']['environment'],
+        environment: sceneData.environment as unknown as SceneState['environment'],
         renderSettings: sceneData.renderSettings as unknown as SceneState['renderSettings'],
         showGrid: sceneData.showGrid,
         turntable: sceneData.turntable as SceneFile['scene']['turntable'],
@@ -286,6 +316,16 @@ export class SceneExporter {
           'custom.hdr',
         );
       }
+
+      // ── Restore modelled meshes ──────────────────────────────────────────
+      getModelingController()?.deserialize(data.modeling ?? []);
+      useObjectHdriStore.getState().importSettings(data.objectHdri);
+      useAppearanceStore.getState().clearImages();
+      useAppearanceStore.getState().importImages(data.appearanceImages);
+      if (Array.isArray(data.collections) && data.collections.length) useLightsStore.getState().setCollections(data.collections);
+
+      // ── Restore HDRI Shapes (drawn map shapes + composite groups) ───────
+      useHDRIShapesStore.getState().importShapes(data.hdriShapes, data.hdriShapeGroups);
 
       return null;
     } catch (err) {

@@ -1,6 +1,6 @@
 ﻿import * as THREE from 'three';
 
-export type PaintMode = 'reflection' | 'illumination' | 'shade' | 'rim' | 'shadow';
+export type PaintMode = 'reflection' | 'illumination' | 'shade' | 'rim' | 'shadow' | 'sun';
 
 export const PAINT_MODES: Array<{ id: PaintMode; label: string; hint: string }> = [
   { id: 'reflection', label: 'Reflection', hint: 'Light appears in the reflection at the clicked point. Best for chrome and car paint.' },
@@ -8,6 +8,7 @@ export const PAINT_MODES: Array<{ id: PaintMode; label: string; hint: string }> 
   { id: 'shade', label: 'Shade', hint: 'Light moves to the opposite side, putting the clicked point in shadow.' },
   { id: 'rim', label: 'Rim', hint: 'Ignores the model. Places the light behind the scene along the camera ray.' },
   { id: 'shadow', label: 'Shadow', hint: 'Pivots the light so its shadow falls on the clicked point.' },
+  { id: 'sun', label: 'Sun', hint: 'Places the sun of a Sky (procedural sky or a light with Sky content) so its reflection lands on the clicked point.' },
 ];
 
 export interface PaintResult {
@@ -142,6 +143,108 @@ export function solveLightPaint(
       return { position: pos, rotation: aimAt(pos, P) };
     }
   }
+}
+
+export interface CurvePointPaintResult { x: number; y: number }
+
+/**
+ * LightPaint for a single Lumi-Curve point (or any other appearance content
+ * authored in the light's own local x/y space): reflect the view ray off the
+ * clicked surface (identical math to 'reflection' mode above), then intersect
+ * that reflected ray with the SELECTED LIGHT'S OWN rectangle plane instead of
+ * walking a light out along it. The point on that plane, converted into the
+ * light's local content space, is where this one curve point should sit so
+ * its highlight lands exactly at the clicked point - the light itself never
+ * moves, only the one point does.
+ *
+ * Mirrors how HDRIShapesLayer/Viewport already reproject an HDRI Shape onto
+ * the equirect sphere via the same reverse-reflection idea, just against a
+ * finite rectangle (the light's own card) instead of an infinite sphere.
+ *
+ * @param lightWidth/lightHeight - the light's real-world area dimensions
+ *   (areaWidth/areaHeight), used to convert the plane-space hit into the
+ *   -1..1 content coordinates every appearance content type is authored in.
+ * Returns null if the reflected ray doesn't hit the light's plane in front of
+ * the clicked point (ray parallel to the plane, or the light faces away).
+ */
+export function solveCurvePointPaint(
+  P: THREE.Vector3,
+  N: THREE.Vector3,
+  camera: THREE.Camera,
+  lightPosition: THREE.Vector3,
+  lightQuaternion: THREE.Quaternion,
+  lightWidth: number,
+  lightHeight: number,
+): CurvePointPaintResult | null {
+  const V = P.clone().sub(camera.position).normalize();
+  const R = V.clone().sub(N.clone().multiplyScalar(2 * V.dot(N))).normalize();
+
+  // A RectAreaLight's local frame in three.js: +X = right, +Y = up, -Z = the
+  // direction it actually shines. Content x maps to +X, y to +Y - the same
+  // axes THREE.PlaneGeometry (the visible textured emitter mesh) already
+  // uses for its own UVs, so no extra flip is needed here.
+  const right = new THREE.Vector3(1, 0, 0).applyQuaternion(lightQuaternion);
+  const up = new THREE.Vector3(0, 1, 0).applyQuaternion(lightQuaternion);
+  const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(lightQuaternion);
+
+  const denom = R.dot(forward);
+  if (Math.abs(denom) < 1e-6) return null;
+  const t = lightPosition.clone().sub(P).dot(forward) / denom;
+  if (t <= 0) return null;
+
+  const hitPoint = P.clone().add(R.multiplyScalar(t));
+  const local = hitPoint.sub(lightPosition);
+  const lx = local.dot(right);
+  const ly = local.dot(up);
+
+  return {
+    x: Math.max(-1, Math.min(1, lx / Math.max(1e-4, lightWidth / 2))),
+    y: Math.max(-1, Math.min(1, ly / Math.max(1e-4, lightHeight / 2))),
+  };
+}
+
+export interface ReflectionCandidate {
+  id: string;
+  position: THREE.Vector3;
+}
+
+/**
+ * HDR Light Studio's "right-click a reflection to select its light": given
+ * where the viewer clicked on the model, work out the ideal reflection
+ * direction (mirror the view ray about the surface normal, same math as
+ * 'reflection' mode above), then return whichever candidate light sits
+ * closest to that direction from the clicked point - that's the light
+ * actually producing the highlight there.
+ *
+ * Returns null if nothing lines up closely enough (dot < threshold) so a
+ * right-click on bare surface with no real reflection doesn't just grab
+ * whatever light happens to be nearest.
+ */
+export function pickLightForReflection(
+  P: THREE.Vector3,
+  N: THREE.Vector3,
+  camera: THREE.Camera,
+  candidates: ReflectionCandidate[],
+  threshold = 0.85,
+): string | null {
+  if (candidates.length === 0) return null;
+
+  const V = P.clone().sub(camera.position).normalize();
+  const R = V.clone().sub(N.clone().multiplyScalar(2 * V.dot(N))).normalize();
+
+  let bestId: string | null = null;
+  let bestDot = threshold;
+
+  for (const c of candidates) {
+    const toLight = c.position.clone().sub(P).normalize();
+    const dot = toLight.dot(R);
+    if (dot > bestDot) {
+      bestDot = dot;
+      bestId = c.id;
+    }
+  }
+
+  return bestId;
 }
 
 /**

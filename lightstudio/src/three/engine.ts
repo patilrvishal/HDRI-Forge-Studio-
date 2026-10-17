@@ -14,6 +14,14 @@ import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { FXAAShader } from 'three/addons/shaders/FXAAShader.js';
 import type { GroundSettings } from '../types/Scene';
 import { paintGradientOntoContext } from './HDRIExporter';
+import { WebGLPathTracer } from 'three-gpu-pathtracer';
+import { LightProbeGenerator } from 'three/addons/lights/LightProbeGenerator.js';
+import { computeEmitterRect, findObjectByKey, type EmitterSide } from './objectBinding';
+import { ObjectEmitters } from './ObjectEmitters';
+import { TexturedEmitters } from './TexturedEmitters';
+import { getLightTexture, dropLightTexture } from '../appearance/textures';
+import type { LightAppearance } from '../appearance/types';
+import type { TexturedAreaSettings } from '../types/Light';
 
 let _rectAreaLibInitialized = false;
 function ensureRectAreaLib(): void {
@@ -37,6 +45,9 @@ export class SceneManager {
   controls: OrbitControls;
   /** True while the user is orbit-dragging a scripted camera. */
   _cameraDragging = false;
+  /** Angle Hunt Mode: the active camera is genuinely read-only - see
+   *  setViewportLocked() and applyActiveCamera(). */
+  _viewportLocked = false;
   container: HTMLElement | null = null;
   ground: THREE.Mesh | null = null;
   groundOverlay: THREE.Mesh | null = null;
@@ -52,6 +63,17 @@ export class SceneManager {
   _floorCubeCamera: THREE.CubeCamera | null = null;
   _floorCubeRT: THREE.WebGLCubeRenderTarget | null = null;
   _floorMaterial: THREE.MeshStandardMaterial | null = null;
+
+  // ------ Global illumination: single spherical-harmonics light probe ------
+  /** Persistent probe instance kept in the scene once GI is enabled -
+   *  bakeLightProbe() only overwrites its .sh coefficients, so toggling
+   *  intensity or re-baking never has to remove/re-add it (which would
+   *  cause a visible pop as materials briefly lose the probe). */
+  _lightProbe: THREE.LightProbe | null = null;
+  _giCubeCamera: THREE.CubeCamera | null = null;
+  _giCubeRT: THREE.WebGLCubeRenderTarget | null = null;
+  _giEnabled = false;
+  _giBaking = false;
 
   constructor() {
     this.scene = new THREE.Scene();
@@ -200,9 +222,7 @@ export class SceneManager {
       this.ground = null;
     }
     if (this._floorCubeCamera) {
-      if (this._floorCubeCamera && typeof this._floorCubeCamera.dispose === 'function') {
-  this._floorCubeCamera.dispose();
-}
+      (this._floorCubeCamera as unknown as { dispose?: () => void }).dispose?.();
       this._floorCubeCamera = null;
     }
     if (this._floorCubeRT) {
@@ -221,7 +241,7 @@ export class SceneManager {
   updateGround(settings?: GroundSettings | null): void {
     if (!settings) return;
     // Merge with defaults so old scene files missing new fields don't crash
-    const merged: GroundSettings = {
+    const defaults: Partial<GroundSettings> = {
       visible: true,
       reflections: true,
       reflectionSharpness: 0.85,
@@ -229,8 +249,8 @@ export class SceneManager {
       roughness: 0.15,
       metalness: 0.95,
       fadeRadius: 8.0,
-      ...settings,
     };
+    const merged = { ...defaults, ...settings } as GroundSettings;
     this._groundSettings = merged;
     this._disposeGround();
 
@@ -445,7 +465,8 @@ export class SceneManager {
         !(child instanceof THREE.GridHelper) &&
         !child.userData.isHelper &&
         child !== this.ground &&
-        child !== this._floorCubeCamera
+        child !== this._floorCubeCamera &&
+        child !== this._giCubeCamera
       ) {
         return child;
       }
@@ -455,6 +476,95 @@ export class SceneManager {
 
   stopRenderLoop(): void {
     cancelAnimationFrame(this._animationId);
+  }
+
+  // ------ Global illumination (light probe) ---------------------------------------------------------------------------------------------------------------------------------------
+
+  setGIEnabled(enabled: boolean): void {
+    if (enabled === this._giEnabled) return;
+    this._giEnabled = enabled;
+
+    if (enabled) {
+      if (!this._lightProbe) {
+        this._lightProbe = new THREE.LightProbe();
+        this.scene.add(this._lightProbe);
+      }
+      if (!this._giCubeCamera) {
+        // Small on purpose: a light probe only captures very low-frequency
+        // (diffuse) irradiance via spherical harmonics, so a sharp capture
+        // buys nothing - 16px/face keeps the CPU readback + SH projection
+        // in LightProbeGenerator cheap enough to re-bake periodically
+        // without stalling the render loop.
+        this._giCubeRT = new THREE.WebGLCubeRenderTarget(16, { type: THREE.UnsignedByteType });
+        this._giCubeCamera = new THREE.CubeCamera(0.1, 100, this._giCubeRT);
+        this._giCubeCamera.userData.isProxy = true; // exclude from SceneHierarchy + path tracer
+        this.scene.add(this._giCubeCamera);
+      }
+      this.bakeLightProbe();
+    } else {
+      if (this._lightProbe) {
+        this.scene.remove(this._lightProbe);
+        this._lightProbe = null;
+      }
+      if (this._giCubeCamera) {
+        this.scene.remove(this._giCubeCamera);
+        this._giCubeCamera = null;
+      }
+      if (this._giCubeRT) {
+        this._giCubeRT.dispose();
+        this._giCubeRT = null;
+      }
+    }
+  }
+
+  setGIIntensity(intensity: number): void {
+    if (this._lightProbe) this._lightProbe.intensity = intensity;
+  }
+
+  /** Re-captures the probe's surroundings and re-projects them to spherical
+   *  harmonics. Synchronous GPU readback (see LightProbeGenerator), so this
+   *  is throttled by the caller (Viewport's render loop) rather than run
+   *  every frame - a light probe approximates static/slow-changing bounce
+   *  lighting, not real-time reflections. */
+  bakeLightProbe(): void {
+    if (!this._giEnabled || !this._lightProbe || !this._giCubeCamera || !this._giCubeRT || this._giBaking) return;
+    this._giBaking = true;
+    try {
+      // Center the probe on the loaded model (falls back to the origin,
+      // roughly where the ground/subject sits, if nothing is loaded yet) -
+      // one probe placed there is a reasonable single-probe approximation
+      // for this app's hero-product-on-a-turntable scenes.
+      const model = this._findModel();
+      if (model) {
+        const box = new THREE.Box3().setFromObject(model);
+        if (!box.isEmpty()) {
+          const center = box.getCenter(new THREE.Vector3());
+          this._giCubeCamera.position.copy(center);
+        }
+      }
+
+      // Exclude UI helpers (gizmo, ground fade overlay, measure line, this
+      // probe's own CubeCamera helper, the floor reflection CubeCamera) from
+      // the capture the same way the path tracer does - otherwise transform
+      // gizmo colors could bleed into the probe's irradiance estimate.
+      const hidden: THREE.Object3D[] = [];
+      this.scene.traverse((o) => {
+        if (o.visible && (o.userData?.isProxy || o.userData?.isHelper || o.userData?.hideInPathTracer)) hidden.push(o);
+      });
+      for (const o of hidden) o.visible = false;
+
+      try {
+        this._giCubeCamera.update(this.renderer, this.scene);
+        const generated = LightProbeGenerator.fromCubeRenderTarget(this.renderer, this._giCubeRT) as unknown as THREE.LightProbe;
+        this._lightProbe.sh.copy(generated.sh);
+      } finally {
+        for (const o of hidden) o.visible = true;
+      }
+    } catch (e) {
+      console.warn('[LightForge] Light probe bake failed:', e);
+    } finally {
+      this._giBaking = false;
+    }
   }
 
   getCameraState(): { position: [number, number, number]; target: [number, number, number]; fov: number } {
@@ -486,10 +596,26 @@ export class SceneManager {
   }
 
   /**
+   * Angle Hunt Mode: locks the active camera so it's genuinely read-only -
+   * orbit-drag stops reaching OrbitControls entirely (controls.enabled =
+   * false), instead of the 360-Workspace behavior below where a scripted
+   * camera's transform can still be permanently overwritten by dragging.
+   * Setting controls.enabled = false also means OrbitControls never fires
+   * its 'start'/'end' events, so the drag-end write-back listener (see the
+   * constructor) naturally never fires while locked - no separate gating
+   * needed there.
+   */
+  setViewportLocked(locked: boolean): void {
+    this._viewportLocked = locked;
+  }
+
+  /**
    * If a scripted camera is active, drive the real viewport camera from it and,
    * when it has a target, lookAt() the target's live world position every frame.
-   * OrbitControls is disabled while a camera is active so the user cannot fight
-   * the scripted transform.
+   * In 360 Workspace, OrbitControls stays enabled so orbit-drag can adjust a
+   * scripted camera (see the pivot-resolution comment below); in Angle Hunt
+   * Mode (_viewportLocked), the camera is fully locked - see
+   * setViewportLocked().
    */
   applyActiveCamera(): boolean {
     const store = (window as unknown as {
@@ -499,18 +625,44 @@ export class SceneManager {
           rotation: { x: number; y: number; z: number };
           targetId: string | null;
           fov: number;
+          locked?: boolean;
         };
       } };
     }).__cameraStore;
 
     const cam = store?.getState().getActiveCamera() ?? null;
-    console.log('[CAM] stored:', cam.position.x.toFixed(2), cam.position.y.toFixed(2), cam.position.z.toFixed(2),
-      '| actual camera:', this.camera.position.x.toFixed(2), this.camera.position.y.toFixed(2), this.camera.position.z.toFixed(2),
-      '| dragging:', this._cameraDragging);
 
     if (!cam) {
       if (!this.controls.enabled) this.controls.enabled = true;
       return false;
+    }
+
+    if (this._viewportLocked || cam.locked) {
+      // Angle Hunt Mode always locks the active camera (_viewportLocked);
+      // in 360 Workspace, a camera locks only when the user has explicitly
+      // toggled its own per-camera lock (cam.locked, via the lock button
+      // next to CameraSwitcher) - otherwise 360 Workspace's default
+      // drag-adjustable behavior below applies. Either way: no orbit pivot
+      // to resolve - OrbitControls is fully disabled, so nothing will ever
+      // read controls.target. Drive the transform straight through every
+      // frame.
+      this.controls.enabled = false;
+      this.camera.position.set(cam.position.x, cam.position.y, cam.position.z);
+      if (cam.fov !== this.camera.fov) {
+        this.camera.fov = cam.fov;
+        this.camera.updateProjectionMatrix();
+      }
+      if (cam.targetId) {
+        const t = this.resolveTargetWorld(cam.targetId);
+        if (t) this.camera.lookAt(t.x, t.y, t.z);
+      } else {
+        this.camera.rotation.set(
+          (cam.rotation.x * Math.PI) / 180,
+          (cam.rotation.y * Math.PI) / 180,
+          (cam.rotation.z * Math.PI) / 180,
+        );
+      }
+      return true;
     }
 
     // A scripted camera owns the view, but orbit-drag is allowed to adjust it.
@@ -526,7 +678,31 @@ export class SceneManager {
       return true;
     }
 
-    const pivot = this.resolveTargetWorld(cam.targetId ?? 'model') ?? { x: 0, y: 0, z: 0 };
+    // When there's no explicit look-at target, the pivot MUST lie on the
+    // camera's own view ray (position + its forward direction) - not an
+    // unrelated point like the model's bounding-box center. OrbitControls
+    // reads its internal spherical state directly off (position - target)
+    // for its own pointer-event handling, independent of the render loop's
+    // gating below; a mismatched target meant the very first drag snapped
+    // the camera toward that unrelated point instead of orbiting around
+    // where it actually looks, silently corrupting a pushed camera's
+    // position/rotation the moment the user touched the viewport.
+    let pivot: { x: number; y: number; z: number };
+    if (cam.targetId) {
+      pivot = this.resolveTargetWorld(cam.targetId) ?? { x: 0, y: 0, z: 0 };
+    } else {
+      const rotRad = new THREE.Euler(
+        (cam.rotation.x * Math.PI) / 180,
+        (cam.rotation.y * Math.PI) / 180,
+        (cam.rotation.z * Math.PI) / 180,
+      );
+      const forward = new THREE.Vector3(0, 0, -1).applyEuler(rotRad);
+      pivot = {
+        x: cam.position.x + forward.x,
+        y: cam.position.y + forward.y,
+        z: cam.position.z + forward.z,
+      };
+    }
     this.controls.target.set(pivot.x, pivot.y, pivot.z);
 
     this.camera.position.set(cam.position.x, cam.position.y, cam.position.z);
@@ -590,6 +766,7 @@ export class SceneManager {
   dispose(): void {
     this.stopRenderLoop();
     this.detach();
+    this.setGIEnabled(false); // properly clean up the probe's CubeCamera + render target
     this._disposeGround(); // properly clean up CubeCamera + render targets
     this.pmremGenerator.dispose();
     this.scene.traverse((obj) => {
@@ -706,6 +883,46 @@ export class RenderPipeline {
   private _config: PipelineConfig;
   private _needsRebuild = false;
 
+  // ------ Path-traced "final quality" preview (GPU path tracer, WebGL-based) ---------------
+  /** Ceiling (linear) on the FINAL per-channel reflected environment radiance
+   *  under path tracing. Path tracing samples the raw HDRI's true (often huge -
+   *  15000+) peak brightness, whereas PBR reflects a PMREM-prefiltered copy
+   *  whose HDR peaks are compressed far lower - which is why the same metallic
+   *  paint stays saturated in PBR but washes toward white under path tracing.
+   *  Soft-clamping the environment to this ceiling brings direct reflections
+   *  down to PBR's perceptual level so the paint keeps its colour, while normal-
+   *  brightness detail is untouched. (Grazing-angle Fresnel still reflects near-
+   *  white on a mirror-finish surface - that is physically correct and also
+   *  happens to real glossy paint; softening it further is a material/roughness
+   *  choice, not something to bake into the renderer.) The clamp is applied in
+   *  final-radiance terms via markPathTracerDirty(), dividing by the current
+   *  environmentIntensity. Calibrated against PBR at matched settings. */
+  private static readonly PT_ENV_CLAMP = 1.5;
+  /** Clamped copy of the environment owned by the pipeline (disposed on
+   *  replacement); never the shared source texture from EnvironmentLoader. */
+  private _pathTracerClampedEnv: THREE.DataTexture | null = null;
+  private _pathTracer: WebGLPathTracer | null = null;
+  /** Target state requested via setEngine - true while the user has the toggle on. */
+  private _pathTracingEnabled = false;
+  /** True once a scene build has completed and renderSample() is safe to call. */
+  private _pathTracerReady = false;
+  private _pathTracerBuilding = false;
+  /** Set by markPathTracerDirty() when lights/shapes/environment change while
+   *  path tracing is active - triggers a full scene rebuild on the next render(). */
+  private _pathTracerDirty = false;
+  private _pathTracerError: string | null = null;
+  private _lastPathTracerCamMatrix = new THREE.Matrix4();
+  /** The RAW equirectangular HDRI texture (pre-PMREM), supplied by the
+   *  viewport whenever the environment changes. three-gpu-pathtracer needs
+   *  the original equirect pixel data to build its HDRI importance-sampling
+   *  tables - scene.environment normally holds the PMREM/CubeUV-prefiltered
+   *  texture used for real-time IBL instead, which has no raw pixel array
+   *  and crashes the path tracer if handed to it directly. Only set for a
+   *  real loaded HDRI file; null for procedural gradient/studio presets,
+   *  which have no equirect source (path tracing then falls back to
+   *  lights-only, no environment lighting). */
+  private _pathTracerRawEnv: THREE.Texture | null = null;
+
   constructor(sceneManager: SceneManager) {
     this._sm = sceneManager;
     this._config = {
@@ -805,10 +1022,211 @@ export class RenderPipeline {
 
   /** Render one frame through the composer (or fallback direct render). */
   render(): void {
+    if (this._pathTracingEnabled && this._pathTracer && this._pathTracerReady && !this._pathTracerBuilding) {
+      this._syncPathTracer();
+      this._pathTracer.renderSample();
+      return;
+    }
     if (this._composer) {
       this._composer.render();
     } else {
       this._sm.renderer.render(this._sm.scene, this._sm.camera);
+    }
+  }
+
+  /** Re-syncs the path tracer with the live camera each frame, and rebuilds
+   *  the whole traced scene when markPathTracerDirty() flagged a change
+   *  (lights/shapes/environment edited while path tracing is active). Both
+   *  paths call updateCamera()/setSceneAsync() internally, which reset the
+   *  sample accumulation - exactly what's wanted, since anything that moves
+   *  the camera or changes the scene invalidates the accumulated samples. */
+  private _syncPathTracer(): void {
+    const pt = this._pathTracer;
+    if (!pt) return;
+    const cam = this._sm.camera;
+    cam.updateMatrixWorld();
+
+    if (this._pathTracerDirty) {
+      this._pathTracerDirty = false;
+      // Synchronous BVH rebuild (see _buildPathTracer for why: async needs a
+      // Worker via setBVHWorker, which this app doesn't wire up). A dirty
+      // rebuild only happens after an edit while path tracing is active, so
+      // one blocking frame here is an acceptable trade for not needing a
+      // worker bundle.
+      try {
+        this._withPathTracerEnv(() => pt.setScene(this._sm.scene, cam));
+        this._lastPathTracerCamMatrix.copy(cam.matrixWorld);
+      } catch (e) {
+        console.error('[LightForge] Path tracer rebuild failed:', e);
+      }
+      return;
+    }
+
+    if (!cam.matrixWorld.equals(this._lastPathTracerCamMatrix)) {
+      this._lastPathTracerCamMatrix.copy(cam.matrixWorld);
+      pt.updateCamera();
+    }
+  }
+
+  /** Flags the currently-traced scene as stale so the next render() rebuilds
+   *  it (new/changed lights, HDRI shapes, or environment). No-op while path
+   *  tracing isn't active - callers don't need to check isPathTracingActive()
+   *  themselves before calling this on every relevant store change.
+   *  `rawEnvTexture` (pass explicitly, even as null) updates the raw equirect
+   *  HDRI used for path-traced environment lighting - see _pathTracerRawEnv. */
+  markPathTracerDirty(rawEnvTexture?: THREE.Texture | null): void {
+    if (rawEnvTexture !== undefined) {
+      // Build (and cache) a peak-clamped copy so the tracer reflects the
+      // environment at PBR's perceptual brightness instead of the raw HDRI's
+      // true peaks - see PT_ENV_CLAMP. Dispose the pipeline-owned previous
+      // clamp; never touch the shared source texture.
+      if (this._pathTracerClampedEnv) {
+        this._pathTracerClampedEnv.dispose();
+        this._pathTracerClampedEnv = null;
+      }
+      if (rawEnvTexture) {
+        try {
+          // PT_ENV_CLAMP is the ceiling in FINAL reflected-radiance terms.
+          // scene.environmentIntensity multiplies the sampled env afterward,
+          // so clamp the texels to (ceiling / intensity) - otherwise a high
+          // Global Intensity re-amplifies past the ceiling and the white
+          // patch returns. Rebuilt whenever intensity changes (it's a dep of
+          // the effect that calls this).
+          const envI = Math.max(this._sm.scene.environmentIntensity ?? 1, 0.001);
+          const maxVal = RenderPipeline.PT_ENV_CLAMP / envI;
+          this._pathTracerClampedEnv = clampEquirectForPathTracer(rawEnvTexture, maxVal);
+          this._pathTracerRawEnv = this._pathTracerClampedEnv;
+        } catch (e) {
+          // If the texture data isn't in a form we can read (unexpected
+          // format), fall back to the unclamped source rather than losing the
+          // environment entirely.
+          console.warn('[HDRI Forge] Env clamp for path tracer failed, using raw env:', e);
+          this._pathTracerRawEnv = rawEnvTexture;
+        }
+      } else {
+        this._pathTracerRawEnv = null;
+      }
+    }
+    if (this._pathTracingEnabled) this._pathTracerDirty = true;
+  }
+
+  /** Temporarily swaps scene.environment to the raw equirect texture (or
+   *  null) and hides non-scene helper meshes for the duration of `fn`,
+   *  restoring both afterward - setScene()/generate() only read the scene
+   *  synchronously during the call, so this never affects the normal
+   *  rasterized render in between path-traced rebuilds.
+   *
+   *  Helper exclusion matters because PathTracingSceneGenerator (via
+   *  three-mesh-bvh's StaticGeometryGenerator) walks every visible mesh with
+   *  traverseVisible() and assumes PBR-ish material properties
+   *  (m.color.r, m.emissive.r, ...) - it has no concept of "this is UI, not
+   *  scene content". Two concrete cases confirmed live: the ground fade
+   *  overlay (a plain THREE.ShaderMaterial with no .color at all - hard
+   *  crash) and the transform gizmo (traceable MeshBasicMaterial, so no
+   *  crash, but it would otherwise get baked into the "final quality"
+   *  render as a set of colored arrows). userData.isProxy is the existing
+   *  convention this codebase already uses to mark the ground overlay as
+   *  "not real scene content" (originally for SceneHierarchy); reused here
+   *  for the same reason, alongside userData.isHelper (measure line) and
+   *  the gizmo root found via getHelper(). */
+  private _withPathTracerEnv<T>(fn: () => T): T {
+    const scene = this._sm.scene;
+    floatifyColorAttributes(scene);
+    const savedEnv = scene.environment;
+    scene.environment = this._pathTracerRawEnv;
+
+    const hidden: THREE.Object3D[] = [];
+    scene.traverse((o) => {
+      if (o.visible && ((!o.userData?.keepInPathTracer && (o.userData?.isProxy || o.userData?.isHelper)) || o.userData?.hideInPathTracer)) {
+        hidden.push(o);
+      }
+    });
+
+    for (const o of hidden) o.visible = false;
+    try {
+      return fn();
+    } finally {
+      for (const o of hidden) o.visible = true;
+      scene.environment = savedEnv;
+    }
+  }
+
+  isPathTracingActive(): boolean {
+    return this._pathTracingEnabled;
+  }
+
+  /** True once the path tracer has a built scene and is actively accumulating -
+   *  false during the initial BVH build (render() falls back to rasterizing). */
+  isPathTracingReady(): boolean {
+    return this._pathTracingEnabled && this._pathTracerReady && !this._pathTracerBuilding;
+  }
+
+  getPathTracerSamples(): number {
+    return this._pathTracer?.samples ?? 0;
+  }
+
+  getPathTracerError(): string | null {
+    return this._pathTracerError;
+  }
+
+  /** Builds (or rebuilds) the path tracer against the current scene/camera.
+   *  Runs the BVH build synchronously on the main thread: the library's async
+   *  path (setSceneAsync) requires a Worker wired up via setBVHWorker, which
+   *  would need bundling a dedicated worker file through Vite/Tauri - not
+   *  worth the fragility for a "final quality still preview" mode. A brief
+   *  blocking hitch when entering the mode (or after an edit) is an
+   *  acceptable trade. Kept as an async method so callers can still `void`
+   *  it uniformly and so a future move to the worker path wouldn't change
+   *  the call sites. */
+  private async _buildPathTracer(): Promise<void> {
+    if (this._pathTracerBuilding) return;
+    this._pathTracerBuilding = true;
+    this._pathTracerReady = false;
+    this._pathTracerError = null;
+    try {
+      // The library throws a cryptic internal error ("Cannot read properties
+      // of undefined") when asked to trace a scene with zero actual Mesh
+      // objects (e.g. nothing loaded yet, ground plane off, no HDRI shapes -
+      // just helpers/lights) because its merged geometry ends up empty.
+      // Fail with a clear message instead of that stack trace.
+      let hasMesh = false;
+      this._sm.scene.traverse((o) => {
+        if ((o as THREE.Mesh).isMesh) hasMesh = true;
+      });
+      if (!hasMesh) {
+        throw new Error('Nothing to path trace yet - load a model or enable the ground plane first.');
+      }
+
+      if (!this._pathTracer) {
+        this._pathTracer = new WebGLPathTracer(this._sm.renderer);
+        this._pathTracer.minSamples = 1;
+        this._pathTracer.renderDelay = 0;
+        this._pathTracer.fadeDuration = 400;
+        // 12 bounces (up from 6) - car paint clearcoat and glass/chrome need
+        // more light transport depth than a matte product shot to resolve
+        // multi-bounce reflections/refractions without going murky.
+        this._pathTracer.bounces = 12;
+        // 0.8 (up from 0.5) - sharp boundaries between the mirror-smooth
+        // clearcoat body paint and adjacent dark trim/glass (roofline,
+        // window surrounds, wheel arches) are a slow-to-converge case for
+        // unbiased path tracing: confirmed live that raising this cuts the
+        // colored noise at those edges noticeably faster for the same
+        // sample count, at an acceptable cost to sharp-reflection accuracy
+        // for a "final quality preview" mode.
+        this._pathTracer.filterGlossyFactor = 0.8;
+        this._pathTracer.renderScale = 1;
+        this._pathTracer.multipleImportanceSampling = true;
+      }
+      this._withPathTracerEnv(() => this._pathTracer!.setScene(this._sm.scene, this._sm.camera));
+      this._lastPathTracerCamMatrix.copy(this._sm.camera.matrixWorld);
+      this._pathTracerReady = true;
+    } catch (e) {
+      console.error('[LightForge] Path tracer failed to build, falling back to PBR:', e);
+      this._pathTracerError = e instanceof Error ? e.message : String(e);
+      this._pathTracingEnabled = false;
+      this._pathTracerReady = false;
+    } finally {
+      this._pathTracerBuilding = false;
     }
   }
 
@@ -900,9 +1318,45 @@ export class RenderPipeline {
 
   setEngine(engine: 'pbr' | 'pathtracer'): void {
     if (engine === 'pbr') {
+      this._pathTracingEnabled = false;
       this._applyToneMapping(this._config.tonemapping);
     } else {
-      this._sm.renderer.toneMapping = THREE.NoToneMapping;
+      // This is called from a useEffect keyed on the whole renderSettings
+      // object, so it re-fires on unrelated changes (bloom, AO, ...) while
+      // already in pathtracer mode - only kick off a (re)build on an actual
+      // pbr->pathtracer transition or after a previous build failed, not on
+      // every re-fire, or every bloom-slider tweak would restart the BVH build.
+      const wasEnabled = this._pathTracingEnabled;
+      this._pathTracingEnabled = true;
+      // Path-traced output needs SOME tonemapping curve or bright specular
+      // samples clip per-channel with no highlight rolloff (red/blue saturate
+      // before green in noisy regions -> persistent magenta/pink fringing).
+      // But ACES (the app default, fine for PBR) over-desaturates: because
+      // path tracing gathers the environment's bright small light sources far
+      // more accurately than PBR's blurred PMREM approximation, the metallic
+      // clearcoat car paint hits genuinely high radiance, and ACES pulls those
+      // bright saturated colors hard toward white - washing a vivid paint to
+      // pale white. Khronos "Neutral" tonemapping (built specifically for
+      // product/e-commerce 3D rendering) rolls off highlights gracefully like
+      // a filmic curve, so no fringing, while preserving material hue and
+      // saturation - keeping the paint its true colour. Applied only in
+      // path-trace mode; PBR keeps the user's chosen tonemapping. The
+      // _applyToneMapping() guard above forces Neutral whenever path tracing
+      // is enabled, so this call resolves to it regardless of the config.
+      this._applyToneMapping(this._config.tonemapping);
+      if (!wasEnabled) {
+        if (!this._pathTracerReady && !this._pathTracerBuilding) {
+          void this._buildPathTracer();
+        } else if (this._pathTracerReady && !this._pathTracerBuilding) {
+          // The tracer was already built from a previous session in this
+          // mode, but the scene may have changed while path tracing was
+          // toggled off (markPathTracerDirty() is a no-op while disabled,
+          // by design, so edits made in PBR mode never set the dirty flag).
+          // Force a rebuild now instead of silently resuming the stale
+          // accumulated snapshot from the first build.
+          this._pathTracerDirty = true;
+        }
+      }
     }
   }
 
@@ -983,6 +1437,31 @@ export class RenderPipeline {
     this._outputPass = null;
   }
 
+  /** Fully tears down the path tracer (GPU buffers, BVH). Separate from the
+   *  composer-only dispose() above so a config-driven build() rebuild doesn't
+   *  throw away accumulated path-tracing state - only called on unmount or
+   *  when explicitly leaving path-tracing mode for good. */
+  disposePathTracer(): void {
+    if (this._pathTracer) {
+      // three-gpu-pathtracer 0.0.22's dispose() references a non-existent
+      // _renderQuad and always throws, so dispose its real members directly.
+      const pt = this._pathTracer as any;
+      this._pathTracer = null;
+      pt._quad?.dispose?.();
+      pt._quad?.material?.dispose?.();
+      pt._pathTracer?.dispose?.();
+    }
+    if (this._pathTracerClampedEnv) {
+      this._pathTracerClampedEnv.dispose();
+      this._pathTracerClampedEnv = null;
+    }
+    this._pathTracerRawEnv = null;
+    this._pathTracingEnabled = false;
+    this._pathTracerReady = false;
+    this._pathTracerBuilding = false;
+    this._pathTracerDirty = false;
+  }
+
   // ------ Private helpers ---------------------------------------------------------------------------------------------------------------------------------------------------------------------
 
   /** Apply SSAO parameters - radius controls kernel spread, intensity controls maxDistance scaling. */
@@ -997,6 +1476,16 @@ export class RenderPipeline {
 
   private _applyToneMapping(mapping: 'aces' | 'reinhard' | 'linear'): void {
     const r = this._sm.renderer;
+    if (this._pathTracingEnabled) {
+      // Path tracing always uses the Khronos "Neutral" tonemap (see setEngine
+      // for why: ACES over-desaturates the accurately-lit metallic paint).
+      // Centralised here so it survives setToneMapping()/updateConfig() calls
+      // that fire right after setEngine() in the render-settings sync effect,
+      // which would otherwise stomp it back to the rasterizer's curve.
+      r.toneMapping = THREE.NeutralToneMapping;
+      r.toneMappingExposure = this._config.exposure;
+      return;
+    }
     switch (mapping) {
       case 'aces':
         r.toneMapping = THREE.ACESFilmicToneMapping;
@@ -1104,6 +1593,21 @@ interface LightSyncEntry {
   areaHeight?: number;
   edgeSoftness?: number;
   dropShadow?: { enabled: boolean; angle: number; distance: number; intensity: number; softness: number };
+  // Object light: follows a scene object (see objectBinding.ts)
+  objectKey?: string;
+  objectSide?: string;
+  objectGlow?: boolean;
+  // Light Appearance + HDR Textured Area Light settings
+  appearance?: LightAppearance;
+  areaTex?: TexturedAreaSettings;
+  // Composite membership + its filter stack (applied to the group in the HDRI bake)
+  compositeId?: string;
+  compositeFilters?: unknown;
+  compositeBlend?: string;
+  /** Position in the light list: lights at the top render over the ones below. */
+  layerIndex?: number;
+  blendMode?: string;
+  blendInvert?: boolean;
 }
 
 interface LightObjectEntry {
@@ -1117,9 +1621,17 @@ export class LightManager {
   private _entries: Map<string, LightObjectEntry> = new Map();
   private _helpers: Map<string, THREE.Object3D> = new Map();
   private _types: Map<string, string> = new Map();
+  private _emitters = new ObjectEmitters();
+  private _bound = new Map<string, { ld: LightSyncEntry; show: boolean }>();
+  private _objCache = new Map<string, THREE.Object3D>();
+  private _frame = 0;
+  private _texEmitters: TexturedEmitters;
+  private _sceneR = 2;
+  private _sceneRFrame = -1;
 
   constructor(scene: THREE.Scene) {
     this._scene = scene;
+    this._texEmitters = new TexturedEmitters(scene);
     ensureRectAreaLib();
   }
 
@@ -1153,6 +1665,80 @@ export class LightManager {
 
       this._updateLight(ld, shouldShow);
     }
+
+    this._bound.clear();
+    for (const ld of lights) {
+      if (ld.objectKey) this._bound.set(ld.id, { ld, show: ld.visible && (hasSolo ? ld.solo : true) });
+    }
+    this._objCache.clear();
+    this.updateBound();
+  }
+
+  /**
+   * Object lights: keep each light glued to its object (position, facing, size)
+   * and make the object glow. Runs after every sync and once per frame so moving
+   * or resizing the object moves the light with it.
+   */
+  updateBound(): void {
+    this._frame++;
+    const active = new Set<string>();
+    for (const [id, b] of this._bound) {
+      const entry = this._entries.get(id);
+      const key = b.ld.objectKey!;
+      if (!entry) continue;
+      let obj = this._objCache.get(key) ?? null;
+      if (obj && !obj.parent) obj = null;
+      if (!obj && (this._frame % 20 === 0 || !this._objCache.has(key))) {
+        obj = findObjectByKey(this._scene, key);
+        if (obj) this._objCache.set(key, obj);
+        else this._objCache.delete(key);
+      }
+      const light = entry.object;
+      if (!obj) {
+        light.visible = false;
+        const hp = this._helpers.get(id);
+        if (hp) hp.visible = false;
+        continue;
+      }
+      const rect = computeEmitterRect(obj, new THREE.Vector3(0, 0, 0), (b.ld.objectSide ?? 'auto') as EmitterSide);
+      if (!rect) continue;
+      const show = b.show && obj.visible;
+      light.visible = show;
+      light.position.copy(rect.center);
+      light.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(rect.right, rect.up, rect.normal.clone().negate()));
+      if (light instanceof THREE.RectAreaLight) {
+        light.width = Math.max(0.01, rect.width);
+        light.height = Math.max(0.01, rect.height);
+      }
+      const glow = show && b.ld.objectGlow !== false;
+      // The path tracer lights from the glowing surface itself, so the analytic
+      // area light would count the same emitter twice.
+      light.userData.hideInPathTracer = glow;
+      const helper = this._helpers.get(id);
+      if (helper) {
+        helper.visible = show && b.ld.gearVisible;
+        helper.position.copy(light.position);
+        helper.quaternion.copy(light.quaternion);
+        const prev = helper.userData as { hw?: number; hh?: number };
+        const w = Math.max(0.01, rect.width);
+        const h = Math.max(0.01, rect.height);
+        if (prev.hw === undefined || Math.abs((prev.hw ?? 0) - w) > 1e-4 || Math.abs((prev.hh ?? 0) - h) > 1e-4) {
+          const line = helper.children[0] as THREE.LineLoop | undefined;
+          if (line && line.geometry) {
+            line.geometry.dispose();
+            line.geometry = this._areaRectGeometry(w, h);
+            prev.hw = w;
+            prev.hh = h;
+          }
+        }
+      }
+      if (glow) {
+        const intensity = (b.ld.brightness / 1000) * 10 * (b.ld.opacity / 100);
+        this._emitters.apply(obj, key, new THREE.Color(b.ld.color), intensity);
+        active.add(key);
+      }
+    }
+    this._emitters.keepOnly(active);
   }
 
   private _createLight(ld: LightSyncEntry): void {
@@ -1207,13 +1793,43 @@ export class LightManager {
     // the light in toward the origin - which is why LightPaint never landed
     // where you clicked.
     void latRad;
-    const px = s.radius * Math.cos(lngRad);
-    const py = s.height;
-    const pz = s.radius * Math.sin(lngRad);
+    let px = s.radius * Math.cos(lngRad);
+    let py = s.height;
+    let pz = s.radius * Math.sin(lngRad);
+
+    // HDR Textured Area Lights.
+    //  - Smart Dolly moves the light closer / further AND scales it, so the illumination it delivers
+    //    stays consistent. With Maintain Reflection Size on, the scale is chosen so the light keeps
+    //    the same size in reflections on flat surfaces instead of the same solid angle.
+    //  - Dolly Multiplier moves the light without changing its size.
+    const isAreaLight = (ld.type === 'area' || ld.type === 'overhead') && !ld.objectKey;
+    let sizeK = 1;
+    if (isAreaLight && ld.areaTex?.enabled) {
+      const r0 = Math.max(0.05, Math.hypot(px, py, pz));
+      const sd = Math.min(10, Math.max(0.05, typeof ld.areaTex.smartDolly === 'number' ? ld.areaTex.smartDolly : 1));
+      const dm = Math.min(10, Math.max(0.05, ld.areaTex.dollyMultiplier ?? 1));
+      const k = sd * dm;
+      px *= k; py *= k; pz *= k;
+      if (ld.areaTex.maintainReflectionSize === false) {
+        sizeK = sd; // same solid angle from the model
+      } else {
+        // reflection size on a flat surface at the edge of the model as seen from the camera
+        const cam = (window as unknown as { __lightforgeScene?: { camera?: THREE.Camera } }).__lightforgeScene?.camera;
+        const V = cam ? Math.max(0.5, cam.position.length()) : 5;
+        const rObj = Math.min(this._sceneRadius(), r0 * 0.9);
+        sizeK = (V + Math.max(0.1, r0 * sd - rObj)) / (V + Math.max(0.1, r0 - rObj));
+      }
+    }
 
     lightObj.userData.edgeSoftness = ld.edgeSoftness ?? 50;
     lightObj.userData.dropShadow = ld.dropShadow;
     lightObj.userData.opacity = (ld.opacity ?? 100) / 100;
+    lightObj.userData.compositeId = ld.compositeId;
+    lightObj.userData.compositeFilters = ld.compositeFilters;
+    lightObj.userData.compositeBlend = ld.compositeBlend;
+    lightObj.userData.layerIndex = ld.layerIndex;
+    lightObj.userData.blendMode = ld.blendMode;
+    lightObj.userData.blendInvert = ld.blendInvert;
     lightObj.position.set(px, py, pz);
     lightObj.visible = shouldShow;
 
@@ -1285,8 +1901,9 @@ export class LightManager {
 
       // Area light dimensions
       if (lightObj instanceof THREE.RectAreaLight) {
-        if (ld.areaWidth !== undefined) lightObj.width = ld.areaWidth;
-        if (ld.areaHeight !== undefined) lightObj.height = ld.areaHeight;
+        if (ld.areaWidth !== undefined) lightObj.width = ld.areaWidth * sizeK;
+        if (ld.areaHeight !== undefined) lightObj.height = ld.areaHeight * sizeK;
+        if (isAreaLight) this._applyAppearance(ld, lightObj, shouldShow);
       }
 
       // Shadow config
@@ -1323,8 +1940,8 @@ export class LightManager {
         // is immutable, so the old geometry must be disposed and replaced.
         const isAreaType = ld.type === 'area' || ld.type === 'overhead';
         if (isAreaType) {
-          const w = Math.max(0.01, ld.areaWidth ?? 2);
-          const h = Math.max(0.01, ld.areaHeight ?? 2);
+          const w = Math.max(0.01, (ld.areaWidth ?? 2) * sizeK);
+          const h = Math.max(0.01, (ld.areaHeight ?? 2) * sizeK);
           const prev = helper.userData as { hw?: number; hh?: number };
           if (prev.hw !== w || prev.hh !== h) {
             const line = helper.children[0] as THREE.LineLoop;
@@ -1346,6 +1963,73 @@ export class LightManager {
           }
         }
       }
+    }
+  }
+
+  /** Radius of the model(s) around the origin - used by Smart Dolly. Cached for a few frames. */
+  private _sceneRadius(): number {
+    if (this._sceneRFrame !== -1 && this._frame - this._sceneRFrame < 45) return this._sceneR;
+    const box = new THREE.Box3();
+    const b = new THREE.Box3();
+    this._scene.traverse((o) => {
+      const m = o as THREE.Mesh;
+      if (!m.isMesh || o.name === '__floor__' || o.name === 'TransformControlsPlane' || !o.visible || !m.geometry) return;
+      // Skip anything inside a helper / gizmo hierarchy (transform gizmo parts carry no flag themselves).
+      for (let p: THREE.Object3D | null = o; p; p = p.parent) {
+        if (p.userData?.isHelper || p.userData?.isProxy || p.userData?.isGrid) return;
+      }
+      b.setFromObject(m);
+      if (!b.isEmpty()) box.union(b);
+    });
+    let r = 2;
+    if (!box.isEmpty()) {
+      const s = box.getBoundingSphere(new THREE.Sphere());
+      r = Math.max(Math.hypot(box.max.x, box.max.z, box.min.x, box.min.z) / 2, s.radius);
+    }
+    this._sceneR = r;
+    this._sceneRFrame = this._frame;
+    return r;
+  }
+
+  /**
+   * Light Appearance on an area light: stash the RGBA texture for the analytic HDRI
+   * export, tint the analytic RectAreaLight by the texture's mean radiance, and (in
+   * Area Light mode) build the visible textured emitter that also lights the path tracer.
+   */
+  private _applyAppearance(ld: LightSyncEntry, light: THREE.RectAreaLight, show: boolean): void {
+    const at = ld.areaTex;
+    const w = Math.max(0.01, light.width);
+    const h = Math.max(0.01, light.height);
+    const tex = ld.appearance ? getLightTexture(ld.id, ld.appearance, w / h, Math.round(Math.min(768, Math.max(96, 192 * (at?.textureScale ?? 1))))) : null;
+    if (!ld.appearance) dropLightTexture(ld.id);
+    light.userData.appearanceTex = tex ? { data: tex.data, width: tex.width, height: tex.height } : undefined;
+    light.userData.areaMode = !!at?.enabled;
+    light.userData.spread = at?.spread ?? 100;
+    light.userData.baseColor = new THREE.Color(ld.color);
+    if (tex) {
+      // Uniform RectAreaLight approximation of the textured emitter.
+      light.color.r *= tex.mean.r;
+      light.color.g *= tex.mean.g;
+      light.color.b *= tex.mean.b;
+    }
+    if (tex && at?.enabled) {
+      const intensity = (ld.brightness / 1000) * 10 * (ld.opacity / 100);
+      this._texEmitters.update(ld.id, {
+        show,
+        camVisible: at.camVisibility !== false,
+        position: light.position,
+        quaternion: light.quaternion,
+        width: w,
+        height: h,
+        tint: new THREE.Color(ld.color),
+        intensity,
+        texture: tex,
+      });
+      // The path tracer lights from the textured emitter itself; the analytic light would double it.
+      light.userData.hideInPathTracer = this._texEmitters.isVisible(ld.id);
+    } else {
+      this._texEmitters.remove(ld.id);
+      light.userData.hideInPathTracer = false;
     }
   }
 
@@ -1579,6 +2263,9 @@ export class LightManager {
 
     this._entries.delete(id);
     this._types.delete(id);
+    this._bound.delete(id);
+    this._texEmitters.remove(id);
+    dropLightTexture(id);
 
     const helper = this._helpers.get(id);
     if (helper) {
@@ -1616,6 +2303,9 @@ export class LightManager {
     for (const id of ids) {
       this._removeLight(id);
     }
+    this._emitters.releaseAll();
+    this._texEmitters.dispose();
+    this._bound.clear();
   }
 }
 
@@ -2017,6 +2707,93 @@ export function createGradientBackground(config: GradientBackgroundConfig): THRE
   return tex;
 }
 
+/** Converts a CanvasTexture (e.g. from createGradientBackground()) into a
+ *  DataTexture with a real CPU-side pixel array, matching what RGBELoader/
+ *  EXRLoader produce for a real HDRI file. three-gpu-pathtracer's
+ *  EquirectHdrInfoUniform reads `image.{width,height,data}` directly to
+ *  build its importance-sampling CDF tables - an HTMLCanvasElement has no
+ *  `.data`, so handing it a raw CanvasTexture crashes with "Cannot read
+ *  properties of undefined (reading 'length')". flipY is set to false to
+ *  match the loaders' convention (row 0 = top of the equirect image), same
+ *  row order getImageData() already returns.
+ *
+ *  The data is manually decoded from sRGB to linear here, and the result
+ *  carries no colorSpace tag (it's already linear) - confirmed by reading
+ *  EquirectHdrInfoUniform's source that it does zero colorSpace-aware
+ *  decoding of the CPU-side `.data` array it's handed; it assumes whatever
+ *  it's given is already linear radiance, exactly like a real loaded HDR
+ *  file's raw float data is. Canvas getImageData() returns sRGB-encoded
+ *  bytes, so without this decode the path tracer's importance-sampling
+ *  table (and the actual light contribution computed from it) reads those
+ *  gamma-compressed values as if they were linear - substantially
+ *  overbright, especially in the midtones - which was blowing this app's
+ *  mirror-smooth clearcoat car paint to solid clipped white under path
+ *  tracing while the same material rendered correctly in PBR mode (PBR's
+ *  PMREM path decodes colorSpace correctly on the GPU sampler). */
+export function canvasTextureToDataTexture(canvasTex: THREE.CanvasTexture): THREE.DataTexture {
+  const canvas = canvasTex.image as HTMLCanvasElement;
+  const ctx = canvas.getContext('2d')!;
+  const { width, height } = canvas;
+  const imgData = ctx.getImageData(0, 0, width, height);
+  const srgb = imgData.data;
+  const linear = new Float32Array(width * height * 4);
+  for (let i = 0; i < srgb.length; i += 4) {
+    for (let c = 0; c < 3; c++) {
+      const s = srgb[i + c] / 255;
+      linear[i + c] = s <= 0.04045 ? s / 12.92 : Math.pow((s + 0.055) / 1.055, 2.4);
+    }
+    linear[i + 3] = srgb[i + 3] / 255;
+  }
+  const dataTex = new THREE.DataTexture(linear, width, height, THREE.RGBAFormat, THREE.FloatType);
+  dataTex.mapping = THREE.EquirectangularReflectionMapping;
+  dataTex.flipY = false;
+  dataTex.needsUpdate = true;
+  return dataTex;
+}
+
+/** Produce a peak-clamped Float32 equirect copy for the path tracer, so its
+ *  bright reflections read at PBR's perceptual level instead of the raw HDRI's
+ *  true peaks (the cause of the "white patch" on mirror-finish paint - see
+ *  RenderPipeline.PT_ENV_CLAMP). Each RGB channel is soft-compressed with a
+ *  Reinhard curve that asymptotes to `maxVal`, so values already below the
+ *  ceiling are essentially untouched while very bright sky/light pixels roll
+ *  off smoothly rather than hard-clipping. Reads the source texture's CPU-side
+ *  pixel data, decoding half-float when needed; throws if the data isn't
+ *  readable (caller falls back to the raw texture). */
+export function clampEquirectForPathTracer(tex: THREE.Texture, maxVal: number): THREE.DataTexture {
+  const img = tex.image as { width: number; height: number; data: ArrayLike<number> };
+  if (!img || !img.data || !img.width || !img.height) {
+    throw new Error('environment texture has no readable pixel data');
+  }
+  const { width, height, data } = img;
+  const texelCount = width * height;
+  const channels = Math.round(data.length / texelCount);
+  if (channels < 3) throw new Error('environment texture has too few channels');
+
+  const isHalf = tex.type === THREE.HalfFloatType || (typeof (data as any).BYTES_PER_ELEMENT === 'number' && !(data instanceof Float32Array) && !(data instanceof Float64Array));
+  const decode = isHalf
+    ? (v: number) => THREE.DataUtils.fromHalfFloat(v)
+    : (v: number) => v;
+
+  const out = new Float32Array(texelCount * 4);
+  // Reinhard-style rolloff: approaches maxVal asymptotically, never exceeds it,
+  // and leaves values well below maxVal almost unchanged.
+  const soft = (c: number) => (c > 0 ? c / (1 + c / maxVal) : 0);
+  for (let i = 0; i < texelCount; i++) {
+    const si = i * channels;
+    const di = i * 4;
+    out[di + 0] = soft(decode(data[si + 0]));
+    out[di + 1] = soft(decode(data[si + 1]));
+    out[di + 2] = soft(decode(data[si + 2]));
+    out[di + 3] = 1;
+  }
+  const clamped = new THREE.DataTexture(out, width, height, THREE.RGBAFormat, THREE.FloatType);
+  clamped.mapping = THREE.EquirectangularReflectionMapping;
+  clamped.flipY = false;
+  clamped.needsUpdate = true;
+  return clamped;
+}
+
 /**
  * Wide, dim additive glow laid flat on the floor at the origin - simulates
  * an overhead spotlight pool so the grid reads as lit rather than flat,
@@ -2098,4 +2875,27 @@ export function createLimboBackground(): THREE.Texture {
   tex.colorSpace = THREE.SRGBColorSpace;
   tex.needsUpdate = true;
   return tex;
+}
+/** GLBs often store vertex colours as normalized Uint8/Uint16. three.js
+ *  normalizes those on the GPU, but three-gpu-pathtracer copies the raw
+ *  integer values (255 instead of 1.0) and multiplies albedo by them - car
+ *  paint came out ~255x too bright and clipped to pale pink/white. Convert
+ *  to Float32 (visually identical for the rasteriser) before tracing. */
+export function floatifyColorAttributes(root: THREE.Object3D): void {
+  root.traverse((o) => {
+    const mesh = o as THREE.Mesh;
+    if (!mesh.isMesh) return;
+    const geo = mesh.geometry;
+    const attr = geo?.attributes?.color as THREE.BufferAttribute | undefined;
+    if (!attr || attr.array instanceof Float32Array) return;
+    const size = attr.itemSize;
+    const out = new Float32Array(attr.count * size);
+    for (let i = 0; i < attr.count; i++) {
+      out[i * size] = attr.getX(i);
+      out[i * size + 1] = attr.getY(i);
+      out[i * size + 2] = attr.getZ(i);
+      if (size > 3) out[i * size + 3] = attr.getW(i);
+    }
+    geo.setAttribute('color', new THREE.BufferAttribute(out, size));
+  });
 }
