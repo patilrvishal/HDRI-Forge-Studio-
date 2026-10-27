@@ -5,8 +5,10 @@ import App from './App'
 import { initBlenderBridge } from './bridge/BlenderBridgeListener'
 import { ErikLiveBadge } from './erikLive/ErikLiveBadge'
 import { isTauri } from '@tauri-apps/api/core'
+import { initA11yLabels } from './utils/a11yLabels'
 
 initBlenderBridge()
+initA11yLabels()
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>

@@ -39,8 +39,9 @@
   --thumb: #ff7d2e;
   /* ── Text hierarchy ──────────────────────────────────────── */
   --text: #f2f0ee;
-  --text-sec: #a0a0a8;
-  --text-dim: #63636c;
+  --text-sec: #b0b0b8;   /* 7.9:1 on panels */
+  --text-dim: #8a8a94;   /* 4.9:1 on panels (was #63636c, 2.9:1) */
+  color-scheme: dark;     /* native select lists, scrollbars and form controls follow the dark theme */
   /* ── Borders ──────────────────────────────────────────────── */
   --border: #2a2a30;
   --border-light: #3a3a42;
@@ -2530,3 +2531,55 @@ input[type="range"]:active::-webkit-slider-thumb {
 .slider-input:hover { border-color: var(--accent); }
 .slider-input:focus { outline: none; border-color: var(--accent); box-shadow: var(--neu-inset), 0 0 0 2px var(--accent-dim); }
 .slider-row .slider-unit { font-size: 10px; color: var(--text-dim); min-width: 14px; flex-shrink: 0; }
+
+/* ═══════════════════════════════════════════════════════════════════
+   UX polish layer - styling only, no behaviour changes.
+   Keeps the Amber Glass identity; adds the accessibility and feedback
+   details the base theme was missing.
+   ═══════════════════════════════════════════════════════════════════ */
+
+/* Keyboard focus. The base reset removes every outline, so tabbing through
+   buttons, tabs and toolbars showed nothing. :focus-visible only fires for
+   keyboard use, so mouse clicks look exactly as before. Controls that already
+   draw their own focus style (field inputs, selects, number boxes) keep it
+   because their selectors are more specific. */
+:where(button, [role="button"], a[href], summary, [tabindex]:not([tabindex="-1"]), input, select, textarea):focus-visible {
+  outline: 2px solid var(--accent-bright);
+  outline-offset: 2px;
+}
+/* Sliders: ring the thumb, not the whole track */
+input[type="range"]:focus-visible { outline: none; }
+input[type="range"]:focus-visible::-webkit-slider-thumb {
+  box-shadow: 0 0 0 3px var(--bg-deep), 0 0 0 5px var(--accent-bright);
+}
+input[type="range"]:focus-visible::-moz-range-thumb {
+  box-shadow: 0 0 0 3px var(--bg-deep), 0 0 0 5px var(--accent-bright);
+}
+
+/* Sliders: slightly larger grab target and a warm hover halo */
+input[type="range"]::-webkit-slider-thumb { width: 14px; height: 14px; transition: transform 0.12s, box-shadow 0.15s; }
+input[type="range"]::-moz-range-thumb { width: 14px; height: 14px; }
+input[type="range"]:hover::-webkit-slider-thumb { box-shadow: 0 0 0 4px var(--accent-bg), var(--glow-sm); }
+input[type="range"]:active::-webkit-slider-thumb { transform: scale(1.1); box-shadow: 0 0 0 5px var(--accent-dim), var(--glow-md); }
+
+/* Pressed feedback for icon buttons (the other button styles already have it) */
+.btn-icon:active { transform: scale(0.93); }
+
+/* Disabled controls say so */
+button:disabled, [aria-disabled="true"] { cursor: not-allowed; }
+
+/* Placeholder text readable and on-theme (browser default was a flat grey) */
+::placeholder { color: var(--text-dim); opacity: 1; }
+
+/* Text selection in fields matches the accent */
+::selection { background: rgba(255, 125, 46, 0.38); color: #fff; }
+
+/* Respect the OS "reduce motion" setting everywhere, not just the glow effects */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
