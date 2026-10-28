@@ -4,7 +4,7 @@ import { useAnimationStore } from '../store/animationStore';
 import { useMaterialEditorStore } from '../store/materialEditorStore';
 import { useHDRIAssetStore } from '../store/hdriAssetStore';
 import { history } from '../store/historyStore';
-import { getRawModelDataBase64 } from '../store/modelDataStore';
+import { getRawModelDataBase64, getImportedModelsBase64 } from '../store/modelDataStore';
 import { getRawHDRIDataBase64 } from '../store/hdriDataStore';
 import type { AnimationState } from '../types/Animation';
 import type { SceneState } from '../types/Scene';
@@ -35,6 +35,8 @@ export interface SceneFile {
     modelName: string;
     /** Base64-encoded GLB binary data (embedded for self-contained scene files) */
     modelDataBase64: string | null;
+    /** Extra model files imported into the scene (File > Import Models); absent in older scene files */
+    importedModels?: { name: string; dataBase64: string }[];
     camera: {
       position: [number, number, number];
       target: [number, number, number];
@@ -144,6 +146,7 @@ export class SceneExporter {
       scene: {
         modelName: sceneState.modelName,
         modelDataBase64: getRawModelDataBase64(),
+        ...(getImportedModelsBase64() ? { importedModels: getImportedModelsBase64()! } : {}),
         camera: { ...sceneState.camera },
         environment: {
           ...sceneState.environment,
@@ -308,6 +311,12 @@ export class SceneExporter {
           sceneData.modelName || 'model.glb',
         );
       }
+      // ── Restore extra imported models (applied after the main model finishes loading) ──
+      useSceneStore.getState().setPendingImportedModels(
+        data.scene.importedModels && data.scene.importedModels.length > 0 ? data.scene.importedModels : null,
+        // A file with imports but no main model is the whole scene: replace what is open instead of adding to it
+        !data.scene.modelDataBase64,
+      );
 
       // ── Restore custom HDRI data ─────────────────────────────────────────
       if (data.scene.environment.customHDRIDataBase64 && sceneData.environment.presetId === '__custom__') {
@@ -462,7 +471,7 @@ export class SceneExporter {
       // Retry without the model payload - the lighting rig is the part worth
       // recovering, and it is orders of magnitude smaller.
       try {
-        const slim: SceneFile = { ...data, scene: { ...data.scene, modelDataBase64: null } };
+        const slim: SceneFile = { ...data, scene: { ...data.scene, modelDataBase64: null, importedModels: undefined } };
         localStorage.setItem('lightstudio_quicksave', JSON.stringify(slim));
         return { ok: true, modelIncluded: false };
       } catch {

@@ -2,8 +2,9 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { OBJLoader } from 'three/addons/loaders/OBJLoader.js';
+import { FBXLoader } from 'three/addons/loaders/FBXLoader.js';
 import { RectAreaLightUniformsLib } from 'three/addons/lights/RectAreaLightUniformsLib.js';
-import { setRawModelData, clearRawModelData } from '../store/modelDataStore';
+import { setRawModelData, clearRawModelData, addRawImportedModel } from '../store/modelDataStore';
 import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
@@ -2309,11 +2310,96 @@ export class LightManager {
   }
 }
 
+
+/**
+ * Size of one unit in an FBX file, as a multiplier to metres. FBX stores a "UnitScaleFactor" (1 = centimetres,
+ * 100 = metres, ...) and three.js' FBXLoader ignores it, so a centimetre file arrives 100x too big next to a
+ * glTF. Returns 1 when the file has no such setting.
+ */
+export function fbxUnitToMetres(buffer: ArrayBuffer): number {
+  try {
+    const bytes = new Uint8Array(buffer);
+    const isBinary = new TextDecoder('latin1').decode(bytes.subarray(0, 18)) === 'Kaydara FBX Binary';
+    let factor: number | null = null;
+    if (!isBinary) {
+      const text = new TextDecoder('utf-8').decode(bytes.subarray(0, Math.min(bytes.length, 4_000_000)));
+      const m = /UnitScaleFactor"\s*,\s*"double"\s*,\s*"Number"\s*,\s*""\s*,\s*([-+0-9.eE]+)/.exec(text);
+      if (m) factor = parseFloat(m[1]);
+    } else {
+      // Binary: the property node is  name, "double", "Number", "", <double>  - each text part is 'S' + length + bytes
+      const needle = Array.from('UnitScaleFactor').map((c) => c.charCodeAt(0));
+      const limit = Math.min(bytes.length, 4_000_000) - needle.length;
+      let at = -1;
+      for (let i = 0; i < limit && at < 0; i++) {
+        let hit = true;
+        for (let k = 0; k < needle.length; k++) {
+          if (bytes[i + k] !== needle[k]) { hit = false; break; }
+        }
+        if (hit) at = i;
+      }
+      if (at >= 0) {
+        const view = new DataView(buffer);
+        let pos = at + needle.length;
+        for (let part = 0; part < 3; part++) {
+          if (bytes[pos] !== 0x53) { pos = -1; break; }
+          pos += 5 + view.getUint32(pos + 1, true);
+        }
+        if (pos >= 0 && bytes[pos] === 0x44) factor = view.getFloat64(pos + 1, true);
+      }
+    }
+    return factor !== null && Number.isFinite(factor) && factor > 0 ? factor / 100 : 1;
+  } catch {
+    return 1;
+  }
+}
+
+/**
+ * Converts the older Phong / Lambert / Basic materials that FBX and OBJ files bring into PBR (Standard) ones,
+ * keeping colour, textures, opacity and name. The Material Editor and the HDRI lighting only work with PBR
+ * materials, so without this an imported FBX or OBJ could not be edited or lit like the rest of the scene.
+ */
+export function toStandardMaterials(root: THREE.Object3D): void {
+  const converted = new Map<THREE.Material, THREE.Material>();
+  const convert = (m: THREE.Material): THREE.Material => {
+    if (m instanceof THREE.MeshStandardMaterial) return m;
+    const done = converted.get(m);
+    if (done) return done;
+    const src = m as THREE.MeshPhongMaterial & THREE.MeshBasicMaterial;
+    const std = new THREE.MeshStandardMaterial({
+      name: src.name,
+      color: src.color ? src.color.clone() : new THREE.Color(0xffffff),
+      map: src.map ?? null,
+      normalMap: (src as THREE.MeshPhongMaterial).normalMap ?? null,
+      bumpMap: (src as THREE.MeshPhongMaterial).bumpMap ?? null,
+      emissive: (src as THREE.MeshPhongMaterial).emissive ? (src as THREE.MeshPhongMaterial).emissive.clone() : new THREE.Color(0x000000),
+      emissiveMap: (src as THREE.MeshPhongMaterial).emissiveMap ?? null,
+      aoMap: src.aoMap ?? null,
+      alphaMap: src.alphaMap ?? null,
+      opacity: src.opacity,
+      transparent: src.transparent,
+      alphaTest: src.alphaTest,
+      side: src.side,
+      vertexColors: src.vertexColors,
+      metalness: 0,
+      // Phong "shininess" (0-100+) to PBR roughness: a glossy Phong becomes a smoother surface
+      roughness: m instanceof THREE.MeshPhongMaterial ? Math.max(0.05, 1 - Math.min(m.shininess, 100) / 100) : 0.8,
+    });
+    converted.set(m, std);
+    m.dispose();
+    return std;
+  };
+  root.traverse((child) => {
+    if (!(child instanceof THREE.Mesh)) return;
+    child.material = Array.isArray(child.material) ? child.material.map(convert) : convert(child.material);
+  });
+}
+
 export class ModelLoader {
   private _scene: THREE.Scene;
   private _currentModel: THREE.Group | null = null;
   private _loader = new GLTFLoader();
   private _objLoader = new OBJLoader();
+  private _fbxLoader = new FBXLoader();
   private _loading = false;
   private _progress = 0;
   private _onProgress: ((progress: number) => void) | null = null;
@@ -2452,6 +2538,8 @@ export class ModelLoader {
       });
 
       this.removeCurrentModel();
+      // removeCurrentModel() clears the saved copy, so store this model's copy again or it is missing from saved scenes
+      if (arrayBuffer) setRawModelData(arrayBuffer, file.name);
 
       this._currentModel = gltf.scene;
       this._scene.add(gltf.scene);
@@ -2532,6 +2620,7 @@ export class ModelLoader {
       });
 
       this.removeCurrentModel();
+      setRawModelData(arrayBuffer, fileName);
 
       this._currentModel = gltf.scene;
       this._scene.add(gltf.scene);
@@ -2632,6 +2721,155 @@ export class ModelLoader {
       const msg = err instanceof Error ? err.message : 'Failed to load OBJ model';
       this._onError?.(msg);
     }
+  }
+
+  /** File types accepted by Import Models. */
+  static importFormatOf(fileName: string): 'glb' | 'gltf' | 'fbx' | 'obj' | null {
+    const ext = fileName.toLowerCase().split('.').pop();
+    return ext === 'glb' || ext === 'gltf' || ext === 'fbx' || ext === 'obj' ? ext : null;
+  }
+
+  /** Parses one model file into a group named after the file, so it shows as a single item in the scene hierarchy. */
+  private async _parseImport(buffer: ArrayBuffer, fileName: string): Promise<THREE.Group> {
+    const format = ModelLoader.importFormatOf(fileName);
+    let content: THREE.Object3D;
+    if (format === 'fbx') {
+      content = this._fbxLoader.parse(buffer, '');
+      // FBX units are usually centimetres; bring them to metres so the file matches GLB and OBJ imports
+      const unit = fbxUnitToMetres(buffer);
+      if (unit !== 1) content.scale.multiplyScalar(unit);
+      toStandardMaterials(content);
+    } else if (format === 'obj') {
+      // OBJLoader carries no materials: meshes come in with the default material, ready for the Material Editor.
+      content = this._objLoader.parse(new TextDecoder('utf-8').decode(buffer));
+      toStandardMaterials(content);
+    } else if (format === 'glb' || format === 'gltf') {
+      const data: ArrayBuffer | string = format === 'gltf' ? new TextDecoder('utf-8').decode(buffer) : buffer;
+      const gltf = await new Promise<{ scene: THREE.Group }>((resolve, reject) => {
+        this._loader.parse(data, '', resolve, reject);
+      });
+      content = gltf.scene;
+    } else {
+      throw new Error('Unsupported file type');
+    }
+    const group = new THREE.Group();
+    group.name = fileName.replace(/\.[^.]+$/, '');
+    group.userData.importedFrom = fileName;
+    group.add(content);
+    group.traverse((child) => {
+      if (child instanceof THREE.Mesh) {
+        child.castShadow = true;
+        child.receiveShadow = true;
+      }
+    });
+    return group;
+  }
+
+  private async _waitUntilIdle(): Promise<void> {
+    const start = Date.now();
+    while (this._loading && Date.now() - start < 60000) {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+  }
+
+  /**
+   * Imports one or more model files (GLB, GLTF, FBX, OBJ) INTO the scene without replacing what is there.
+   *
+   * With a model already loaded, each file goes inside it, so it inherits that model's scale and position and lines
+   * up as it did in the source app (they are parts of one scene). With nothing loaded, the files become one new
+   * model: centred, scaled and grounded together, so their placement relative to each other is kept.
+   *
+   * `keepName` is the scene's model name to keep when a model is already loaded (evaluated after any load in
+   * progress finishes). Files that fail are reported in the result; the rest are still imported.
+   */
+  async importFromBuffers(
+    items: { name: string; data: ArrayBuffer }[],
+    keepName?: string | (() => string),
+  ): Promise<{ imported: string[]; failed: { name: string; error: string }[] }> {
+    const result = { imported: [] as string[], failed: [] as { name: string; error: string }[] };
+    if (items.length === 0) return result;
+
+    await this._waitUntilIdle();
+    if (this._loading) {
+      items.forEach((i) => result.failed.push({ name: i.name, error: 'Another model is still loading' }));
+      return result;
+    }
+    this._loading = true;
+    this._progress = 0;
+    this._onProgress?.(0);
+
+    const parsed: { name: string; data: ArrayBuffer; group: THREE.Group }[] = [];
+    for (let i = 0; i < items.length; i++) {
+      const item = items[i];
+      try {
+        parsed.push({ ...item, group: await this._parseImport(item.data, item.name) });
+      } catch (err) {
+        result.failed.push({ name: item.name, error: err instanceof Error ? err.message : String(err) });
+      }
+      this._progress = ((i + 1) / items.length) * 90;
+      this._onProgress?.(this._progress);
+      await new Promise((resolve) => setTimeout(resolve, 0)); // let the progress bar paint
+    }
+
+    if (parsed.length === 0) {
+      this._loading = false;
+      this._progress = 0;
+      this._onError?.(result.failed.map((f) => `${f.name}: ${f.error}`).join(' | ') || 'Nothing to import');
+      return result;
+    }
+
+    let label: string;
+    const existing = this._currentModel;
+    if (existing) {
+      parsed.forEach((p) => existing.add(p.group));
+      label = (typeof keepName === 'function' ? keepName() : keepName) || existing.name || parsed[0].name;
+    } else {
+      const root = new THREE.Group();
+      root.name = 'Imported models';
+      parsed.forEach((p) => root.add(p.group));
+      this._scene.add(root);
+      this._currentModel = root;
+      const box = new THREE.Box3().setFromObject(root);
+      const size = box.getSize(new THREE.Vector3());
+      const maxDim = Math.max(size.x, size.y, size.z);
+      if (maxDim > 0) root.scale.multiplyScalar(4 / maxDim);
+      const box2 = new THREE.Box3().setFromObject(root);
+      root.position.sub(box2.getCenter(new THREE.Vector3()));
+      root.position.y += box2.getSize(new THREE.Vector3()).y / 2;
+      label = parsed.length === 1 ? parsed[0].name : `${parsed[0].name} + ${parsed.length - 1} more`;
+    }
+
+    // Keep the files so a saved scene can bring them back
+    for (const p of parsed) {
+      addRawImportedModel(p.name, p.data);
+      result.imported.push(p.name);
+    }
+    this._updateContactShadow(new THREE.Box3().setFromObject(this._currentModel!));
+
+    this._loading = false;
+    this._progress = 100;
+    this._onProgress?.(100);
+    this._onLoaded?.(label);
+    return result;
+  }
+
+  /** Same as importFromBuffers, reading the files first. */
+  async importFromFiles(
+    files: File[],
+    keepName?: string | (() => string),
+  ): Promise<{ imported: string[]; failed: { name: string; error: string }[] }> {
+    const items: { name: string; data: ArrayBuffer }[] = [];
+    const unreadable: { name: string; error: string }[] = [];
+    for (const f of files) {
+      try {
+        items.push({ name: f.name, data: await f.arrayBuffer() });
+      } catch (err) {
+        unreadable.push({ name: f.name, error: err instanceof Error ? err.message : String(err) });
+      }
+    }
+    const result = await this.importFromBuffers(items, keepName);
+    result.failed.push(...unreadable);
+    return result;
   }
 
   removeCurrentModel(): void {

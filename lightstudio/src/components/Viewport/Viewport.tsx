@@ -95,6 +95,7 @@ export const Viewport: React.FC<ViewportProps> = ({ sceneManagerRef, onScreensho
   const envLoaderRef = useRef<EnvironmentLoader | null>(null);
   const materialManagerRef = useRef<MaterialManager | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const importInputRef = useRef<HTMLInputElement>(null);
   const animAccumulatorRef = useRef(0);
   const giAccumulatorRef = useRef(0);
   const mouseDownPos = useRef<{ x: number; y: number } | null>(null);
@@ -121,6 +122,9 @@ export const Viewport: React.FC<ViewportProps> = ({ sceneManagerRef, onScreensho
   const pendingModelSkipFit = useSceneStore((s) => s._pendingModelSkipFit);
   const pendingModelFormat = useSceneStore((s) => s._pendingModelFormat);
   const clearPendingModelData = useSceneStore((s) => s.clearPendingModelData);
+  const pendingImportedModels = useSceneStore((s) => s._pendingImportedModels);
+  const clearPendingImportedModels = useSceneStore((s) => s.clearPendingImportedModels);
+  const pendingImportedReplace = useSceneStore((s) => s._pendingImportedReplace);
   const pendingHDRIData = useSceneStore((s) => s._pendingHDRIDataBase64);
   const clearPendingHDRIData = useSceneStore((s) => s.clearPendingHDRIData);
   const backplate = useSceneStore((s) => s.environment.backplate);
@@ -827,6 +831,24 @@ export const Viewport: React.FC<ViewportProps> = ({ sceneManagerRef, onScreensho
     clearPendingModelData();
   }, [pendingModelData, pendingModelFileName, pendingModelSkipFit, pendingModelFormat, modelLoaderRef, clearPendingModelData]);
 
+  // Restore the extra imported models from a scene file (runs after the main model has finished loading)
+  useEffect(() => {
+    if (!pendingImportedModels) return;
+    const ml = modelLoaderRef.current;
+    if (!ml) return;
+    const items = pendingImportedModels.map((m) => ({ name: m.name, data: base64ToArrayBuffer(m.dataBase64) }));
+    clearPendingImportedModels();
+    setIsLoading(true);
+    setLoadError(null);
+    setLoadProgress(0);
+    if (pendingImportedReplace) ml.removeCurrentModel();
+    void ml.importFromBuffers(items, () => useSceneStore.getState().modelName).then((res) => {
+      if (res.failed.length > 0) {
+        useUIStore.getState().showToast(`Could not restore: ${res.failed.map((f) => f.name).join(', ')}`, 'error');
+      }
+    });
+  }, [pendingImportedModels, pendingImportedReplace, modelLoaderRef, clearPendingImportedModels]);
+
   // Restore custom HDRI from scene file
   useEffect(() => {
     if (!pendingHDRIData) return;
@@ -1508,14 +1530,19 @@ export const Viewport: React.FC<ViewportProps> = ({ sceneManagerRef, onScreensho
       e.stopPropagation();
       setIsDragging(false);
 
-      const files = e.dataTransfer.files;
+      const files = Array.from(e.dataTransfer.files);
       if (files.length === 0) return;
 
-      const file = files[0];
-      const ext = file.name.toLowerCase().split('.').pop();
-      if (ext === 'glb' || ext === 'gltf' || ext === 'erik') {
-        loadModelFile(file);
+      // A single GLB / GLTF / ERIK replaces the model, exactly as before
+      if (files.length === 1) {
+        const ext = files[0].name.toLowerCase().split('.').pop();
+        if (ext === 'glb' || ext === 'gltf' || ext === 'erik') {
+          loadModelFile(files[0]);
+          return;
+        }
       }
+      // Several files, or an FBX / OBJ: add them to the scene
+      void importModelFiles(files);
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [modelLoaderRef, erikLoaderRef]
@@ -1535,6 +1562,51 @@ export const Viewport: React.FC<ViewportProps> = ({ sceneManagerRef, onScreensho
     },
     [modelLoaderRef, erikLoaderRef]
   );
+
+  // Import Models: add one or more GLB / GLTF / FBX / OBJ files to the scene without replacing what is there
+  const importModelFiles = useCallback(
+    async (files: File[]) => {
+      const ml = modelLoaderRef.current;
+      if (!ml || files.length === 0) return;
+      const ui = useUIStore.getState();
+
+      const supported = files.filter((f) => ModelLoader.importFormatOf(f.name));
+      const skipped = files.filter((f) => !ModelLoader.importFormatOf(f.name));
+      if (skipped.length > 0) {
+        ui.showToast(`Skipped (not GLB, GLTF, FBX or OBJ): ${skipped.map((f) => f.name).join(', ')}`, 'info');
+      }
+      if (supported.length === 0) return;
+
+      setIsLoading(true);
+      setLoadError(null);
+      setLoadProgress(0);
+      const result = await ml.importFromFiles(supported, () => useSceneStore.getState().modelName);
+      if (result.imported.length > 0) {
+        const n = result.imported.length;
+        ui.showToast(`Imported ${n} model${n === 1 ? '' : 's'}: ${result.imported.join(', ')}`, 'success');
+      }
+      if (result.failed.length > 0 && result.imported.length > 0) {
+        ui.showToast(`Could not import: ${result.failed.map((f) => `${f.name} (${f.error})`).join(', ')}`, 'error');
+      }
+    },
+    [modelLoaderRef]
+  );
+
+  const handleImportInput = useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) => {
+      const files = Array.from(e.target.files ?? []);
+      e.target.value = '';
+      void importModelFiles(files);
+    },
+    [importModelFiles]
+  );
+
+  // The Project menu's "Import Models..." asks the viewport to open the picker
+  useEffect(() => {
+    const open = () => importInputRef.current?.click();
+    window.addEventListener('lightforge:import-models', open);
+    return () => window.removeEventListener('lightforge:import-models', open);
+  }, []);
 
   // File picker
   const handleFileInput = useCallback(
@@ -1654,6 +1726,14 @@ export const Viewport: React.FC<ViewportProps> = ({ sceneManagerRef, onScreensho
             accept=".glb,.gltf,.erik"
             style={{ display: 'none' }}
             onChange={handleFileInput}
+          />
+          <input
+            ref={importInputRef}
+            type="file"
+            multiple
+            accept=".glb,.gltf,.fbx,.obj"
+            style={{ display: 'none' }}
+            onChange={handleImportInput}
           />
 
           {/* Raw position/target/fov snapshots, unrelated to cameraStore - would

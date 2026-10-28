@@ -116,6 +116,13 @@ const MENU_DEFINITIONS = (
       label: 'Open Recent',
       submenu: recentScenesMenu(recentScenes, sceneManagerRef),
     },
+    importModels: {
+      label: 'Import Models (GLB, FBX, OBJ)...',
+      action: () => {
+        // The viewport owns the file picker; it adds the chosen files to the scene
+        window.dispatchEvent(new CustomEvent('lightforge:import-models'));
+      },
+    },
     save: {
       label: 'Save Scene',
       shortcut: 'Ctrl+S',
