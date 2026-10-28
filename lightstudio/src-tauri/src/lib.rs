@@ -3,6 +3,7 @@ use std::sync::atomic::{AtomicU16, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tauri::Emitter;
+use tauri_plugin_dialog::DialogExt;
 
 /// Port the desktop build's HDRI Bridge HTTP listener binds to. Deliberately
 /// different from Vite's dev-server port (5173) so a `npm run dev` session
@@ -380,10 +381,107 @@ fn start_erik_live_server() {
   });
 }
 
+
+// ─── Scene files: native Save As / Open dialogs and read/write ─────────────
+// The webview cannot choose a folder or overwrite a file it saved earlier (it can
+// only trigger a download), so the desktop build does it natively. The read and
+// write commands only accept scene files, so a script in the page cannot use
+// them to touch arbitrary files.
+
+const SCENE_EXT: &str = "lightscene";
+
+fn has_ext(path: &std::path::Path, allowed: &[&str]) -> bool {
+  path
+    .extension()
+    .and_then(|e| e.to_str())
+    .map(|e| allowed.iter().any(|a| a.eq_ignore_ascii_case(e)))
+    .unwrap_or(false)
+}
+
+fn file_path_to_string(p: tauri_plugin_dialog::FilePath) -> Option<String> {
+  p.into_path().ok().map(|p| p.to_string_lossy().into_owned())
+}
+
+/// Shows the native "Save As" dialog. Returns the chosen path (always ending in .lightscene), or None if cancelled.
+#[tauri::command]
+async fn pick_scene_save_path(
+  app: tauri::AppHandle,
+  default_name: String,
+  start_dir: Option<String>,
+) -> Option<String> {
+  let mut dlg = app
+    .dialog()
+    .file()
+    .set_title("Save scene as")
+    .add_filter("HDRI Forge scene", &[SCENE_EXT])
+    .set_file_name(default_name);
+  if let Some(d) = start_dir {
+    let dir = std::path::PathBuf::from(d);
+    if dir.is_dir() {
+      dlg = dlg.set_directory(dir);
+    }
+  }
+  let mut path = std::path::PathBuf::from(dlg.blocking_save_file().and_then(file_path_to_string)?);
+  if !has_ext(&path, &[SCENE_EXT]) {
+    path.set_extension(SCENE_EXT);
+  }
+  Some(path.to_string_lossy().into_owned())
+}
+
+/// Shows the native "Open" dialog for scene files. Returns the chosen path, or None if cancelled.
+#[tauri::command]
+async fn pick_scene_open_path(app: tauri::AppHandle, start_dir: Option<String>) -> Option<String> {
+  let mut dlg = app
+    .dialog()
+    .file()
+    .set_title("Open scene")
+    .add_filter("HDRI Forge scene", &[SCENE_EXT, "json", "hfs"]);
+  if let Some(d) = start_dir {
+    let dir = std::path::PathBuf::from(d);
+    if dir.is_dir() {
+      dlg = dlg.set_directory(dir);
+    }
+  }
+  dlg.blocking_pick_file().and_then(file_path_to_string)
+}
+
+/// Writes a scene file (overwrites if it exists). Only .lightscene paths are accepted.
+#[tauri::command]
+fn write_text_file(path: String, contents: String) -> Result<(), String> {
+  let p = std::path::Path::new(&path);
+  if !has_ext(p, &[SCENE_EXT]) {
+    return Err("Only .lightscene files can be written".into());
+  }
+  std::fs::write(p, contents).map_err(|e| e.to_string())
+}
+
+/// Reads a scene file. Returns the text, or the error "not-found" when the file no longer exists.
+#[tauri::command]
+fn read_text_file(path: String) -> Result<String, String> {
+  let p = std::path::Path::new(&path);
+  if !has_ext(p, &[SCENE_EXT, "json", "hfs"]) {
+    return Err("Only scene files can be read".into());
+  }
+  std::fs::read_to_string(p).map_err(|e| {
+    if e.kind() == std::io::ErrorKind::NotFound {
+      "not-found".to_string()
+    } else {
+      e.to_string()
+    }
+  })
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
   tauri::Builder::default()
-    .invoke_handler(tauri::generate_handler![erik_live_port])
+    .plugin(tauri_plugin_dialog::init())
+    .invoke_handler(tauri::generate_handler![
+      erik_live_port,
+      pick_scene_save_path,
+      pick_scene_open_path,
+      write_text_file,
+      read_text_file
+    ])
     .setup(|app| {
       if cfg!(debug_assertions) {
         app.handle().plugin(
@@ -398,4 +496,52 @@ pub fn run() {
     })
     .run(tauri::generate_context!())
     .expect("error while running tauri application");
+}
+
+#[cfg(test)]
+mod scene_file_tests {
+  use super::*;
+
+  fn temp_path(name: &str) -> std::path::PathBuf {
+    std::env::temp_dir().join(format!("lf_scene_test_{}_{}", std::process::id(), name))
+  }
+
+  #[test]
+  fn extension_guard_is_case_insensitive_and_strict() {
+    assert!(has_ext(std::path::Path::new(r"C:.lightscene"), &[SCENE_EXT]));
+    assert!(has_ext(std::path::Path::new("x.LIGHTSCENE"), &[SCENE_EXT]));
+    assert!(!has_ext(std::path::Path::new("x.exe"), &[SCENE_EXT]));
+    assert!(!has_ext(std::path::Path::new("noextension"), &[SCENE_EXT]));
+    assert!(!has_ext(std::path::Path::new("x.json"), &[SCENE_EXT]));
+    assert!(has_ext(std::path::Path::new("x.json"), &[SCENE_EXT, "json", "hfs"]));
+  }
+
+  #[test]
+  fn write_then_read_round_trips_and_overwrites() {
+    let p = temp_path("a.lightscene");
+    let path = p.to_string_lossy().into_owned();
+    write_text_file(path.clone(), "first".into()).unwrap();
+    assert_eq!(read_text_file(path.clone()).unwrap(), "first");
+    // Save over the same file replaces its contents
+    write_text_file(path.clone(), "second, longer".into()).unwrap();
+    assert_eq!(read_text_file(path.clone()).unwrap(), "second, longer");
+    let _ = std::fs::remove_file(&p);
+  }
+
+  #[test]
+  fn missing_file_reports_not_found() {
+    let path = temp_path("missing.lightscene").to_string_lossy().into_owned();
+    assert_eq!(read_text_file(path).unwrap_err(), "not-found");
+  }
+
+  #[test]
+  fn refuses_to_write_or_read_other_file_types() {
+    let exe = temp_path("evil.exe").to_string_lossy().into_owned();
+    assert!(write_text_file(exe.clone(), "x".into()).is_err());
+    assert!(!std::path::Path::new(&exe).exists());
+    assert!(read_text_file(exe).is_err());
+    // .json can be opened but never written
+    let j = temp_path("o.json").to_string_lossy().into_owned();
+    assert!(write_text_file(j, "x".into()).is_err());
+  }
 }

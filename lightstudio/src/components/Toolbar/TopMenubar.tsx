@@ -14,6 +14,9 @@ import { exportSceneAsHDR, exportSceneAsEXR } from '../../three/HDRIExporter';
 import type { SceneManager } from '../../three/engine';
 import { promptForCustomHDRI } from '../../utils/loadCustomHDRI';
 import { addProceduralSky } from '../../hdriedit/addSky';
+import { useSceneFileStore, dirName } from '../../store/sceneFileStore';
+import type { RecentScene } from '../../store/sceneFileStore';
+import { canUseNativeFiles, openSceneDialog, openSceneFromPath, saveScene, saveSceneAs } from '../../utils/sceneFiles';
 
 interface MenuItem {
   label: string;
@@ -38,6 +41,36 @@ function checkLabel(label: string, checked: boolean): string {
   return checked ? `${label}` : label;
 }
 
+/** Builds the Open Recent submenu from the remembered files. */
+function recentScenesMenu(
+  recent: RecentScene[],
+  sceneManagerRef: React.MutableRefObject<SceneManager | null> | undefined,
+): MenuDefinition {
+  if (!canUseNativeFiles()) {
+    return { none: { label: 'Available in the desktop app', disabled: true } };
+  }
+  if (recent.length === 0) {
+    return { none: { label: 'No recent files', disabled: true } };
+  }
+  const menu: MenuDefinition = {};
+  recent.forEach((r, i) => {
+    // The folder name tells apart two files with the same name
+    const folder = dirName(r.path).split(/[\\/]/).pop();
+    menu[`recent${i}`] = {
+      label: folder ? `${r.name}   -   ${folder}` : r.name,
+      action: () => {
+        void openSceneFromPath(r.path, sceneManagerRef);
+      },
+    };
+  });
+  menu.recentSep = { label: '', separator: true };
+  menu.clearRecent = {
+    label: 'Clear Recent Files',
+    action: () => useSceneFileStore.getState().clearRecent(),
+  };
+  return menu;
+}
+
 const MENU_DEFINITIONS = (
   onExportImage: (() => void) | undefined,
   onFinalRender: (() => void) | undefined,
@@ -47,6 +80,7 @@ const MENU_DEFINITIONS = (
   canUndo: boolean,
   canRedo: boolean,
   panelVisibility: PanelVisibilityState,
+  recentScenes: RecentScene[],
 ): Record<string, MenuDefinition> => ({
   Project: {
     newScene: {
@@ -60,6 +94,7 @@ const MENU_DEFINITIONS = (
         const ok = await useUIStore.getState().requestConfirm('Create a new scene? Unsaved changes will be lost.', 'New Scene');
         if (!ok) return;
         useSceneStore.getState().resetScene();
+        useSceneFileStore.getState().setCurrent(null);
         useLightsStore.getState().clearAllLights();
         useAppearanceStore.getState().clearImages();
         getModelingController()?.deserialize([]);
@@ -73,63 +108,26 @@ const MENU_DEFINITIONS = (
     open: {
       label: 'Open Scene...',
       shortcut: 'Ctrl+O',
-      action: async () => {
-        const result = await SceneExporter.openSceneFile();
-        if (!result) return;
-        const ui = useUIStore.getState();
-        try {
-          const sceneFile = SceneExporter.fromJSON(result.text);
-          const error = SceneExporter.importScene(sceneFile);
-          if (error) {
-            ui.showToast(error, 'error');
-            return;
-          }
-          // Clear undo history after full scene load
-          useHistoryStore.getState().clear();
-          // Restore camera position in 3D view
-          if (sceneManagerRef?.current) {
-            const cam = sceneFile.scene.camera;
-            sceneManagerRef.current.setCameraState(cam.position, cam.target, cam.fov);
-          }
-          ui.showToast(`Opened "${result.filename}"`, 'success');
-        } catch (err) {
-          const msg = err instanceof Error ? err.message : 'Failed to open scene file';
-          ui.showToast(msg, 'error');
-        }
+      action: () => {
+        void openSceneDialog(sceneManagerRef);
       },
+    },
+    openRecent: {
+      label: 'Open Recent',
+      submenu: recentScenesMenu(recentScenes, sceneManagerRef),
     },
     save: {
       label: 'Save Scene',
       shortcut: 'Ctrl+S',
       action: () => {
-        const ui = useUIStore.getState();
-        try {
-          const data = SceneExporter.exportScene();
-          SceneExporter.downloadSceneFile(data);
-          ui.showToast('Scene saved', 'success');
-        } catch (err) {
-          const msg = err instanceof Error ? err.message : 'Unknown error';
-          console.error('[LightForge] Save failed:', err);
-          ui.showToast(`Save failed: ${msg}`, 'error');
-        }
+        void saveScene();
       },
     },
     saveAs: {
       label: 'Save Scene As...',
-      action: async () => {
-        const ui = useUIStore.getState();
-        // Not window.prompt() - see the New Scene action's comment above.
-        const name = await ui.requestPrompt('Enter filename:', `lightforge_scene_${Date.now()}.lightscene`);
-        if (!name) return;
-        try {
-          const data = SceneExporter.exportScene();
-          SceneExporter.downloadSceneFile(data, name);
-          ui.showToast(`Saved as "${name}"`, 'success');
-        } catch (err) {
-          const msg = err instanceof Error ? err.message : 'Unknown error';
-          console.error('[LightForge] Save failed:', err);
-          ui.showToast(`Save failed: ${msg}`, 'error');
-        }
+      shortcut: 'Ctrl+Shift+S',
+      action: () => {
+        void saveSceneAs();
       },
     },
     sep1: { label: '', separator: true },
@@ -569,6 +567,8 @@ export const TopMenubar: React.FC<TopMenubarProps> = ({ sceneManagerRef, onExpor
   const undoStack = useHistoryStore((s) => s.undoStack);
   const redoStack = useHistoryStore((s) => s.redoStack);
 
+  const recentScenes = useSceneFileStore((s) => s.recent);
+
   const canUndo = undoStack.length > 0;
   const canRedo = redoStack.length > 0;
   const undoLabel = canUndo ? undoStack[undoStack.length - 1].label : null;
@@ -576,9 +576,9 @@ export const TopMenubar: React.FC<TopMenubarProps> = ({ sceneManagerRef, onExpor
 
   // Build menu definitions with current callbacks and history state
   const menuDefinitions = useMemo(
-    () => MENU_DEFINITIONS(onExportImage, onFinalRender, sceneManagerRef, undoLabel, redoLabel, canUndo, canRedo, panelVisibility),
+    () => MENU_DEFINITIONS(onExportImage, onFinalRender, sceneManagerRef, undoLabel, redoLabel, canUndo, canRedo, panelVisibility, recentScenes),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [onExportImage, onFinalRender, sceneManagerRef, undoLabel, redoLabel, canUndo, canRedo, panelVisibility],
+    [onExportImage, onFinalRender, sceneManagerRef, undoLabel, redoLabel, canUndo, canRedo, panelVisibility, recentScenes],
   );
 
   // Close menu on outside click

@@ -21,6 +21,7 @@ import { useHDRIShapesStore } from '../../store/hdriShapesStore';
 import { useUILayoutStore } from '../../store/uiLayoutStore';
 import { useHistoryStore } from '../../store/historyStore';
 import { useKeyboardShortcuts } from '../../hooks/useKeyboardShortcuts';
+import { saveScene, saveSceneAs } from '../../utils/sceneFiles';
 import { CameraPanel } from '../Viewport/CameraPanel';
 import { useSceneHierarchyStore } from '../../store/sceneHierarchyStore';
 
@@ -232,23 +233,12 @@ export const AppLayout: React.FC = () => {
   // Keyboard shortcuts
   useKeyboardShortcuts({
     onSave: () => {
-      // Ctrl+S must do what the Project menu advertises next to this shortcut:
-      // write an actual scene FILE. It previously ran quickSave(), which only
-      // touched localStorage - invisible on success, and silently dropped
-      // entirely once an embedded model pushed it past the storage quota, so
-      // Ctrl+S looked completely dead.
-      const ui = useUIStore.getState();
-      try {
-        const data = SceneExporter.exportScene();
-        SceneExporter.downloadSceneFile(data);
-        // Keep the session-recovery copy too, best-effort.
-        SceneExporter.quickSave();
-        ui.showToast('Scene saved', 'success');
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : 'Unknown error';
-        console.error('[LightForge] Save failed:', err);
-        ui.showToast(`Save failed: ${msg}`, 'error');
-      }
+      // Ctrl+S runs the same Save as the Project menu: overwrite the file saved or opened last
+      // (after asking), or open Save As for a scene that has never been saved.
+      void saveScene();
+    },
+    onSaveAs: () => {
+      void saveSceneAs();
     },
     onOpen: () => {
       const ui = useUIStore.getState();
