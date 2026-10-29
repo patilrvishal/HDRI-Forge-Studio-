@@ -236,6 +236,19 @@ const MENU_DEFINITIONS = (
         fillLight: { label: 'Fill Light', action: () => useLightsStore.getState().addLight('fill') },
       },
     },
+    appearanceLights: {
+      label: 'Lights (Appearance)',
+      submenu: {
+        roundLight: { label: 'Round Light', action: () => useLightsStore.getState().addLight('roundLight') },
+        rectLight: { label: 'Rect Light', action: () => useLightsStore.getState().addLight('rectLight') },
+        scrimLight: { label: 'Scrim Light', action: () => useLightsStore.getState().addLight('scrimLight') },
+        boxGradLight: { label: 'Box Grad Light', action: () => useLightsStore.getState().addLight('boxGradLight') },
+        gradientLight: { label: 'Gradient Light', action: () => useLightsStore.getState().addLight('gradientLight') },
+        pictureLight: { label: 'Picture Light', action: () => useLightsStore.getState().addLight('pictureLight') },
+        darkLight: { label: 'Dark Light', action: () => useLightsStore.getState().addLight('darkLight') },
+        sunShadeLight: { label: 'Sun Shade Light', action: () => useLightsStore.getState().addLight('sunShadeLight') },
+      },
+    },
     hdriShapes: {
       label: 'HDRI Shapes',
       submenu: {

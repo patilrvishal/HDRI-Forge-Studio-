@@ -1,4 +1,5 @@
 import type { LightAppearance } from '../appearance/types';
+import { newAppearance } from '../appearance/content';
 
 // Light types for the studio
 export type LightType =
@@ -198,4 +199,23 @@ export const LIGHT_TEMPLATES: Record<string, Partial<Light>> = {
   underlight: { type: 'underlight', name: 'Under Grid Light', color: '#4a9eff', brightness: 80, transform: { spherical: { lat: -90, lng: 0, radius: 3, height: -0.5 }, position: { x: 0, y: -0.5, z: 0 }, rotation: { x: 90, y: 0, z: 0, mode: 'euler', enabled: true, repeat: false, advanced: { lR: 0, p1: 0, p2: 0, p3: 0, rR: 0, ro: 0, roat: 0 } } } },
   rim: { type: 'rim', name: 'Rim Light', color: '#4a9eff', brightness: 180, spotAngle: 30, spotPenumbra: 0.3, transform: { spherical: { lat: 10, lng: 180, radius: 6, height: 2 }, position: { x: -6, y: 2, z: 0 }, rotation: { x: 0, y: 0, z: 0, mode: 'euler', enabled: false, repeat: false, advanced: { lR: 0, p1: 0, p2: 0, p3: 0, rR: 0, ro: 0, roat: 0 } } } },
   fill: { type: 'area', name: 'Fill Light', color: '#c8d8ff', brightness: 100, areaLight: true, falloff: 'linear', areaWidth: 3, areaHeight: 2, transform: { spherical: { lat: 30, lng: -90, radius: 5, height: 2 }, position: { x: -5, y: 2, z: 0 }, rotation: { x: 0, y: 90, z: 0, mode: 'euler', enabled: true, repeat: false, advanced: { lR: 0, p1: 0, p2: 0, p3: 0, rR: 0, ro: 0, roat: 0 } } } },
+
+  // Appearance-content-driven quick-creates, named after HDR Light Studio's
+  // Create menu. Each is an Area light pre-loaded with the matching Light
+  // Appearance master content, so it looks right the instant it's created
+  // instead of needing the Appearance editor opened first.
+  roundLight: { type: 'area', name: 'Round Light', color: '#ffffff', brightness: 150, areaLight: true, falloff: 'linear', areaWidth: 2, areaHeight: 2, appearance: newAppearance('bulb', 'Round Light') },
+  rectLight: { type: 'area', name: 'Rect Light', color: '#ffffff', brightness: 150, areaLight: true, falloff: 'linear', areaWidth: 2, areaHeight: 1.2, appearance: newAppearance('flat', 'Rect Light') },
+  scrimLight: { type: 'area', name: 'Scrim Light', color: '#ffffff', brightness: 200, areaLight: true, falloff: 'linear', areaWidth: 2, areaHeight: 2, appearance: newAppearance('scrim', 'Scrim Light') },
+  boxGradLight: { type: 'area', name: 'Box Grad Light', color: '#ffffff', brightness: 150, areaLight: true, falloff: 'linear', areaWidth: 2, areaHeight: 2, appearance: newAppearance('boxgrad', 'Box Grad Light') },
+  gradientLight: { type: 'area', name: 'Gradient Light', color: '#ffffff', brightness: 150, areaLight: true, falloff: 'linear', areaWidth: 2, areaHeight: 2, appearance: newAppearance('gradient', 'Gradient Light') },
+  pictureLight: { type: 'area', name: 'Picture Light', color: '#ffffff', brightness: 150, areaLight: true, falloff: 'linear', areaWidth: 2, areaHeight: 2, appearance: newAppearance('image', 'Picture Light') },
+  // Dark Light: subtracts from what's beneath it in the HDRI - used to carve
+  // negative fill / contact shadows into reflections. blendMode 'subtract'
+  // on a black master does that directly through the existing blend system.
+  darkLight: { type: 'area', name: 'Dark Light', color: '#000000', brightness: 150, areaLight: true, falloff: 'linear', areaWidth: 2, areaHeight: 2, blendMode: 'subtract', appearance: newAppearance('flat', 'Dark Light') },
+  // Sun Shade Light: a soft rectangular shadow cast into the environment to
+  // dim/shape a sun or large light - a black Box Grad multiplied in, so its
+  // own per-edge softness ramps shape the shade.
+  sunShadeLight: { type: 'area', name: 'Sun Shade Light', color: '#000000', brightness: 100, areaLight: true, falloff: 'linear', areaWidth: 3, areaHeight: 3, blendMode: 'multiply', appearance: newAppearance('boxgrad', 'Sun Shade Light') },
 };
