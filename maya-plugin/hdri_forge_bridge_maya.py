@@ -1134,6 +1134,7 @@ def _bridge_dome(kind):
     existing = _bridge_domes(kind)
     if existing:
         xform, shape = existing[0]
+        _link_dome_to_scene(xform)                          # repairs a dome an older version left unlinked
     else:
         shape = cmds.createNode('aiSkyDomeLight', name=_DOME_NAMES[kind] + "Shape")
         xform = (cmds.listRelatives(shape, parent=True) or [shape])[0]
@@ -1352,7 +1353,8 @@ def _live_tick(*_args):
         r = renderer_name()
         if r != _live["renderer"]:
             _live["renderer"] = r
-            link.set_client_name(_client_name())
+            if hasattr(link, "set_client_name"):             # an older forge_link_core may still be loaded in this session
+                link.set_client_name(_client_name())
             _refresh_renderer_ui()
     frame = link.take_frame()
     if frame is not None:
