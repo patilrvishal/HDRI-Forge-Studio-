@@ -1981,6 +1981,18 @@ input[type="range"]:active::-webkit-slider-thumb {
   box-shadow: inset 0 0 20px rgba(34, 211, 238, 0.05);
 }
 
+/* Preset cards show the baked 2:1 equirect map of the preset, so they are wide, not square. */
+.preset-grid.preset-grid-wide {
+  grid-template-columns: repeat(auto-fill, minmax(calc(var(--preset-thumb-size, 72px) * 1.9), 1fr));
+}
+.pc-inner.pc-wide {
+  aspect-ratio: 2 / 1;
+}
+.preset-card.auditioning {
+  border-color: var(--accent, #22d3ee);
+  box-shadow: 0 0 0 1px var(--accent, #22d3ee);
+}
+
 /* ═══════════════════════════════════════════════════════════════════════════
    Smooth Global Transitions
    ═══════════════════════════════════════════════════════════════════════════ */

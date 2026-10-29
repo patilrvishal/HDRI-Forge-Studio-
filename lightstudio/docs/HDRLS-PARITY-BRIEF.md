@@ -77,6 +77,20 @@ and are applied in `HDRIExporter.ts`. Unset behaves exactly as before (tested).
 - Env / Content / Element / Effect have no built-in presets yet, so their tabs stay hidden until a
   preset carries that `group`.
 
+## Preset Library upgrade (thumbnails, content, audition)
+
+- **Baked thumbnails** (`src/three/presetBake.ts`): every preset card shows the real 2:1 equirect map its
+  lights produce, from the same `generateAnalyticalHDRI` bake the HDRI Preview uses, tone-mapped with a log
+  curve and a small glow so pinpoint lights stay visible. Saving a custom preset bakes its thumbnail too.
+- **Original library** (`src/data/presetsExtra.ts`): 32 new rigs (studio, outdoor, spotlight, sidelights) and
+  16 new single lights, all designed for this app's own light model. Nothing copied from any other product.
+- **Audition** button in the Presets tab: arrow keys step through the shown presets (your lights + the
+  preset, never stacking), Enter keeps the one on screen, Esc puts your lights back. Clicking a card while
+  auditioning steps to it; double-click keeps it.
+- **Bug fixed on the way**: the HDRI bake read a spot/directional light's own +Z facing instead of its target,
+  so every sun landed in the same place and spots were invisible in the map. `aimDirection()` in
+  `HDRIExporter.ts` now aims from the target (tested in `npm run test:hdri`).
+
 ## Decided not to build
 
 - **Preserve Alpha**: the baked map is always opaque (alpha is written as 1 in `generateAnalyticalHDRI`),

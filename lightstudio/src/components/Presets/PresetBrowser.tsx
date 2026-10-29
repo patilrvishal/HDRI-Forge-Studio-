@@ -3,7 +3,7 @@ import { usePresetsStore } from '../../store/presetsStore';
 import { useLightsStore } from '../../store/lightsStore';
 import { presetToLights, presetGroup, PRESET_GROUPS } from '../../types/Preset';
 import type { Preset } from '../../types/Preset';
-import { renderPresetThumbnail } from '../../three/PresetThumbnailRenderer';
+import { bakePresetThumbnail } from '../../three/presetBake';
 import { useHDRIAssetStore } from '../../store/hdriAssetStore';
 import { useLooksStore } from '../../store/looksStore';
 import { useUIStore } from '../../store/uiStore';
@@ -158,9 +158,8 @@ export const PresetBrowser: React.FC<PresetBrowserProps> = ({ onGenerateThumbnai
     if (hasStartedRendering.current) return;
     hasStartedRendering.current = true;
 
-    const needsRendering = presets.filter(
-      (p) => p.isDefault && p.thumbnail && !p.thumbnail.startsWith('data:image/png'),
-    );
+    // Every preset gets the thumbnail baked from its own lights (built-ins, and custom ones saved without one)
+    const needsRendering = presets.filter((p) => p.isDefault || !p.thumbnail);
 
     if (needsRendering.length === 0) return;
 
@@ -172,8 +171,8 @@ export const PresetBrowser: React.FC<PresetBrowserProps> = ({ onGenerateThumbnai
       async (prev, item) => {
         await prev;
         try {
-          const thumb = await renderPresetThumbnail(item.id, item.lights);
-          updatePreset(item.id, { thumbnail: thumb });
+          const thumb = await bakePresetThumbnail(item.lights);
+          if (thumb) updatePreset(item.id, { thumbnail: thumb });
         } catch {
           // Silently skip failed renders
         }
@@ -252,6 +251,11 @@ export const PresetBrowser: React.FC<PresetBrowserProps> = ({ onGenerateThumbnai
     [presets, setLightsFromPreset, setPreviewPreset, showToast],
   );
 
+  // Audition: step through the presets with the arrow keys, each one shown temporarily.
+  // Enter keeps the one on screen, Escape (or switching Audition off) puts your lights back.
+  const [audition, setAudition] = useState(false);
+  const auditionSnapshot = useRef<typeof lights | null>(null);
+
   // Apply preset permanently
   const applyPreset = useCallback(
     (id: string) => {
@@ -265,6 +269,86 @@ export const PresetBrowser: React.FC<PresetBrowserProps> = ({ onGenerateThumbnai
     },
     [presets, setLightsFromPreset, setPreviewPreset, selectLight, showToast],
   );
+
+  // Presets are added on top of the current lights (setLightsFromPreset is additive), so an audition step
+  // shows "your lights + this preset" by setting the list directly from the snapshot each time: stepping never stacks.
+  const auditionShow = useCallback(
+    (id: string) => {
+      const preset = presets.find((p) => p.id === id);
+      const base = auditionSnapshot.current;
+      if (!preset || !base) return;
+      const extra = presetToLights(preset);
+      useLightsStore.setState({ lights: [...base, ...extra], selectedLightId: extra[0]?.id ?? null });
+      setPreviewPreset(id);
+    },
+    [presets, setPreviewPreset],
+  );
+
+  const endAudition = useCallback(
+    (keep: boolean) => {
+      const base = auditionSnapshot.current;
+      const shownId = usePresetsStore.getState().previewingId;
+      auditionSnapshot.current = null;
+      setAudition(false);
+      if (base) useLightsStore.setState({ lights: base });         // put your lights back first
+      if (keep && shownId) {
+        const preset = presets.find((p) => p.id === shownId);
+        if (preset) {
+          const newLights = presetToLights(preset);
+          setLightsFromPreset(newLights);                          // then apply it the normal way (history, selection)
+          if (newLights.length > 0) selectLight(newLights[0].id);
+          showToast(`Applied "${preset.name}"`);
+        }
+      }
+      setPreviewPreset(null);
+    },
+    [presets, setLightsFromPreset, selectLight, setPreviewPreset, showToast],
+  );
+
+  const toggleAudition = useCallback(() => {
+    if (audition) {
+      endAudition(false);
+      return;
+    }
+    auditionSnapshot.current = useLightsStore.getState().lights;
+    setAudition(true);
+    if (filteredPresets.length > 0) auditionShow(filteredPresets[0].id);
+  }, [audition, endAudition, filteredPresets, auditionShow]);
+
+  useEffect(() => {
+    if (!audition) return;
+    const onKey = (e: KeyboardEvent) => {
+      const t = e.target as HTMLElement | null;
+      if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable)) return;
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        endAudition(false);
+        return;
+      }
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        endAudition(true);
+        return;
+      }
+      const step = e.key === 'ArrowRight' || e.key === 'ArrowDown' ? 1 : e.key === 'ArrowLeft' || e.key === 'ArrowUp' ? -1 : 0;
+      if (!step || filteredPresets.length === 0) return;
+      e.preventDefault();
+      const cur = filteredPresets.findIndex((p) => p.id === previewingId);
+      const next = (cur + step + filteredPresets.length) % filteredPresets.length;
+      auditionShow(filteredPresets[cur < 0 && step < 0 ? filteredPresets.length - 1 : cur < 0 ? 0 : next].id);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [audition, filteredPresets, previewingId, auditionShow, endAudition]);
+
+  // Leaving the browser mid-audition must not strand the preview as the real lighting
+  useEffect(() => () => {
+    if (auditionSnapshot.current) {
+      const snap = auditionSnapshot.current;
+      auditionSnapshot.current = null;
+      useLightsStore.setState({ lights: snap });
+    }
+  }, []);
 
   // Save current lights as custom preset
   const handleSavePreset = useCallback(async () => {
@@ -287,9 +371,9 @@ export const PresetBrowser: React.FC<PresetBrowserProps> = ({ onGenerateThumbnai
     }
 
     if (hasLights) {
-      const thumbnail = onGenerateThumbnail
-        ? onGenerateThumbnail(usePresetsStore.getState().lightsToPresetLights(lights))
-        : '';
+      // The baked map of these very lights; the old preview-sphere thumbnail only if the bake fails
+      const presetLights = usePresetsStore.getState().lightsToPresetLights(lights);
+      const thumbnail = (await bakePresetThumbnail(presetLights).catch(() => '')) || (onGenerateThumbnail ? onGenerateThumbnail(presetLights) : '');
       const preset = await saveCurrentAsPreset(lights, thumbnail);
       messages.push(`"${preset.name}" saved`);
     }
@@ -374,6 +458,19 @@ export const PresetBrowser: React.FC<PresetBrowserProps> = ({ onGenerateThumbnai
     if (fileInputRef.current) fileInputRef.current.value = '';
   }, [importPresetsFromFile, showToast]);
 
+  // Double-click: apply the preset; during an audition that means "keep this one".
+  const applyOrKeep = useCallback(
+    (id: string) => {
+      if (audition) {
+        auditionShow(id);
+        endAudition(true);
+      } else {
+        applyPreset(id);
+      }
+    },
+    [audition, auditionShow, endAudition, applyPreset],
+  );
+
   // Click handling with double-click detection
   const clickTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const handleCardClick = useCallback(
@@ -382,15 +479,16 @@ export const PresetBrowser: React.FC<PresetBrowserProps> = ({ onGenerateThumbnai
       if (clickTimer.current) {
         clearTimeout(clickTimer.current);
         clickTimer.current = null;
-        applyPreset(presetId);
+        applyOrKeep(presetId);
       } else {
         clickTimer.current = setTimeout(() => {
           clickTimer.current = null;
-          previewPreset(presetId);
+          if (audition) auditionShow(presetId);
+          else previewPreset(presetId);
         }, 300);
       }
     },
-    [applyPreset, previewPreset],
+    [applyOrKeep, audition, auditionShow, previewPreset],
   );
 
   // Drag start
@@ -457,6 +555,15 @@ export const PresetBrowser: React.FC<PresetBrowserProps> = ({ onGenerateThumbnai
           ))}
         </div>
 
+        <button
+          className={`btn-sm ${audition ? 'btn-glow' : ''}`}
+          onClick={toggleAudition}
+          aria-pressed={audition}
+          title="Audition: arrow keys step through presets, Enter keeps one, Esc puts your lights back"
+          style={{ marginRight: 6, alignSelf: 'center' }}
+        >
+          {audition ? 'Auditioning · Esc' : 'Audition'}
+        </button>
         <div className="preset-size-adjuster" title={`Thumbnail size: ${thumbSize}px`}>
           <svg width="9" height="9" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.2" opacity="0.6">
             <rect x="1" y="4" width="3" height="5" />
@@ -529,15 +636,15 @@ export const PresetBrowser: React.FC<PresetBrowserProps> = ({ onGenerateThumbnai
             {searchQuery || activeTags.length > 0 ? 'No matching presets' : 'No presets in this category'}
           </div>
         ) : (
-          <div className="preset-grid" style={{ '--preset-thumb-size': `${thumbSize}px` } as React.CSSProperties}>
+          <div className="preset-grid preset-grid-wide" style={{ '--preset-thumb-size': `${thumbSize}px` } as React.CSSProperties}>
             {filteredPresets.map((preset) => (
               <div
                 key={preset.id}
-                className={`preset-card ${previewingId === preset.id ? 'previewing' : ''}`}
+                className={`preset-card ${previewingId === preset.id ? 'previewing' : ''} ${audition && previewingId === preset.id ? 'auditioning' : ''}`}
                 onClick={(e) => handleCardClick(e, preset.id)}
                 onDoubleClick={(e) => {
                   if (clickTimer.current) { clearTimeout(clickTimer.current); clickTimer.current = null; }
-                  applyPreset(preset.id);
+                  applyOrKeep(preset.id);
                 }}
                 onDragStart={(e) => handleDragStart(e, preset.id)}
                 draggable
@@ -549,7 +656,7 @@ export const PresetBrowser: React.FC<PresetBrowserProps> = ({ onGenerateThumbnai
                   <div className="preset-card-tooltip">{preset.description}</div>
                 )}
 
-                <div className="pc-inner">
+                <div className="pc-inner pc-wide">
                   {renderingIds.has(preset.id) ? (
                     <div className="thumbnail-skeleton" />
                   ) : preset.thumbnail ? (

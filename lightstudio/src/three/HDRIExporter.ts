@@ -1111,6 +1111,24 @@ lights.forEach((l, i) => {
  * @param scene - The THREE.Scene to traverse.
  * @returns Array of extracted light data objects.
  */
+/**
+ * Where a spot or directional light points. The viewport aims these through their `target` object and never
+ * rotates the light itself, so reading the light's own facing (Object3D.getWorldDirection = its +Z axis) gave every
+ * such light the same direction: suns all landed in one spot of the map and spots were outside their own cone,
+ * i.e. invisible. The target gives the real aim; the light's own facing is only the fallback when there is none.
+ */
+function aimDirection(light: THREE.SpotLight | THREE.DirectionalLight, from: THREE.Vector3): THREE.Vector3 {
+  const dir = new THREE.Vector3();
+  if (light.target) {
+    light.target.updateWorldMatrix(true, false);
+    light.target.getWorldPosition(dir);
+    dir.sub(from);
+    if (dir.lengthSq() > 1e-12) return dir.normalize();
+  }
+  light.getWorldDirection(dir);
+  return dir;
+}
+
 function extractLightsFromScene(scene: THREE.Scene, includeAreaMode = false): ExtractedLight[] {
   const lights: ExtractedLight[] = [];
   let tag: { compositeId?: string; compositeFilters?: FilterSpec[]; compositeBlend?: AppearanceBlend; layerIndex?: number; blendMode?: AppearanceBlend; blendInvert?: boolean; blendChannel?: ExtractedLight['blendChannel']; mapping?: ExtractedLight['mapping'] } = {};
@@ -1144,8 +1162,7 @@ function extractLightsFromScene(scene: THREE.Scene, includeAreaMode = false): Ex
 
     // ------ SpotLight ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
     if (child instanceof THREE.SpotLight) {
-      const dir = new THREE.Vector3();
-      child.getWorldDirection(dir);
+      const dir = aimDirection(child, worldPos);
       push({
         type: 'spot',
         color: child.color.clone(),
@@ -1161,8 +1178,7 @@ function extractLightsFromScene(scene: THREE.Scene, includeAreaMode = false): Ex
 
     // ------ DirectionalLight ---------------------------------------------------------------------------------------------------------------------------------------------------------
     if (child instanceof THREE.DirectionalLight) {
-      const dir = new THREE.Vector3();
-      child.getWorldDirection(dir);
+      const dir = aimDirection(child, worldPos);
       push({
         type: 'directional',
         color: child.color.clone(),

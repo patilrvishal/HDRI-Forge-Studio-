@@ -11,6 +11,9 @@ import {
   LIGHT_PROFILE_PRESETS, LIGHT_PROFILE_META,
 } from '../data/presets';
 import { generatePresetThumbnail } from '../types/Preset';
+import {
+  EXTRA_STUDIO, EXTRA_OUTDOOR, EXTRA_SPOTLIGHT, EXTRA_SIDELIGHT, EXTRA_LIGHT_PROFILES,
+} from '../data/presetsExtra';
 
 // ── Build built-in presets from data ────────────────────────────────
 
@@ -44,6 +47,15 @@ function buildBuiltins(): Preset[] {
   SIDELIGHT_META.forEach((m, i) => push(m.id, m.name, 'sidelights', m.description, m.tags, SIDELIGHT_PRESETS[i]));
   // Light Profiles (14) - single functional modifier presets
   LIGHT_PROFILE_META.forEach((m, i) => push(m.id, m.name, 'lightprofiles', m.description, m.tags, LIGHT_PROFILE_PRESETS[i]));
+
+  // The larger original library (data/presetsExtra.ts)
+  const extras: Array<[Preset['category'], typeof EXTRA_STUDIO]> = [
+    ['studio', EXTRA_STUDIO], ['outdoor', EXTRA_OUTDOOR], ['spotlight', EXTRA_SPOTLIGHT],
+    ['sidelights', EXTRA_SIDELIGHT], ['lightprofiles', EXTRA_LIGHT_PROFILES],
+  ];
+  for (const [category, list] of extras) {
+    for (const e of list) push(e.id, e.name, category, e.description, e.tags, e.lights);
+  }
 
   return out;
 }

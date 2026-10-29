@@ -18,7 +18,7 @@ type LT = PresetLight['type'];
 type CP = PresetLight['colorProfile'];
 type FF = PresetLight['falloff'];
 
-function pl(
+export function pl(
   name: string,
   type: LT,
   color: string,

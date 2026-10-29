@@ -80,6 +80,31 @@ async function main(): Promise<void> {
   const explicitPersp = await bake(sceneWith({ ...big, mapping: 'perspective' }));
   check(unsetMap.every((v, i) => v === explicitPersp[i]), 'unset mapping is identical to "perspective" (existing lights unchanged)');
 
+  // ── Spot / directional aim comes from the light's target ──────
+  const peakPos = (px: Float32Array): [number, number] => {
+    let best = 0, bx = 0, by = 0;
+    for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+      const i = (y * W + x) * 4;
+      const m = px[i] + px[i + 1] + px[i + 2];
+      if (m > best) { best = m; bx = x; by = y; }
+    }
+    return [bx, by];
+  };
+  const aimed = async (make: (p: THREE.Vector3) => THREE.DirectionalLight | THREE.SpotLight, at: [number, number, number]): Promise<Float32Array> => {
+    const scene = new THREE.Scene();
+    const l = make(new THREE.Vector3(...at));
+    l.position.set(...at);
+    l.target.position.set(0, 0, 0);
+    scene.add(l, l.target);
+    scene.updateMatrixWorld(true);
+    return bake(scene);
+  };
+  const sunA = peakPos(await aimed(() => new THREE.DirectionalLight(0xffffff, 5), [5, 2, 0]));
+  const sunB = peakPos(await aimed(() => new THREE.DirectionalLight(0xffffff, 5), [-5, 2, 0]));
+  check(Math.abs(sunA[0] - sunB[0]) > W / 4, `a directional light lands where it is placed (x ${sunA[0]} vs ${sunB[0]})`);
+  const spotPx = await aimed(() => new THREE.SpotLight(0xffffff, 5, 50, Math.PI / 4, 0.5, 2), [5, 2, 0]);
+  check(litPixels(spotPx) > 0, 'a spot light aimed at the capture point shows up in the map');
+
   console.log(failed === 0 ? 'ALL PASS' : `${failed} FAILED`);
   process.exit(failed === 0 ? 0 : 1);
 }
