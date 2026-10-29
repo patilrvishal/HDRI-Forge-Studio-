@@ -86,6 +86,8 @@ function aimAt(from: THREE.Vector3, at: THREE.Vector3): { x: number; y: number; 
  * @param center   - scene bounding-sphere centre
  * @param distance - how far the light sits from `center`
  * @param pivot    - for 'shadow': the point the light was previously painted to
+ * @param viewDir  - direction the cursor ray travels. Right for any camera; the fallback (point minus camera
+ *                   position) is only correct for a perspective camera.
  */
 export function solveLightPaint(
   mode: PaintMode,
@@ -95,12 +97,14 @@ export function solveLightPaint(
   center: THREE.Vector3,
   distance: number,
   pivot?: THREE.Vector3,
+  viewDir?: THREE.Vector3,
 ): PaintResult {
+  const rayDir = (): THREE.Vector3 => (viewDir ? viewDir.clone().normalize() : P.clone().sub(camera.position).normalize());
   switch (mode) {
     case 'reflection': {
       // Mirror the view ray about the surface normal. Anything sitting along the
       // reflected ray is what the camera sees mirrored at P.
-      const V = P.clone().sub(camera.position).normalize();
+      const V = rayDir();
       const R = V.clone().sub(N.clone().multiplyScalar(2 * V.dot(N))).normalize();
       const pos = P.clone().add(R.multiplyScalar(distance));
       return { position: pos, rotation: aimAt(pos, P) };
@@ -124,7 +128,7 @@ export function solveLightPaint(
     case 'rim': {
       // Model is ignored entirely. Ride the camera ray straight through the scene
       // and out the back, so the light sits behind the subject.
-      const dir = P.clone().sub(camera.position).normalize();
+      const dir = rayDir();
       const pos = center.clone().add(dir.multiplyScalar(distance));
       return { position: pos, rotation: aimAt(pos, center) };
     }
@@ -175,8 +179,9 @@ export function solveCurvePointPaint(
   lightQuaternion: THREE.Quaternion,
   lightWidth: number,
   lightHeight: number,
+  viewDir?: THREE.Vector3,
 ): CurvePointPaintResult | null {
-  const V = P.clone().sub(camera.position).normalize();
+  const V = viewDir ? viewDir.clone().normalize() : P.clone().sub(camera.position).normalize();
   const R = V.clone().sub(N.clone().multiplyScalar(2 * V.dot(N))).normalize();
 
   // A RectAreaLight's local frame in three.js: +X = right, +Y = up, -Z = the
@@ -226,10 +231,11 @@ export function pickLightForReflection(
   camera: THREE.Camera,
   candidates: ReflectionCandidate[],
   threshold = 0.85,
+  viewDir?: THREE.Vector3,
 ): string | null {
   if (candidates.length === 0) return null;
 
-  const V = P.clone().sub(camera.position).normalize();
+  const V = viewDir ? viewDir.clone().normalize() : P.clone().sub(camera.position).normalize();
   const R = V.clone().sub(N.clone().multiplyScalar(2 * V.dot(N))).normalize();
 
   let bestId: string | null = null;
@@ -288,6 +294,7 @@ export function smoothNormalAt(hit: THREE.Intersection): THREE.Vector3 {
     N.copy(face.normal);
   }
 
-  N.transformDirection(mesh.matrixWorld).normalize();
+  // A normal is not a direction: under a non-uniform scale it must go through the inverse transpose.
+  N.applyMatrix3(new THREE.Matrix3().getNormalMatrix(mesh.matrixWorld)).normalize();
   return N;
 }

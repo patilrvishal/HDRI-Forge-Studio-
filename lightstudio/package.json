@@ -12,6 +12,7 @@
     "tauri": "tauri",
     "desktop:dev": "tauri dev",
     "desktop:build": "tauri build",
+    "test:paint": "esbuild tests/paint/paint-picker.test.ts --bundle --platform=node --format=esm --outfile=.paintpick.mjs --log-level=error && node .paintpick.mjs",
     "test:hdri": "esbuild tests/hdri/light-compositing.test.ts --bundle --platform=node --format=esm --outfile=.hdritest.mjs --log-level=error \"--define:import.meta.env={\\\"DEV\\\":false}\" && node .hdritest.mjs && esbuild tests/hdri/include-object.test.ts --bundle --platform=node --format=esm --outfile=.hdriinc.mjs --log-level=error \"--define:import.meta.env={\\\"DEV\\\":false}\" && node .hdriinc.mjs && esbuild tests/hdri/pt-environment.test.ts --bundle --platform=node --format=esm --outfile=.hdriptenv.mjs --log-level=error \"--define:import.meta.env={\\\"DEV\\\":false}\" && node .hdriptenv.mjs",
     "test:modeling": "esbuild tests/modeling/parity.test.ts --bundle --platform=node --format=esm --outfile=.modtest.mjs --log-level=error && node .modtest.mjs && esbuild tests/modeling/positions.test.ts --bundle --platform=node --format=esm --outfile=.modpos.mjs --log-level=error && node .modpos.mjs tests/modeling/blender_reference_positions.json"
   },

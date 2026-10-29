@@ -91,6 +91,21 @@ and are applied in `HDRIExporter.ts`. Unset behaves exactly as before (tested).
   so every sun landed in the same place and spots were invisible in the map. `aimDirection()` in
   `HDRIExporter.ts` now aims from the target (tested in `npm run test:hdri`).
 
+## LightPaint v2 (precision and feel)
+
+- **Picking** (`src/three/PaintPicker.ts`): clicks resolve against a BVH per mesh instead of three's brute-force
+  raycast. On a ~1M-triangle mesh a pick takes ~0.01 ms against ~32 ms before, so dragging no longer stalls on
+  heavy cars. BVHs are built a few at a time when LightPaint is switched on.
+- **Only what is drawn counts**: hidden meshes (and children of hidden groups), helpers/proxies and fully
+  transparent materials can no longer take the click. Before, a hidden variant mesh in front of the car stole
+  it and the light landed somewhere the user never pointed.
+- **Normals**: smooth, correct for non-uniformly scaled meshes (inverse transpose), and always turned to face
+  the viewer so a back face cannot put the light inside the model.
+- **Any camera**: the reflection is solved from the cursor ray itself, so it is exact for orthographic cameras too.
+- **Feel**: a ring follows the cursor (bright over the model, faint over nothing), the whole stroke is one undo
+  step, and Esc during a drag puts the light back.
+- Tests: `npm run test:paint`.
+
 ## Decided not to build
 
 - **Preserve Alpha**: the baked map is always opaque (alpha is written as 1 in `generateAnalyticalHDRI`),
@@ -111,4 +126,4 @@ and are applied in `HDRIExporter.ts`. Unset behaves exactly as before (tested).
 - Verify through the real UI (dev server, actual clicks), not just store calls —
   this project's own history shows that gap (gizmo gave wrong deltas, shapes
   silently vanished from export) more than once.
-- Run `npx tsc --noEmit` and `npx oxlint` clean before calling anything done.
+- Run `npx tsc -p tsconfig.app.json --noEmit` (the root `tsc --noEmit` checks nothing: the root tsconfig only has project references) and `npx oxlint` clean before calling anything done.

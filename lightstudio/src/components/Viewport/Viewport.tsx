@@ -27,7 +27,10 @@ import { CameraSwitcher } from './CameraSwitcher';
 import { ViewportPropertiesPanel } from './ViewportPropertiesPanel';
 import { CameraPanel } from './CameraPanel';
 import { GizmoManager, type GizmoMode } from '../../three/GizmoManager';
-import { solveLightPaint, smoothNormalAt, computeLightDistance, pickLightForReflection, solveCurvePointPaint, type PaintMode } from '../../three/LightPaint';
+import { solveLightPaint, computeLightDistance, pickLightForReflection, solveCurvePointPaint, type PaintMode } from '../../three/LightPaint';
+import { PaintPicker, type PaintHit } from '../../three/PaintPicker';
+import { useHistoryStore } from '../../store/historyStore';
+import type { Light } from '../../types/Light';
 import { useCurvePaintStore } from '../../store/curvePaintStore';
 import { cartesianToSpherical } from '../../utils/math';
 import { CameraBookmarks } from './CameraBookmarks';
@@ -1208,44 +1211,43 @@ export const Viewport: React.FC<ViewportProps> = ({ sceneManagerRef, onScreensho
   const paintPosRef = useRef<{ x: number; y: number } | null>(null);
   const paintingRef = useRef(false);
 
-  const paintAt = useCallback((clientX: number, clientY: number) => {
+  // What the cursor is over: only meshes that are really drawn, found through a BVH so the pick costs well under a
+  // millisecond even on a multi-million-triangle car (see three/PaintPicker.ts).
+  const pickerRef = useRef<PaintPicker | null>(null);
+  const pickAt = useCallback((clientX: number, clientY: number): { hit: PaintHit | null; ray: THREE.Ray } | null => {
     const container = containerRef.current;
     const sm = sceneManagerRef.current;
-    const lightId = useLightsStore.getState().selectedLightId;
-    const shapeId = useHDRIShapesStore.getState().selectedShapeId;
-    if (!container || !sm || (!lightId && !shapeId && paintMode !== 'sun')) return;
-
+    if (!container || !sm) return null;
     const rect = container.getBoundingClientRect();
     const mouse = new THREE.Vector2(
       ((clientX - rect.left) / rect.width) * 2 - 1,
       -((clientY - rect.top) / rect.height) * 2 + 1,
     );
-
+    sm.camera.updateMatrixWorld();
     const raycaster = new THREE.Raycaster();
     raycaster.setFromCamera(mouse, sm.camera);
+    if (!pickerRef.current) pickerRef.current = new PaintPicker();
+    return { hit: pickerRef.current.pick(raycaster.ray), ray: raycaster.ray.clone() };
+  }, [containerRef, sceneManagerRef]);
 
-    const meshes: THREE.Mesh[] = [];
-    sm.scene.traverse((obj) => {
-      if (
-        obj instanceof THREE.Mesh &&
-        !obj.userData?.isHelper &&
-        !obj.userData?.isProxy &&
-        obj.name !== '__floor__'
-      ) {
-        meshes.push(obj);
-      }
-    });
+  const paintAt = useCallback((clientX: number, clientY: number) => {
+    const sm = sceneManagerRef.current;
+    const lightId = useLightsStore.getState().selectedLightId;
+    const shapeId = useHDRIShapesStore.getState().selectedShapeId;
+    if (!sm || (!lightId && !shapeId && paintMode !== 'sun')) return;
 
-    const hits = raycaster.intersectObjects(meshes, false);
+    const picked = pickAt(clientX, clientY);
+    if (!picked) return;
+    const { hit, ray } = picked;
+    // The reflection is solved from the cursor ray itself, so it is right for any camera, not only a perspective one.
+    const view = ray.direction;
 
     // LightPaint the Sun: reflect the view ray off the clicked point and put the sky's sun
     // along that direction, so its reflection appears exactly where you clicked.
     if (paintMode === 'sun') {
-      const hit = hits[0];
       if (!hit) return;
-      const N = smoothNormalAt(hit);
-      const incident = hit.point.clone().sub(sm.camera.position).normalize();
-      const R = incident.clone().sub(N.clone().multiplyScalar(2 * incident.dot(N))).normalize();
+      const N = hit.normal;
+      const R = view.clone().sub(N.clone().multiplyScalar(2 * view.dot(N))).normalize();
       paintSunToDirection(R);
       return;
     }
@@ -1259,9 +1261,7 @@ export const Viewport: React.FC<ViewportProps> = ({ sceneManagerRef, onScreensho
       const l = st.lights.find((x) => x.id === lightId);
       const content = l?.appearance?.master?.content;
       if (l && content?.type === 'lumicurve' && content.p.points[armedIdx]) {
-        const hit = hits[0];
         if (!hit) return;
-        const N = smoothNormalAt(hit);
         let lightObj: THREE.Object3D | null = null;
         sm.scene.traverse((obj) => {
           if (lightObj) return;
@@ -1273,7 +1273,7 @@ export const Viewport: React.FC<ViewportProps> = ({ sceneManagerRef, onScreensho
         (lightObj as THREE.Object3D).getWorldPosition(worldPos);
         (lightObj as THREE.Object3D).getWorldQuaternion(worldQuat);
         const width = l.areaWidth ?? 2, height = l.areaHeight ?? 2;
-        const res = solveCurvePointPaint(hit.point.clone(), N, sm.camera, worldPos, worldQuat, width, height);
+        const res = solveCurvePointPaint(hit.point.clone(), hit.normal, sm.camera, worldPos, worldQuat, width, height, view);
         if (!res) return;
         const nextPoints = content.p.points.map((pt, i) => (i === armedIdx ? { ...pt, x: res.x, y: res.y } : pt));
         st.updateLight(lightId, {
@@ -1296,11 +1296,9 @@ export const Viewport: React.FC<ViewportProps> = ({ sceneManagerRef, onScreensho
     if (!lightId && shapeId) {
       const targetShape = useHDRIShapesStore.getState().shapes.find((s) => s.id === shapeId);
       if (targetShape?.locked) return;
-      const hit = hits[0];
       if (!hit) return;
-      const N = smoothNormalAt(hit);
-      const incident = hit.point.clone().sub(sm.camera.position).normalize();
-      const R = incident.clone().sub(N.clone().multiplyScalar(2 * incident.dot(N))).normalize();
+      const N = hit.normal;
+      const R = view.clone().sub(N.clone().multiplyScalar(2 * view.dot(N))).normalize();
 
       // Same equirect convention as HDRIExporter's pixelToDirection/
       // sampleEnvTexture and HDRIShapesLayer's directionAt: phi = v*PI
@@ -1316,16 +1314,15 @@ export const Viewport: React.FC<ViewportProps> = ({ sceneManagerRef, onScreensho
     }
 
     // Rim ignores the model entirely - it rides the camera ray out past the scene.
-    if (paintMode !== 'rim' && hits.length === 0) return;
+    if (paintMode !== 'rim' && !hit) return;
 
     if (!paintBoundsRef.current) {
       paintBoundsRef.current = computeLightDistance(sm.scene, distanceScale);
     }
     const { center, distance } = paintBoundsRef.current;
 
-    const hit = hits[0];
     const P = hit ? hit.point.clone() : center.clone();
-    const N = hit ? smoothNormalAt(hit) : new THREE.Vector3(0, 1, 0);
+    const N = hit ? hit.normal.clone() : new THREE.Vector3(0, 1, 0);
 
     const result = solveLightPaint(
       paintMode,
@@ -1335,6 +1332,7 @@ export const Viewport: React.FC<ViewportProps> = ({ sceneManagerRef, onScreensho
       center,
       distance,
       paintPivotRef.current ?? undefined,
+      view,
     );
 
     // Reflection and Illumination set the pivot that Shadow later swings around.
@@ -1343,13 +1341,6 @@ export const Viewport: React.FC<ViewportProps> = ({ sceneManagerRef, onScreensho
     }
 
     const lp = result.position;
-    const sphDbg = cartesianToSpherical(lp.x, lp.y, lp.z);
-    console.log('[LP]', paintMode,
-      '| dist:', distance.toFixed(1),
-      '| center:', center.x.toFixed(1), center.y.toFixed(1), center.z.toFixed(1),
-      '| lightPos:', lp.x.toFixed(1), lp.y.toFixed(1), lp.z.toFixed(1),
-      '| sph lat:', sphDbg.lat.toFixed(1), 'lng:', sphDbg.lng.toFixed(1),
-      'rad:', sphDbg.radius.toFixed(1), 'h:', sphDbg.height.toFixed(1));
     const st = useLightsStore.getState();
     const l = st.lights.find((x) => x.id === lightId);
     if (!l) return;
@@ -1371,42 +1362,17 @@ export const Viewport: React.FC<ViewportProps> = ({ sceneManagerRef, onScreensho
       aimTarget: { x: P.x, y: P.y, z: P.z },
       rotation: { ...l.transform.rotation, enabled: false },
     } as never);
-  }, [paintMode, distanceScale, containerRef, sceneManagerRef, moveHDRIShapeAndGroup]);
+  }, [paintMode, distanceScale, pickAt, sceneManagerRef, moveHDRIShapeAndGroup]);
 
   // Right-click a reflection to select the light producing it - HDR Light
   // Studio's other half of LightPaint. Read-only: no light gets moved, this
   // only changes the selection so the right panel jumps to that light.
   const pickReflectionAt = useCallback((clientX: number, clientY: number) => {
-    const container = containerRef.current;
     const sm = sceneManagerRef.current;
-    if (!container || !sm) return;
-
-    const rect = container.getBoundingClientRect();
-    const mouse = new THREE.Vector2(
-      ((clientX - rect.left) / rect.width) * 2 - 1,
-      -((clientY - rect.top) / rect.height) * 2 + 1,
-    );
-
-    const raycaster = new THREE.Raycaster();
-    raycaster.setFromCamera(mouse, sm.camera);
-
-    const meshes: THREE.Mesh[] = [];
-    sm.scene.traverse((obj) => {
-      if (
-        obj instanceof THREE.Mesh &&
-        !obj.userData?.isHelper &&
-        !obj.userData?.isProxy &&
-        obj.name !== '__floor__'
-      ) {
-        meshes.push(obj);
-      }
-    });
-
-    const hit = raycaster.intersectObjects(meshes, false)[0];
-    if (!hit) return;
-
-    const P = hit.point.clone();
-    const N = smoothNormalAt(hit);
+    if (!sm) return;
+    pickerRef.current?.refresh(sm.scene);
+    const picked = pickAt(clientX, clientY);
+    if (!picked?.hit) return;
 
     const candidates = useLightsStore.getState().lights
       .filter((l) => l.visible)
@@ -1415,11 +1381,16 @@ export const Viewport: React.FC<ViewportProps> = ({ sceneManagerRef, onScreensho
         position: new THREE.Vector3(l.transform.position.x, l.transform.position.y, l.transform.position.z),
       }));
 
-    const pickedId = pickLightForReflection(P, N, sm.camera, candidates);
+    const pickedId = pickLightForReflection(picked.hit.point, picked.hit.normal, sm.camera, candidates, 0.85, picked.ray.direction);
     if (pickedId) {
       useLightsStore.getState().selectLight(pickedId);
     }
-  }, [containerRef, sceneManagerRef]);
+  }, [pickAt, sceneManagerRef]);
+
+  // The ring that follows the cursor while LightPaint is on: bright where a click will land on the model, faint
+  // when the cursor is over nothing. Moved with a transform straight from the pointer handler (no React render).
+  const paintRingRef = useRef<HTMLDivElement | null>(null);
+  const strokeStartRef = useRef<{ lightId: string; transform: Light['transform'] } | null>(null);
 
   // Pointer handling lives on the container so no JSX surgery is needed.
   useEffect(() => {
@@ -1427,59 +1398,121 @@ export const Viewport: React.FC<ViewportProps> = ({ sceneManagerRef, onScreensho
     const sm = sceneManagerRef.current;
     if (!container || !sm || !paintActive) return;
 
-    const down = (e: PointerEvent) => {
-      if (e.button !== 0) return;
-      if ((e.target as HTMLElement | null)?.closest?.('[data-paint-ui]')) return; // clicks on the mode bar
-      paintingRef.current = true;
-      paintBoundsRef.current = null;
-      sm.controls.enabled = false;
-      paintAt(e.clientX, e.clientY);
+    // Make sure the model can be picked instantly: collect its meshes and build their BVHs a few at a time now,
+    // instead of stalling the first click on a big car.
+    if (!pickerRef.current) pickerRef.current = new PaintPicker();
+    void pickerRef.current.prepare(sm.scene);
+
+    const showRing = (x: number, y: number, over: boolean, painting: boolean) => {
+      const ring = paintRingRef.current;
+      if (!ring) return;
+      const parent = (ring.offsetParent as HTMLElement | null) ?? container;
+      const pr = parent.getBoundingClientRect();
+      ring.style.transform = `translate(${x - pr.left - 11}px, ${y - pr.top - 11}px) scale(${painting ? 0.8 : 1})`;
+      ring.style.opacity = over ? '1' : '0.35';
+      ring.style.borderColor = painting ? 'var(--accent-bright, #ffb347)' : 'var(--accent, #ff9a1f)';
+      ring.style.background = painting ? 'rgba(255,170,60,0.28)' : 'transparent';
     };
-    const context = (e: MouseEvent) => {
-      e.preventDefault();
-      pickReflectionAt(e.clientX, e.clientY);
+    const hideRing = () => {
+      if (paintRingRef.current) paintRingRef.current.style.opacity = '0';
     };
-    const move = (e: PointerEvent) => {
+
+    const endStroke = (revert: boolean) => {
       if (!paintingRef.current) return;
-
-      // pointermove fires far faster than the renderer draws. Raycasting on every
-      // event means several raycasts per frame, all but the last one thrown away -
-      // that is what makes the drag feel heavy and jumpy. Keep only the newest
-      // cursor position and resolve it once per animation frame.
-      paintPosRef.current = { x: e.clientX, y: e.clientY };
-      if (paintRafRef.current !== null) return;
-
-      paintRafRef.current = requestAnimationFrame(() => {
-        paintRafRef.current = null;
-        const p = paintPosRef.current;
-        if (p) paintAt(p.x, p.y);
-      });
-    };
-    const up = () => {
       paintingRef.current = false;
       paintBoundsRef.current = null;
       if (paintRafRef.current !== null) {
         cancelAnimationFrame(paintRafRef.current);
         paintRafRef.current = null;
       }
+      const start = strokeStartRef.current;
+      strokeStartRef.current = null;
+      if (revert && start) {
+        useLightsStore.getState().updateLightTransform(start.lightId, start.transform);
+      }
+      useHistoryStore.getState().endGroup();
       sm.controls.enabled = true;
     };
+
+    const down = (e: PointerEvent) => {
+      if (e.button !== 0) return;
+      if ((e.target as HTMLElement | null)?.closest?.('[data-paint-ui]')) return; // clicks on the mode bar
+      paintingRef.current = true;
+      paintBoundsRef.current = null;
+      sm.controls.enabled = false;
+      try { container.setPointerCapture?.(e.pointerId); } catch { /* synthetic events have no active pointer */ }
+
+      // The whole stroke is one undo step, and Esc can take it back.
+      const lightId = useLightsStore.getState().selectedLightId;
+      const light = lightId ? useLightsStore.getState().lights.find((l) => l.id === lightId) : undefined;
+      strokeStartRef.current = light ? { lightId: light.id, transform: JSON.parse(JSON.stringify(light.transform)) } : null;
+      useHistoryStore.getState().beginGroup('LightPaint');
+
+      pickerRef.current?.refresh(sm.scene);
+      paintAt(e.clientX, e.clientY);
+      showRing(e.clientX, e.clientY, true, true);
+    };
+    const context = (e: MouseEvent) => {
+      e.preventDefault();
+      pickerRef.current?.refresh(sm.scene);
+      pickReflectionAt(e.clientX, e.clientY);
+    };
+    const move = (e: PointerEvent) => {
+      // pointermove fires far faster than the renderer draws. Keep only the newest cursor position and resolve
+      // it once per animation frame: one pick and one light update per frame, never several thrown away.
+      paintPosRef.current = { x: e.clientX, y: e.clientY };
+      if (paintRafRef.current !== null) return;
+
+      paintRafRef.current = requestAnimationFrame(() => {
+        paintRafRef.current = null;
+        const p = paintPosRef.current;
+        if (!p) return;
+        if (paintingRef.current) {
+          paintAt(p.x, p.y);
+          showRing(p.x, p.y, true, true);
+        } else if (container.contains(document.elementFromPoint(p.x, p.y))) {
+          const r = container.getBoundingClientRect();
+          if (p.x < r.left || p.x > r.right || p.y < r.top || p.y > r.bottom) return hideRing();
+          const over = !!pickAt(p.x, p.y)?.hit;
+          showRing(p.x, p.y, over, false);
+        } else {
+          hideRing();
+        }
+      });
+    };
+    const up = () => endStroke(false);
+    const key = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && paintingRef.current) {
+        e.preventDefault();
+        e.stopPropagation();
+        endStroke(true);
+      }
+    };
+    const leave = () => { if (!paintingRef.current) hideRing(); };
 
     container.addEventListener('pointerdown', down);
     window.addEventListener('pointermove', move);
     window.addEventListener('pointerup', up);
+    window.addEventListener('pointercancel', up);
+    window.addEventListener('keydown', key, true);
+    container.addEventListener('pointerleave', leave);
     container.addEventListener('contextmenu', context);
     container.style.cursor = 'crosshair';
 
     return () => {
+      endStroke(false);
       container.removeEventListener('pointerdown', down);
       window.removeEventListener('pointermove', move);
       window.removeEventListener('pointerup', up);
+      window.removeEventListener('pointercancel', up);
+      window.removeEventListener('keydown', key, true);
+      container.removeEventListener('pointerleave', leave);
       container.removeEventListener('contextmenu', context);
       container.style.cursor = '';
+      hideRing();
       sm.controls.enabled = true;
     };
-  }, [paintActive, paintAt, pickReflectionAt, containerRef, sceneManagerRef]);
+  }, [paintActive, paintAt, pickAt, pickReflectionAt, containerRef, sceneManagerRef]);
 
   // Click-to-select material from viewport
   const handleViewportClick = useCallback((event: React.MouseEvent) => {
@@ -1713,6 +1746,19 @@ export const Viewport: React.FC<ViewportProps> = ({ sceneManagerRef, onScreensho
           onDrop={handleDrop}
         >
           {paintActive && <PaintModeBar mode={paintMode} onMode={setPaintMode} />}
+          {paintActive && (
+            <div
+              ref={paintRingRef}
+              data-paint-ui
+              aria-hidden="true"
+              style={{
+                position: 'absolute', left: 0, top: 0, width: 22, height: 22, borderRadius: '50%',
+                border: '2px solid var(--accent, #ff9a1f)', boxShadow: '0 0 0 1px rgba(0,0,0,0.55), 0 0 10px rgba(255,150,30,0.45)',
+                pointerEvents: 'none', opacity: 0, zIndex: 19, willChange: 'transform',
+                transition: 'opacity 0.12s ease, background 0.12s ease',
+              }}
+            />
+          )}
           {isDragging && (
             <div className="drop-overlay">
               <span>Drop .glb or .erik file to load model</span>
