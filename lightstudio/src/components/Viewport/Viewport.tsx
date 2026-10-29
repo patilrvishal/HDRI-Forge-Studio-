@@ -14,6 +14,8 @@ import { SceneManager, RenderPipeline, LightManager, ModelLoader, canvasTextureT
 import { ErikLoader } from '../../three/ErikLoader';
 import { animationEngine, AnimationEngine } from '../../three/AnimationEngine';
 import { EnvironmentLoader } from '../../three/EnvironmentLoader';
+import { bakePathTracerEnvironment } from '../../three/ptEnvironment';
+import { HDRICancelled } from '../../three/HDRIExporter';
 import { getHDRIPresetById } from '../../types/Environment';
 import { base64ToArrayBuffer } from '../../store/modelDataStore';
 import { hdriBase64ToArrayBuffer, setRawHDRIData } from '../../store/hdriDataStore';
@@ -143,6 +145,10 @@ export const Viewport: React.FC<ViewportProps> = ({ sceneManagerRef, onScreensho
     return () => { window.removeEventListener('keydown', dn); window.removeEventListener('keyup', up); };
   }, []);
   const hasSkyAsset = useHDRIAssetStore((s) => s.assets.some((a) => a.kind === 'sky'));
+  const hdriAssets = useHDRIAssetStore((s) => s.assets);
+  // The environment map the path tracer is lit with (see three/ptEnvironment.ts); null = use the loaded file as is.
+  const ptEnvRef = useRef<THREE.DataTexture | null>(null);
+  const ptEnvGen = useRef(0);
   const selectedLightId = useLightsStore((s) => s.selectedLightId);
   const updateLight = useLightsStore((s) => s.updateLight);
 
@@ -684,7 +690,7 @@ export const Viewport: React.FC<ViewportProps> = ({ sceneManagerRef, onScreensho
           // Show the HDRI as a 360deg backplate in the viewport
           el.setBackgroundFromEnv(sm.scene, environment.showBackground);
 
-          renderPipelineRef.current?.markPathTracerDirty(el.getEquirectTexture());
+          renderPipelineRef.current?.markPathTracerDirty(ptEnvRef.current ?? el.getEquirectTexture());
         })
         .catch((e) => {
           // Do NOT fall back to a built-in preset - that silently replaces the
@@ -801,9 +807,39 @@ export const Viewport: React.FC<ViewportProps> = ({ sceneManagerRef, onScreensho
     if (environment.presetId === '__custom__' && environment.hdri && !equirectTex) {
       return;
     }
-    const rawEnv = equirectTex ?? gradientRawEnv;
+    const rawEnv = ptEnvRef.current ?? equirectTex ?? gradientRawEnv;
     renderPipelineRef.current?.markPathTracerDirty(rawEnv);
   }, [lights, hdriShapes, environment.presetId, environment.rotation, environment.intensity, environment.hdri, environment.gradientBackground, environment.background, environment.showBackground, renderSettings.engine, envLoaderRef, sceneManagerRef]);
+
+  // Path tracing: light the scene with the HDRI assets' own settings (Exposure, Rotation X/Z, Flip, Offset, Opacity,
+  // Highlights/Shadows, Blur, colour grading), the same composite the HDRI Preview shows, redone shortly after
+  // every change so the traced image follows the sliders. The PBR viewport keeps showing the raw file.
+  useEffect(() => {
+    const gen = ++ptEnvGen.current;
+    if (renderSettings.engine !== 'pathtracer') {
+      ptEnvRef.current = null;
+      return;
+    }
+    const hasActive = hdriAssets.some((a) => a.active && (a.dataBase64 || a.kind === 'sky'));
+    if (!hasActive) {
+      if (ptEnvRef.current) {
+        ptEnvRef.current = null;
+        renderPipelineRef.current?.markPathTracerDirty(envLoaderRef.current?.getEquirectTexture() ?? null);
+      }
+      return;
+    }
+    const timer = window.setTimeout(async () => {
+      try {
+        const tex = await bakePathTracerEnvironment(() => gen !== ptEnvGen.current);
+        if (gen !== ptEnvGen.current || !tex) return;
+        ptEnvRef.current = tex;
+        renderPipelineRef.current?.markPathTracerDirty(tex);
+      } catch (e) {
+        if (!(e instanceof HDRICancelled)) console.warn('[HDRI Forge] Path tracer environment bake failed:', e);
+      }
+    }, 150);
+    return () => window.clearTimeout(timer);
+  }, [hdriAssets, renderSettings.engine, envLoaderRef, renderPipelineRef]);
 
   // Restore model from scene file (triggered when _pendingModelDataBase64 is set)
   useEffect(() => {

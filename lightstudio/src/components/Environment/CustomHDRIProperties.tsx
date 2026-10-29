@@ -254,7 +254,8 @@ export const CustomHDRIProperties: React.FC = () => {
             Reset all grading
           </button>
           <div style={{ fontSize: 9, color: 'var(--text-dim)', lineHeight: 1.4, marginTop: -2 }}>
-            Applies to the HDRI Preview panel and exported file. The live 3D
+            Applies to the HDRI Preview panel and exported file, and to the
+            Path Tracer, which follows every slider as you move it. The PBR
             viewport shows this HDRI&apos;s reflections unadjusted - grading a
             real-time PBR environment map would need a custom shader pass,
             which isn&apos;t wired up yet.
