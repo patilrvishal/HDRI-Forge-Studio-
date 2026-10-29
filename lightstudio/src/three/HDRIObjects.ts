@@ -22,6 +22,8 @@ export interface ObjectHit {
 }
 
 const MAX_TRIS = 1_500_000;
+/** World distance under which the capture point counts as lying on a surface. */
+const ON_SURFACE = 1e-3;
 const bvhCache = new WeakMap<THREE.BufferGeometry, MeshBVH>();
 
 function bvhFor(geometry: THREE.BufferGeometry): MeshBVH | null {
@@ -47,6 +49,8 @@ export class HdriObjectCaster {
   private ray = new THREE.Ray();
   private local = new THREE.Ray();
   private tmp = new THREE.Vector3();
+  private normal = new THREE.Vector3();
+  private up = new THREE.Vector3(0, 1, 0);
 
   static build(scene: THREE.Scene): HdriObjectCaster | null {
     const settings = useObjectHdriStore.getState().settings;
@@ -97,6 +101,16 @@ export class HdriObjectCaster {
       if (!hit) continue;
       this.tmp.copy(hit.point).applyMatrix4(c.mesh.matrixWorld);
       const dist = this.tmp.distanceTo(origin);
+      // The capture point sits ON this surface (a plane added at the origin, a floor at the capture height).
+      // Every ray starts on it, so every direction "hits" at distance 0 and the whole map used to turn into the
+      // object. Treat the viewer as standing just on one side of it instead: it is seen only in the directions
+      // that point into it. A ground-like plane is viewed from above (you see it below the horizon, whichever way
+      // it faces); any other surface is viewed from its front face.
+      if (dist < ON_SURFACE && hit.face) {
+        const n = this.normal.copy(hit.face.normal).transformDirection(c.mesh.matrixWorld);
+        const side = Math.abs(n.y) > 0.7 ? this.up : n;
+        if (dir.dot(side) >= 0) continue;
+      }
       if (!best || dist < best.dist) {
         best = { dist, r: c.color.r, g: c.color.g, b: c.color.b, alpha: c.opacity };
       }
