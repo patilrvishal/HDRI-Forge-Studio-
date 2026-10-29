@@ -194,6 +194,7 @@ class ForgeLink(object):
                         "width": 0, "height": 0, "final": False, "ms": 0, "frames": 0, "note": ""}
         self._pending = None            # newest frame the DCC has not taken yet
         self._last_version = 0
+        self._tag = self._new_run()      # keeps file names unique, see _new_run
         self._applied_at = 0.0
         self._applied_mp = 0.0
         self._written = []              # files we created, oldest first
@@ -210,6 +211,7 @@ class ForgeLink(object):
             return
         self._stop.clear()
         self._last_version = 0
+        self._tag = self._new_run()
         self._purge_dir()                    # leftovers from a previous run that never got to clean up
         self._set(state=SEARCHING, message="Looking for HDRI Forge Studio...", frames=0, note="")
         self._thread = threading.Thread(target=self._run, name="forge-link", daemon=True)
@@ -275,6 +277,15 @@ class ForgeLink(object):
 
     # ---- internals -------------------------------------------------------
 
+    @staticmethod
+    def _new_run():
+        """A tag for this stretch of version numbers.
+
+        Forge counts versions from 0 again whenever it restarts, and so do we. A renderer keeps the map it is using
+        open, so on Windows a new frame named like an old leftover could not replace it ("Access is denied") and Live
+        stopped updating until the artist restarted everything."""
+        return format(int(time.time() * 1000) & 0xFFFFFFFF, "x")
+
     def _set(self, **kw):
         with self._lock:
             self._status.update(kw)
@@ -304,6 +315,7 @@ class ForgeLink(object):
                 base = inst["base"]
                 backoff = 0.5
                 self._last_version = 0          # a restarted Forge counts versions from 0 again
+                self._tag = self._new_run()
                 note = ""
                 if inst["protocol"] > PROTOCOL:
                     note = "Forge is newer than this addon. Update the addon to keep every feature."
@@ -331,6 +343,7 @@ class ForgeLink(object):
             version = int(st.get("version", 0) or 0)
             if version < self._last_version:
                 self._last_version = 0          # Forge restarted between two polls: take the new map
+                self._tag = self._new_run()
             if version == self._last_version:
                 self._wait(self._poll)
                 continue
@@ -364,11 +377,11 @@ class ForgeLink(object):
             except Exception:
                 ash_text = None                       # diffuse light is optional
         os.makedirs(self._dir, exist_ok=True)
-        path = os.path.join(self._dir, "live_%d.hdr" % version)
+        path = os.path.join(self._dir, "live_%s_%d.hdr" % (self._tag, version))
         self._atomic_write(path, data)
         ash_path = None
         if ash_text:
-            ash_path = os.path.join(self._dir, "live_%d.ash" % version)
+            ash_path = os.path.join(self._dir, "live_%s_%d.ash" % (self._tag, version))
             self._atomic_write(ash_path, ash_text.encode("utf-8"))
         return Frame(version=version, path=path, ash_path=ash_path, ash_text=ash_text,
                      width=w or int(st.get("w", 0) or 0), height=h or int(st.get("h", 0) or 0),

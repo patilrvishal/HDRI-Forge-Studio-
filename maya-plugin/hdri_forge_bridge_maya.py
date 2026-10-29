@@ -1128,6 +1128,16 @@ def _show_artist_domes(our_transform):
             cmds.setAttr(n + '.visibility', 1)
 
 
+def _set_other_bridge_domes_visible(kind, visible):
+    """Show or hide the bridge's domes of every other kind (Live vs Import), leaving this kind alone."""
+    for xform, _shape in _bridge_domes():
+        try:
+            if cmds.getAttr(xform + '.' + BRIDGE_ATTR) != kind:
+                cmds.setAttr(xform + '.visibility', 1 if visible else 0)
+        except Exception:
+            pass
+
+
 def _bridge_dome(kind):
     """The sky dome we own for this kind, created on demand. Returns (transform, shape, file_node)."""
     _ensure_arnold()
@@ -1151,6 +1161,7 @@ def _bridge_dome(kind):
         _hide_artist_domes(xform)
         _link_dome_to_scene(xform)                          # without this the dome lights nothing
         _apply_sky_settings()                               # a new dome starts with the chosen sky settings
+    _set_other_bridge_domes_visible(kind, False)            # two sky domes add up: an old Import would drown the live one
     conns = cmds.listConnections(shape + '.color', source=True, destination=False, type='file') or []
     if conns:
         file_node = conns[0]
@@ -1342,6 +1353,32 @@ def toggle_shadow_catcher(*_args):
     return True
 
 
+def _refresh_arnold_ipr():
+    """Arnold's IPR does not notice a texture path swapped on the dome's file node, so ask it to re-sync.
+
+    Without this the Render View keeps the old lighting until the artist picks Render > Update Full Scene
+    (verified: a new map on the dome's file node left the Render View unchanged; arnoldIpr -mode refresh did nothing).
+    Does nothing when the renderer is not Arnold or the Render View is closed."""
+    if renderer_name() != "arnold" or not _arnold_render_view_open():
+        return                                              # never pop the Render View open ourselves
+    try:
+        cmds.arnoldRenderView(opt=("Update Full Scene", "1"))   # what Render > Update Full Scene does
+    except Exception:
+        pass
+
+
+def _arnold_render_view_open():
+    """True while the Arnold Render View window is showing (a Qt window, not a Maya UI control)."""
+    for name in ("PySide2", "PySide6"):
+        try:
+            QtWidgets = __import__(name + ".QtWidgets", fromlist=["QtWidgets"])
+            app = QtWidgets.QApplication.instance()
+            return any(w.isVisible() and "Arnold RenderView" in (w.windowTitle() or "") for w in app.topLevelWidgets())
+        except Exception:
+            continue
+    return False
+
+
 def _live_tick(*_args):
     """Main-thread timer: apply the newest map the background thread has downloaded."""
     link = _live["link"]
@@ -1360,6 +1397,7 @@ def _live_tick(*_args):
     if frame is not None:
         try:
             _set_dome_image(LIVE_KIND, frame.path)
+            _refresh_arnold_ipr()
         except Exception as e:                       # never let a bad frame kill the timer
             cmds.warning("HDRI Forge Bridge: could not apply frame: %s" % e)
             link._set(state=_core.ERROR, message=str(e))
@@ -1422,6 +1460,7 @@ def live_stop(*_args):
         link.stop()
         link.cleanup()
     _remove_bridge_domes(LIVE_KIND)
+    _set_other_bridge_domes_visible(LIVE_KIND, True)         # bring back an imported sky Live had hidden
     _live["last_status"] = None
     _refresh_live_ui()
 

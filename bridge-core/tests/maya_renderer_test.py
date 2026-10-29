@@ -241,6 +241,15 @@ def main():
     vals = (cmds.getAttr(shp + ".camera"), cmds.getAttr(shp + ".aiDiffuse"), cmds.getAttr(shp + ".aiSpecular"), cmds.getAttr(shp + ".exposure"))
     check(vals == (1.0, 1.0, 1.0, 0.0), "turning everything back on restores the dome %s" % (vals,))
 
+    # 6b. an Import dome left in the scene must not add to the Live one (Arnold sums every sky dome)
+    hm._set_dome_image(hm.IMPORT_KIND, hdr)
+    imp_x = hm._bridge_domes(hm.IMPORT_KIND)[0][0]
+    hm._set_dome_image(hm.LIVE_KIND, hdr)
+    check(cmds.getAttr(imp_x + ".visibility") == 0, "Live hides a leftover Import dome so it cannot drown the live sky")
+    hm._set_other_bridge_domes_visible(hm.LIVE_KIND, True)
+    check(cmds.getAttr(imp_x + ".visibility") == 1, "stopping Live shows the imported sky again")
+    hm._remove_bridge_domes(hm.IMPORT_KIND)
+
     # 7. sampling presets
     o = "defaultArnoldRenderOptions"
     hm.apply_quality("DRAFT")

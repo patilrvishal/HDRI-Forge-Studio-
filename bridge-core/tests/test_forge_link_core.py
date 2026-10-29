@@ -308,6 +308,33 @@ class LinkTests(unittest.TestCase):
         self.assertIsNotNone(f)
         self.assertEqual(f.width, 2048)
 
+    def test_a_restarted_link_can_reuse_a_version_while_the_renderer_holds_the_old_file(self):
+        # Maya/Arnold keep the map they are rendering open. Stopping and restarting Live (or reloading the plug-in)
+        # counts versions from 0 again, so the new "version 1" used to be written over the old, still-open
+        # "live_1.hdr": Windows said "Access is denied" and Live silently stopped updating.
+        self.bridge.push(256, 128)
+        self.link.start()
+        first = self.take()
+        self.link.frame_applied(first)
+        self.link.stop()
+        held = open(first.path, "rb")                        # the renderer's handle; Windows blocks replacing it
+        try:
+            again = core.ForgeLink(cache_dir=self.tmp, ports=[self.bridge.port], poll_interval=0.02,
+                                   probe_timeout=0.3, request_timeout=2.0)
+            again.start()
+            try:
+                out = []
+                wait_for(lambda: out.append(again.take_frame()) or out[-1] is not None, 4.0, 0.01)
+                second = out[-1]
+                self.assertIsNotNone(second)
+                self.assertEqual(second.version, first.version)
+                self.assertNotEqual(second.path, first.path)
+                self.assertNotEqual(again.status()["state"], core.ERROR)
+            finally:
+                again.stop()
+        finally:
+            held.close()
+
     def test_warns_when_forge_is_newer_than_the_addon(self):
         self.bridge.state["protocol"] = core.PROTOCOL + 1
         self.link.start()
