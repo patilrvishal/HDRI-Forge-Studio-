@@ -1609,6 +1609,8 @@ interface LightSyncEntry {
   layerIndex?: number;
   blendMode?: string;
   blendInvert?: boolean;
+  blendChannel?: string;
+  mapping?: string;
 }
 
 interface LightObjectEntry {
@@ -1831,6 +1833,8 @@ export class LightManager {
     lightObj.userData.layerIndex = ld.layerIndex;
     lightObj.userData.blendMode = ld.blendMode;
     lightObj.userData.blendInvert = ld.blendInvert;
+    lightObj.userData.blendChannel = ld.blendChannel;
+    lightObj.userData.mapping = ld.mapping;
     lightObj.position.set(px, py, pz);
     lightObj.visible = shouldShow;
 

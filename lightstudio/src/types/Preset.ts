@@ -22,16 +22,43 @@ export interface PresetLight {
   edgeSoftness?: number;
 }
 
+/** Top-level kind of thing a preset is, orthogonal to `category` (which stays the load-bearing
+ *  flat bucket: studio / outdoor / ...). Original taxonomy for this app, not copied from any
+ *  other product: rig = several lights placed together, light = one light, env = an
+ *  environment/HDRI, content = what a light shows, element = a reusable piece, effect = a look
+ *  modifier. */
+export type PresetGroup = 'rig' | 'env' | 'light' | 'content' | 'element' | 'effect';
+
+export const PRESET_GROUPS: Array<{ key: PresetGroup; label: string }> = [
+  { key: 'rig', label: 'Rig' },
+  { key: 'env', label: 'Env' },
+  { key: 'light', label: 'Light' },
+  { key: 'content', label: 'Content' },
+  { key: 'element', label: 'Element' },
+  { key: 'effect', label: 'Effect' },
+];
+
 export interface Preset {
   id: string;
   name: string;
   category: 'sidelights' | 'studio' | 'outdoor' | 'spotlight' | 'lightprofiles' | 'custom';
+  /** Optional explicit group. Presets without one (every built-in and every preset saved before
+   *  groups existed) get theirs from `presetGroup()`. */
+  group?: PresetGroup;
   description: string;
   thumbnail: string; // base64 data URL
   tags: string[];
   lights: PresetLight[];
   createdAt: number;
   isDefault: boolean;
+}
+
+/** The group a preset belongs to: its own `group`, else derived from how it is built. */
+export function presetGroup(p: Pick<Preset, 'group' | 'category' | 'lights'>): PresetGroup {
+  if (p.group) return p.group;
+  if (p.category === 'lightprofiles') return 'light';       // one light shaped like a modifier
+  if (p.category === 'custom') return p.lights.length > 1 ? 'rig' : 'light';
+  return 'rig';                                              // studio / outdoor / spotlight / sidelights set-ups
 }
 
 export function presetToLights(preset: Preset): Light[] {

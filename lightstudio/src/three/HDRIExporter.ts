@@ -83,6 +83,10 @@ interface ExtractedLight {
   layerIndex?: number;
   blendMode?: AppearanceBlend;
   blendInvert?: boolean;
+  /** Channels of the map this light writes to ('all' when unset). */
+  blendChannel?: 'all' | 'red' | 'green' | 'blue';
+  /** 'plane' = parallel projection of the rectangle, 'perspective' (default) = gnomonic as seen from the capture point. */
+  mapping?: 'perspective' | 'plane';
 }
 
 /** Bilinear sample of a light appearance texture at (u,v) in 0..1, v=0 at the top. */
@@ -584,13 +588,21 @@ function evaluateLightRadiance(
 
       // Project the pixel's direction into the rectangle's local tangent
       // plane (right/up axes), same math as HDRIShapesLayer's paintPatch.
-      const lx = (dir.x * lightRight.x + dir.y * lightRight.y + dir.z * lightRight.z) / cosc;
-      const ly = (dir.x * lightUp.x + dir.y * lightUp.y + dir.z * lightUp.z) / cosc;
+      //
+      // Mapping 'plane' (original semantic for this renderer): drop the perspective divide, so the pixel's direction
+      // is projected straight (orthographically) onto the light's plane and the half-extents use sin instead of tan.
+      // A large light then keeps an evenly spaced footprint and texture across the sphere instead of stretching
+      // toward its edges, and it never blows up near the horizon of its own hemisphere.
+      const plane = light.mapping === 'plane';
+      const pdiv = plane ? 1 : cosc;
+      const extent = (half: number): number => (plane ? Math.sin(Math.min(half, 1.55)) : Math.tan(Math.min(half, 1.55)));
+      const lx = (dir.x * lightRight.x + dir.y * lightRight.y + dir.z * lightRight.z) / pdiv;
+      const ly = (dir.x * lightUp.x + dir.y * lightUp.y + dir.z * lightUp.z) / pdiv;
 
       const halfW = Math.max(0.02, Math.atan2(rectW / 2, dist));
       const halfH = Math.max(0.02, Math.atan2(rectH / 2, dist));
-      const nx = Math.abs(lx) / Math.tan(Math.min(halfW, 1.55));
-      const ny = Math.abs(ly) / Math.tan(Math.min(halfH, 1.55));
+      const nx = Math.abs(lx) / extent(halfW);
+      const ny = Math.abs(ly) / extent(halfH);
       const edge = Math.max(nx, ny); // Chebyshev distance = box falloff
       // Outside the footprint. Plain lights keep a small margin so the anti-aliased edge can reach past the boundary.
       if (light.tex ? (nx > 1 || ny > 1) : edge > 1.25) break;
@@ -600,8 +612,8 @@ function evaluateLightRadiance(
       if (light.tex) {
         // Light Appearance: the RGBA texture defines both the shape (alpha) and the
         // colour/brightness pattern. u runs to the viewer's right = the light's -X.
-        const tanW = Math.tan(Math.min(halfW, 1.55));
-        const tanH = Math.tan(Math.min(halfH, 1.55));
+        const tanW = extent(halfW);
+        const tanH = extent(halfH);
         sampleLightTex(light.tex, 0.5 - 0.5 * (lx / tanW), 0.5 - 0.5 * (ly / tanH), _texOut);
         coverage = Math.max(0, Math.min(1, _texOut[3]));
         tr = _texOut[0]; tg = _texOut[1]; tb = _texOut[2];
@@ -611,14 +623,15 @@ function evaluateLightRadiance(
         // The width is the real per-pixel change of the edge metric here, so it follows resolution and projection.
         let aa = 0;
         if (edge > 0.6 && _aaPix.w > 0) {
-          const tanW = Math.tan(Math.min(halfW, 1.55));
-          const tanH = Math.tan(Math.min(halfH, 1.55));
+          const tanW = extent(halfW);
+          const tanH = extent(halfH);
           const edgeAtPixel = (px: number, py: number): number => {
             pixelDirInto(px, py, _aaPix.w, _aaPix.h, _aaDir);
             const c = _aaDir[0] * centerDir.x + _aaDir[1] * centerDir.y + _aaDir[2] * centerDir.z;
             if (c <= 0.02) return NaN;
-            const ax = (_aaDir[0] * lightRight.x + _aaDir[1] * lightRight.y + _aaDir[2] * lightRight.z) / c;
-            const ay = (_aaDir[0] * lightUp.x + _aaDir[1] * lightUp.y + _aaDir[2] * lightUp.z) / c;
+            const pd = plane ? 1 : c;
+            const ax = (_aaDir[0] * lightRight.x + _aaDir[1] * lightRight.y + _aaDir[2] * lightRight.z) / pd;
+            const ay = (_aaDir[0] * lightUp.x + _aaDir[1] * lightUp.y + _aaDir[2] * lightUp.z) / pd;
             return Math.max(Math.abs(ax) / tanW, Math.abs(ay) / tanH);
           };
           const ex = edgeAtPixel(_aaPix.x + 1, _aaPix.y);
@@ -942,14 +955,17 @@ lights.forEach((l, i) => {
             const bm = lights[i].blendMode ?? 'normal';
             let cr = c.r, cg = c.g, cb = c.b;
             if (lights[i].blendInvert) { cr = Math.max(0, 1 - cr); cg = Math.max(0, 1 - cg); cb = Math.max(0, 1 - cb); }
+            // Blend channel: a light set to one channel leaves the other two of the map exactly as they were.
+            const bc = lights[i].blendChannel ?? 'all';
+            const wr = bc === 'all' || bc === 'red', wg = bc === 'all' || bc === 'green', wb = bc === 'all' || bc === 'blue';
             if (bm === 'normal') {
-              r = r * (1 - alpha) + cr * alpha;
-              g = g * (1 - alpha) + cg * alpha;
-              b = b * (1 - alpha) + cb * alpha;
+              if (wr) r = r * (1 - alpha) + cr * alpha;
+              if (wg) g = g * (1 - alpha) + cg * alpha;
+              if (wb) b = b * (1 - alpha) + cb * alpha;
             } else {
-              r += (blendValue(bm, r, cr) - r) * alpha;
-              g += (blendValue(bm, g, cg) - g) * alpha;
-              b += (blendValue(bm, b, cb) - b) * alpha;
+              if (wr) r += (blendValue(bm, r, cr) - r) * alpha;
+              if (wg) g += (blendValue(bm, g, cg) - g) * alpha;
+              if (wb) b += (blendValue(bm, b, cb) - b) * alpha;
             }
           } else {
             r += c.r;
@@ -1097,7 +1113,7 @@ lights.forEach((l, i) => {
  */
 function extractLightsFromScene(scene: THREE.Scene, includeAreaMode = false): ExtractedLight[] {
   const lights: ExtractedLight[] = [];
-  let tag: { compositeId?: string; compositeFilters?: FilterSpec[]; compositeBlend?: AppearanceBlend; layerIndex?: number; blendMode?: AppearanceBlend; blendInvert?: boolean } = {};
+  let tag: { compositeId?: string; compositeFilters?: FilterSpec[]; compositeBlend?: AppearanceBlend; layerIndex?: number; blendMode?: AppearanceBlend; blendInvert?: boolean; blendChannel?: ExtractedLight['blendChannel']; mapping?: ExtractedLight['mapping'] } = {};
   const push = (l: ExtractedLight) => { lights.push({ ...l, ...tag }); };
   const worldPos = new THREE.Vector3();
   const worldQuat = new THREE.Quaternion();
@@ -1111,7 +1127,7 @@ function extractLightsFromScene(scene: THREE.Scene, includeAreaMode = false): Ex
     // Skip AmbientLight - no position/direction, adds uniform light to all pixels
     if (child instanceof THREE.AmbientLight) return;
 
-    tag = { compositeId: child.userData.compositeId, compositeFilters: child.userData.compositeFilters as FilterSpec[] | undefined, compositeBlend: child.userData.compositeBlend as AppearanceBlend | undefined, layerIndex: child.userData.layerIndex as number | undefined, blendMode: child.userData.blendMode as AppearanceBlend | undefined, blendInvert: child.userData.blendInvert as boolean | undefined };
+    tag = { compositeId: child.userData.compositeId, compositeFilters: child.userData.compositeFilters as FilterSpec[] | undefined, compositeBlend: child.userData.compositeBlend as AppearanceBlend | undefined, layerIndex: child.userData.layerIndex as number | undefined, blendMode: child.userData.blendMode as AppearanceBlend | undefined, blendInvert: child.userData.blendInvert as boolean | undefined, blendChannel: child.userData.blendChannel as ExtractedLight['blendChannel'], mapping: child.userData.mapping as ExtractedLight['mapping'] };
     child.getWorldPosition(worldPos);
 
     // ------ PointLight ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------

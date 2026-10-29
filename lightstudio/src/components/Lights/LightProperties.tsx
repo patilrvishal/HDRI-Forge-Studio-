@@ -544,6 +544,26 @@ export const LightProperties: React.FC<{ lightId?: string }> = ({ lightId }) => 
             onChange={(v) => handleUpdate({ blendMode: v as Light['blendMode'] })}
           />
           <Toggle label="Invert" checked={!!light.blendInvert} variant="glossy" onChange={(v) => handleUpdate({ blendInvert: v })} />
+          <Dropdown
+            label="Blend channel"
+            value={light.blendChannel ?? 'all'}
+            options={[
+              { value: 'all', label: 'All (RGB)' },
+              { value: 'red', label: 'Red only' },
+              { value: 'green', label: 'Green only' },
+              { value: 'blue', label: 'Blue only' },
+            ]}
+            onChange={(v) => handleUpdate({ blendChannel: v as Light['blendChannel'] })}
+          />
+          <Dropdown
+            label="Mapping"
+            value={light.mapping ?? 'perspective'}
+            options={[
+              { value: 'perspective', label: '3D (perspective)' },
+              { value: 'plane', label: 'Infinite plane' },
+            ]}
+            onChange={(v) => handleUpdate({ mapping: v as Light['mapping'] })}
+          />
         </CollapsibleSection>
       )}
       {isAreaLike && <LightAppearanceSection light={light} onUpdate={handleUpdate} />}

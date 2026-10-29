@@ -100,7 +100,20 @@ export interface Light {
   blendMode?: import('../appearance/types').AppearanceBlend;
   /** Invert the light's colours before blending. */
   blendInvert?: boolean;
+  /** Which colour channels of the map this light writes to when it is blended in (default 'all').
+   *  'red' / 'green' / 'blue' leave the other two channels of the map untouched, so a light can tint
+   *  or subtract in one channel only. The baked map is always opaque, so there is no alpha channel
+   *  to blend into: see docs/HDRLS-PARITY-BRIEF.md. */
+  blendChannel?: BlendChannel;
+  /** How the light's rectangle is projected onto the map (default 'perspective').
+   *  'perspective' = as seen from the capture point (gnomonic, edges stretch for big lights);
+   *  'plane' = parallel projection onto the light's plane, so a big light keeps a true-to-size,
+   *  evenly spaced footprint and texture across the sphere. */
+  mapping?: LightMapping;
 }
+
+export type BlendChannel = 'all' | 'red' | 'green' | 'blue';
+export type LightMapping = 'perspective' | 'plane';
 
 /**
  * Area Light mode: instead of being painted into the HDRI, the light becomes a real

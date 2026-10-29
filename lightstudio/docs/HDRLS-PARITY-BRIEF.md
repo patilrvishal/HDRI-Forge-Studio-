@@ -50,52 +50,41 @@ rendered via `SceneManager.ts:205`/`engine.ts:383`). No code change needed — i
 just not framed as an explicit "Background Type" selector like HDR Light Studio's
 Create menu does. Low priority; see below if picked up.
 
-## Scoped, not yet implemented
+## Shipped in the follow-up pass
 
-These need design decisions or touch rendering-critical paths (`HDRIExporter.ts`'s
-per-pixel compositing, `evaluateLightRadiance`'s projection math) that deserve their
-own focused session rather than a rushed bolt-on, given how much testing rigor this
-project holds itself to (see the parity-run memory: every control re-verified via
-real DOM clicks, not just store calls).
+**Per-light compositing controls** (Light properties > Blend). Both are optional fields on `Light`
+(`src/types/Light.ts`), flow through `Viewport.tsx` -> `engine.ts` userData -> `extractLightsFromScene`
+and are applied in `HDRIExporter.ts`. Unset behaves exactly as before (tested).
+- **Blend channel** (`blendChannel`: all / red / green / blue): the light writes only to that channel of
+  the map; the other two stay as they were. Works with every blend mode. Our own semantic, chosen
+  because our compositing carries (r,g,b) only.
+- **Mapping** (`mapping`: perspective / plane): `perspective` is the previous gnomonic projection;
+  `plane` drops the perspective divide and uses sin instead of tan for the half-extents, i.e. a parallel
+  (orthographic) projection onto the light's plane. Large lights keep an even footprint and texture
+  instead of stretching toward their edges. Small lights look the same either way.
+- Tests: `npm run test:hdri` (`tests/hdri/light-compositing.test.ts`) bakes real THREE scenes through
+  `generateAnalyticalHDRI` and checks channel isolation, mapping and that unset == default.
 
-1. **Per-light compositing controls** — HDR Light Studio exposes, per individual
-   light: Blend Channel, Preserve Alpha, Mapping (3D vs Infinite Plane), and an
-   explicit Area Light checkbox. Today `src/types/Light.ts`'s `Light` interface only
-   has `blendMode` + `blendInvert` (`LightProperties.tsx:538-547`'s "Blend" section).
-   - **Blend Channel**: needs a defined semantic for this renderer specifically —
-     today each light contributes `(r,g,b,coverage)` per pixel
-     (`HDRIExporter.ts:937-960`); there's no separate alpha channel carried through
-     the final composite to let a "Channel: Alpha only" option mean something
-     precise. Decide: does it mask/multiply only `coverage` without touching RGB, or
-     something else? Write the semantic down before implementing.
-   - **Preserve Alpha**: same blocker — needs a defined meaning against this
-     specific compositing model before it can do anything but exist as a no-op
-     checkbox.
-   - **Mapping (3D / Infinite Plane)**: changes how the light's appearance texture
-     projects — real 3D angular projection (current, implicit) vs. parallel/infinite-
-     plane projection. This is in `evaluateLightRadiance` (wherever it does its
-     direction→UV mapping for area-type lights) — needs that function read in full
-     before touching it; don't guess at the projection math.
-   - **Area Light checkbox**: `Light.areaLight` already exists but is auto-derived
-     from `type` (`LightProperties.tsx:262`: `areaLight: isAreaType`), not
-     user-toggleable — intentionally left alone this pass, since exposing it raw
-     risks desyncing from that derivation elsewhere (presets, Blender bridge,
-     `objectLightApi.ts`). If genuinely wanted, it needs to become either a real
-     independent flag with its own handling everywhere `isAreaType` currently gates,
-     or explicitly documented as "redundant with light type, not exposed."
+**Preset Library groups + tag filter** (`PresetBrowser.tsx`, `presetsStore.ts`, `types/Preset.ts`).
+- New optional `Preset.group` (`rig | env | light | content | element | effect`) next to the untouched
+  `category`. `presetGroup()` derives it for every existing preset: studio/outdoor/spotlight/sidelights
+  = rig, light profiles = light, custom = rig if it has several lights else light. Saved presets and
+  export/import keep working; an explicit `group` is round-tripped.
+- A group tab bar (All + only the groups that actually hold presets) sits above the category tabs;
+  the category tabs narrow to the categories present in the chosen group.
+- A multi-select **Tags** filter next to the search box (a preset must carry every picked tag),
+  built from the tags in the current group and category.
+- Env / Content / Element / Effect have no built-in presets yet, so their tabs stay hidden until a
+  preset carries that `group`.
 
-2. **Preset Library taxonomy** — HDR Light Studio has 6 tabs (Rig/Env/Light/Content/
-   Element/Effect), each independently filterable by Type + Tag.
-   `src/types/Preset.ts:28`'s `category` is a flat enum (`sidelights | studio |
-   outdoor | spotlight | lightprofiles | custom`), rendered as flat tabs in
-   `PresetBrowser.tsx:18-25`, with a free-text search only — `tags: string[]`
-   (`Preset.ts:31`) exists on the data but isn't exposed as a facet filter.
-   Suggested approach for a future pass: don't replace the existing category enum
-   (it's load-bearing elsewhere); add a second, orthogonal `group` field
-   (`'rig' | 'env' | 'light' | 'content' | 'element' | 'effect'`) that existing and
-   new presets get tagged with, add a top-level group tab bar above the current
-   category tabs, and wire the existing `tags` field into a real multi-select Tag
-   filter dropdown next to the search box.
+## Decided not to build
+
+- **Preserve Alpha**: the baked map is always opaque (alpha is written as 1 in `generateAnalyticalHDRI`),
+  so there is no alpha channel to preserve. A checkbox would be a no-op. Revisit only if the map ever
+  carries real alpha.
+- **Area Light checkbox**: `Light.areaLight` is derived from `type` (`LightProperties.tsx:262`) and read
+  by presets, the Blender bridge and `objectLightApi.ts`. Exposing it raw would let it drift out of
+  sync with the type, so it is intentionally redundant with Light type and not exposed.
 
 ## Ground rules for whoever picks this up
 

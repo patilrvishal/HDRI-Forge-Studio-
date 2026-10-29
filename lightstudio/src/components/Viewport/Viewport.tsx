@@ -1127,6 +1127,8 @@ export const Viewport: React.FC<ViewportProps> = ({ sceneManagerRef, onScreensho
         layerIndex,
         blendMode: l.blendMode,
         blendInvert: l.blendInvert,
+        blendChannel: l.blendChannel,
+        mapping: l.mapping,
         solo: l.solo,
         falloff: l.falloff,
         gearVisible: l.gearVisible,

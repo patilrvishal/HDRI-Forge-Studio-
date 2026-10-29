@@ -33,3 +33,4 @@ src-tauri/gen
 .filtertest.mjs
 public/_testcar.glb
 .hdrieditttest.mjs
+.hdritest.mjs

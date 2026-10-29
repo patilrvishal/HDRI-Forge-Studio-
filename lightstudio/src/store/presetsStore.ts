@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { Preset, PresetLight } from '../types/Preset';
+import type { Preset, PresetLight, PresetGroup } from '../types/Preset';
 import type { Light } from '../types/Light';
 import { createDefaultLight } from '../types/Light';
 import { presetDB } from '../services/PresetDB';
@@ -59,12 +59,19 @@ type PresetCategory = 'sidelights' | 'studio' | 'outdoor' | 'spotlight' | 'light
 interface PresetsState {
   presets: Preset[];
   activeCategory: PresetCategory;
+  /** 'all' keeps the browser exactly as it was before groups existed. */
+  activeGroup: PresetGroup | 'all';
+  /** Tags the user picked in the filter; a preset must carry every one of them. */
+  activeTags: string[];
   searchQuery: string;
   previewingId: string | null;
   dbLoaded: boolean;
 
   // Navigation
   setActiveCategory: (cat: PresetCategory) => void;
+  setActiveGroup: (group: PresetGroup | 'all') => void;
+  toggleTag: (tag: string) => void;
+  clearTags: () => void;
   setSearchQuery: (q: string) => void;
   setPreviewPreset: (id: string | null) => void;
 
@@ -89,11 +96,21 @@ interface PresetsState {
 export const usePresetsStore = create<PresetsState>((set, get) => ({
   presets: [...BUILTIN_PRESETS],
   activeCategory: 'studio',
+  activeGroup: 'all',
+  activeTags: [],
   searchQuery: '',
   previewingId: null,
   dbLoaded: false,
 
   setActiveCategory: (cat) => set({ activeCategory: cat, previewingId: null }),
+  setActiveGroup: (group) => set({ activeGroup: group, previewingId: null }),
+  toggleTag: (tag) =>
+    set((state) => ({
+      activeTags: state.activeTags.includes(tag)
+        ? state.activeTags.filter((t) => t !== tag)
+        : [...state.activeTags, tag],
+    })),
+  clearTags: () => set({ activeTags: [] }),
   setSearchQuery: (q) => set({ searchQuery: q }),
   setPreviewPreset: (id) => set({ previewingId: id }),
 
@@ -203,10 +220,11 @@ export const usePresetsStore = create<PresetsState>((set, get) => ({
     const data = {
       version: '1.0',
       exportedAt: new Date().toISOString(),
-      presets: exportable.map(({ id, name, category, description, thumbnail, tags, lights }) => ({
+      presets: exportable.map(({ id, name, category, group, description, thumbnail, tags, lights }) => ({
         id,
         name,
         category,
+        ...(group ? { group } : {}),
         description,
         thumbnail,
         tags,
@@ -239,6 +257,7 @@ export const usePresetsStore = create<PresetsState>((set, get) => ({
         id: (p.id as string) || `imp_${generateId()}`,
         name: p.name as string,
         category: (p.category as Preset['category']) || 'custom',
+        ...(p.group ? { group: p.group as PresetGroup } : {}),
         description: (p.description as string) || '',
         thumbnail: (p.thumbnail as string) || '',
         tags: (p.tags as string[]) || [],

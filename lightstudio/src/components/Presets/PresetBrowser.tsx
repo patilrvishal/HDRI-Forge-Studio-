@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useMemo, useCallback, useState } from 'react';
 import { usePresetsStore } from '../../store/presetsStore';
 import { useLightsStore } from '../../store/lightsStore';
-import { presetToLights } from '../../types/Preset';
+import { presetToLights, presetGroup, PRESET_GROUPS } from '../../types/Preset';
 import type { Preset } from '../../types/Preset';
 import { renderPresetThumbnail } from '../../three/PresetThumbnailRenderer';
 import { useHDRIAssetStore } from '../../store/hdriAssetStore';
@@ -33,6 +33,11 @@ export const PresetBrowser: React.FC<PresetBrowserProps> = ({ onGenerateThumbnai
   const presets = usePresetsStore((s) => s.presets);
   const activeCategory = usePresetsStore((s) => s.activeCategory);
   const searchQuery = usePresetsStore((s) => s.searchQuery);
+  const activeGroup = usePresetsStore((s) => s.activeGroup);
+  const activeTags = usePresetsStore((s) => s.activeTags);
+  const setActiveGroup = usePresetsStore((s) => s.setActiveGroup);
+  const toggleTag = usePresetsStore((s) => s.toggleTag);
+  const clearTags = usePresetsStore((s) => s.clearTags);
   const previewingId = usePresetsStore((s) => s.previewingId);
   const dbLoaded = usePresetsStore((s) => s.dbLoaded);
 
@@ -184,9 +189,44 @@ export const PresetBrowser: React.FC<PresetBrowserProps> = ({ onGenerateThumbnai
     );
   }, [presets, updatePreset]);
 
-  // Filter presets by category and search query
+  // Presets inside the chosen group ('all' = everything, i.e. the browser as it always was)
+  const inGroup = useMemo(
+    () => (activeGroup === 'all' ? presets : presets.filter((p) => presetGroup(p) === activeGroup)),
+    [presets, activeGroup],
+  );
+  // Only offer groups that hold presets, and categories that hold presets in the chosen group
+  const groupTabs = useMemo(
+    () => PRESET_GROUPS.filter((g) => presets.some((p) => presetGroup(p) === g.key)),
+    [presets],
+  );
+  const categoryTabs = useMemo(
+    () => (activeGroup === 'all' ? CATEGORY_TABS : CATEGORY_TABS.filter((t) => inGroup.some((p) => p.category === t.key))),
+    [activeGroup, inGroup],
+  );
+  useEffect(() => {
+    // A group switch can leave the current category empty: move to the first one that has presets
+    if (categoryTabs.length > 0 && !categoryTabs.some((t) => t.key === activeCategory)) {
+      setActiveCategory(categoryTabs[0].key);
+    }
+  }, [categoryTabs, activeCategory, setActiveCategory]);
+  // Tags available in the current group + category, most common first
+  const tagChoices = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const p of inGroup) {
+      if (p.category !== activeCategory) continue;
+      for (const t of p.tags ?? []) counts.set(t, (counts.get(t) ?? 0) + 1);
+    }
+    for (const t of activeTags) if (!counts.has(t)) counts.set(t, 0);
+    return [...counts.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+  }, [inGroup, activeCategory, activeTags]);
+  const [tagMenuOpen, setTagMenuOpen] = useState(false);
+
+  // Filter presets by group, category, tags and search query
   const filteredPresets = useMemo(() => {
-    let list = presets.filter((p) => p.category === activeCategory);
+    let list = inGroup.filter((p) => p.category === activeCategory);
+    if (activeTags.length > 0) {
+      list = list.filter((p) => activeTags.every((t) => (p.tags ?? []).includes(t)));
+    }
     if (searchQuery) {
       const q = searchQuery.toLowerCase();
       list = list.filter(
@@ -197,7 +237,7 @@ export const PresetBrowser: React.FC<PresetBrowserProps> = ({ onGenerateThumbnai
       );
     }
     return list;
-  }, [presets, activeCategory, searchQuery]);
+  }, [inGroup, activeCategory, activeTags, searchQuery]);
 
   // Preview preset: temporarily override lights
   const previewPreset = useCallback(
@@ -386,10 +426,27 @@ export const PresetBrowser: React.FC<PresetBrowserProps> = ({ onGenerateThumbnai
 
       {browserMode === 'presets' && (
         <>
+      {/* Group tabs: what kind of preset (rig, light, ...). Hidden until more than one group has presets. */}
+      {groupTabs.length > 1 && (
+        <div className="preset-tabs" role="tablist" aria-label="Preset group" style={{ paddingRight: 6 }}>
+          {[{ key: 'all' as const, label: 'All' }, ...groupTabs].map((g) => (
+            <div
+              key={g.key}
+              role="tab"
+              aria-selected={activeGroup === g.key}
+              className={`preset-tab ${activeGroup === g.key ? 'active' : ''}`}
+              onClick={() => setActiveGroup(g.key)}
+            >
+              {g.label}
+            </div>
+          ))}
+        </div>
+      )}
+
       {/* Category tabs + thumbnail size adjuster */}
       <div className="preset-tabs" style={{ justifyContent: 'space-between', paddingRight: 6 }}>
         <div style={{ display: 'flex' }}>
-          {CATEGORY_TABS.map((tab) => (
+          {categoryTabs.map((tab) => (
             <div
               key={tab.key}
               className={`preset-tab ${activeCategory === tab.key ? 'active' : ''}`}
@@ -417,15 +474,49 @@ export const PresetBrowser: React.FC<PresetBrowserProps> = ({ onGenerateThumbnai
         </div>
       </div>
 
-      {/* Search bar */}
-      <div style={{ padding: '4px 6px' }}>
+      {/* Search bar + tag filter */}
+      <div style={{ padding: '4px 6px', display: 'flex', gap: 4, position: 'relative' }}>
         <input
           className="field-input preset-search"
+          style={{ flex: 1 }}
           type="text"
           placeholder="Search presets..."
           value={searchQuery}
           onChange={(e) => setSearchQuery(e.target.value)}
         />
+        {tagChoices.length > 0 && (
+          <button
+            className={`btn-sm ${activeTags.length > 0 ? 'btn-glow' : ''}`}
+            onClick={() => setTagMenuOpen((o) => !o)}
+            aria-haspopup="true"
+            aria-expanded={tagMenuOpen}
+            title="Filter by tag: a preset must carry every tag you pick"
+          >
+            Tags{activeTags.length > 0 ? ` (${activeTags.length})` : ''}
+          </button>
+        )}
+        {tagMenuOpen && (
+          <div
+            role="group"
+            aria-label="Tag filter"
+            style={{
+              position: 'absolute', top: '100%', right: 6, zIndex: 20, maxHeight: 200, overflowY: 'auto', minWidth: 150,
+              padding: 6, background: 'var(--bg-panel, #14141c)', border: '1px solid var(--border)', borderRadius: 6,
+              display: 'flex', flexDirection: 'column', gap: 3,
+            }}
+          >
+            {tagChoices.map(([tag, n]) => (
+              <label key={tag} style={{ display: 'flex', gap: 6, alignItems: 'center', fontSize: 10, cursor: 'pointer' }}>
+                <input type="checkbox" checked={activeTags.includes(tag)} onChange={() => toggleTag(tag)} />
+                <span style={{ flex: 1 }}>{tag}</span>
+                <span style={{ color: 'var(--text-dim)' }}>{n}</span>
+              </label>
+            ))}
+            {activeTags.length > 0 && (
+              <button className="btn-sm" style={{ marginTop: 3 }} onClick={clearTags}>Clear tags</button>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Preset grid */}
@@ -435,7 +526,7 @@ export const PresetBrowser: React.FC<PresetBrowserProps> = ({ onGenerateThumbnai
       >
         {filteredPresets.length === 0 ? (
           <div className="preset-empty">
-            {searchQuery ? 'No matching presets' : 'No presets in this category'}
+            {searchQuery || activeTags.length > 0 ? 'No matching presets' : 'No presets in this category'}
           </div>
         ) : (
           <div className="preset-grid" style={{ '--preset-thumb-size': `${thumbSize}px` } as React.CSSProperties}>
