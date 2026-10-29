@@ -201,6 +201,10 @@ class ForgeLink(object):
 
     # ---- public API ------------------------------------------------------
 
+    def set_client_name(self, name):
+        """Change the name Forge shows for this app, e.g. when the artist switches renderer."""
+        self._client_headers = {"X-Forge-Client": _clean_client_name(name)}
+
     def start(self):
         if self._thread and self._thread.is_alive():
             return

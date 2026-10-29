@@ -1055,7 +1055,8 @@ _DOME_NAMES = {LIVE_KIND: "HDRIForgeLive", IMPORT_KIND: "HDRIForgeImport"}
 # could not pass), and keeps a +180 degree rotation as a control that must fail.
 FORGE_TO_MAYA_Y_ROTATION = 90.0
 
-_live = {"link": None, "running": False, "timer": None, "job": None, "last_status": None}
+_live = {"link": None, "running": False, "timer": None, "job": None, "last_status": None,
+         "renderer": None, "renderer_checked": 0.0}
 
 
 def _is_bridge_node(node):
@@ -1076,6 +1077,19 @@ def _bridge_domes(kind=None):
         if kind is None or cmds.getAttr(parents[0] + '.' + BRIDGE_ATTR) == kind:
             out.append((parents[0], shape))
     return out
+
+
+def _link_dome_to_scene(xform):
+    """Make the dome light the objects, not just show as a background.
+
+    A light made with createNode is not in Maya's default light set, and light linking then gives it no objects to
+    light: the sky showed behind the scene but every surface stayed black (verified with a real Arnold render).
+    """
+    try:
+        if xform not in (cmds.sets("defaultLightSet", query=True) or []):
+            cmds.sets(xform, edit=True, forceElement="defaultLightSet")
+    except Exception as e:
+        cmds.warning("HDRI Forge Bridge: could not link the sky to the scene's lighting: %s" % e)
 
 
 def _ensure_arnold():
@@ -1134,6 +1148,8 @@ def _bridge_dome(kind):
         cmds.setAttr(shape + '.intensity', 1.0)             # Forge already bakes exposure into the map
         cmds.setAttr(xform + '.rotateY', FORGE_TO_MAYA_Y_ROTATION)
         _hide_artist_domes(xform)
+        _link_dome_to_scene(xform)                          # without this the dome lights nothing
+        _apply_sky_settings()                               # a new dome starts with the chosen sky settings
     conns = cmds.listConnections(shape + '.color', source=True, destination=False, type='file') or []
     if conns:
         file_node = conns[0]
@@ -1172,11 +1188,172 @@ def _remove_bridge_domes(kind=None):
                 cmds.delete(f)
 
 
+
+# ─── Renderer awareness (Arnold) ────────────────────────────────────────────
+# Settings are kept for the session and act on every sky dome the bridge owns (live and imported), never on the
+# artist's own lights.
+
+SHADOW_CATCHER_NAME = "HDRIForge_ShadowCatcher"
+SHADOW_CATCHER_KIND = "shadow_catcher"
+_RENDERER_LABELS = {"arnold": "Arnold", "mayaSoftware": "Maya Software", "mayaHardware2": "Viewport 2.0 renderer",
+                    "mayaVector": "Maya Vector", "vray": "V-Ray", "redshift": "Redshift", "renderman": "RenderMan"}
+
+_sky = {"show_background": True, "light_scene": True, "reflections": True, "exposure": 0.0}
+
+# Sampling presets (Arnold render options). Only sample counts change.
+_ARNOLD_QUALITY = {
+    "DRAFT":    {"AASamples": 2, "GIDiffuseSamples": 1, "GISpecularSamples": 1,
+                 "GITransmissionSamples": 1, "GISssSamples": 1, "GIVolumeSamples": 1},
+    "BALANCED": {"AASamples": 4, "GIDiffuseSamples": 2, "GISpecularSamples": 2,
+                 "GITransmissionSamples": 2, "GISssSamples": 2, "GIVolumeSamples": 2},
+    "FINAL":    {"AASamples": 8, "GIDiffuseSamples": 3, "GISpecularSamples": 3,
+                 "GITransmissionSamples": 2, "GISssSamples": 2, "GIVolumeSamples": 2},
+}
+_VIEW_TRANSFORM_PREFERENCE = ("Un-tone-mapped", "Raw")
+
+
+def renderer_name():
+    """The current renderer's plug-in id, for example 'arnold'."""
+    try:
+        return cmds.getAttr("defaultRenderGlobals.currentRenderer") or ""
+    except Exception:
+        return ""
+
+
+def renderer_label():
+    r = renderer_name()
+    return _RENDERER_LABELS.get(r, r or "unknown")
+
+
+def _client_name():
+    """What Forge's badge shows for this app, for example 'Maya 2023 (Arnold)'."""
+    return "Maya %s (%s)" % (cmds.about(version=True), renderer_label())
+
+
+def _set_attr_quiet(node, attr, value):
+    """setAttr that skips an attribute this Arnold version does not have."""
+    try:
+        if cmds.attributeQuery(attr, node=node, exists=True):
+            cmds.setAttr(node + "." + attr, value)
+            return True
+    except Exception:
+        pass
+    return False
+
+
+def _apply_sky_settings():
+    """Push the chosen sky settings onto every bridge dome: ray visibility and exposure."""
+    for _xform, shape in _bridge_domes():
+        _link_dome_to_scene(_xform)                         # also repairs a dome made by an older version
+        _set_attr_quiet(shape, "camera", 1.0 if _sky["show_background"] else 0.0)
+        light = 1.0 if _sky["light_scene"] else 0.0
+        for a in ("aiDiffuse", "aiSss", "aiVolume"):
+            _set_attr_quiet(shape, a, light)
+        refl = 1.0 if _sky["reflections"] else 0.0
+        for a in ("aiSpecular", "transmission"):
+            _set_attr_quiet(shape, a, refl)
+        _set_attr_quiet(shape, "exposure", float(_sky["exposure"]))
+
+
+def set_sky(**changes):
+    _sky.update(changes)
+    _apply_sky_settings()
+
+
+def _ensure_arnold_options():
+    """Arnold's render options node only exists after Arnold has created it (the Render Settings window does)."""
+    if not cmds.objExists("defaultArnoldRenderOptions"):
+        import mtoa.core as mtoa_core
+        mtoa_core.createOptions()
+    return cmds.objExists("defaultArnoldRenderOptions")
+
+
+def apply_quality(name):
+    """Draft / Balanced / Final sample counts for Arnold. 'KEEP' leaves the artist's settings alone."""
+    if name not in _ARNOLD_QUALITY:
+        return False
+    _ensure_arnold()
+    if not _ensure_arnold_options():
+        return False
+    for attr, value in _ARNOLD_QUALITY[name].items():
+        _set_attr_quiet("defaultArnoldRenderOptions", attr, value)
+    return True
+
+
+def use_arnold(*_args):
+    _ensure_arnold()
+    cmds.setAttr("defaultRenderGlobals.currentRenderer", "arnold", type="string")
+    _refresh_renderer_ui()
+
+
+def standard_color(*_args):
+    """View transform with no tone mapping, like Forge's preview, so renders show the HDRI's values untouched."""
+    try:
+        names = cmds.colorManagementPrefs(query=True, viewTransformNames=True) or []
+    except Exception:
+        names = []
+    for want in _VIEW_TRANSFORM_PREFERENCE:
+        for n in names:
+            if want.lower() in n.lower():
+                cmds.colorManagementPrefs(edit=True, viewTransformName=n)
+                return n
+    cmds.warning("HDRI Forge Bridge: no 'Un-tone-mapped' or 'Raw' view transform in this color management config.")
+    return None
+
+
+def _shadow_catchers():
+    out = []
+    for t in cmds.ls(type="transform") or []:
+        if cmds.attributeQuery(BRIDGE_ATTR, node=t, exists=True) and cmds.getAttr(t + "." + BRIDGE_ATTR) == SHADOW_CATCHER_KIND:
+            out.append(t)
+    return out
+
+
+def toggle_shadow_catcher(*_args):
+    """Add (or, if present, remove) a ground plane that only catches shadows, for product shots over a backplate."""
+    existing = _shadow_catchers()
+    if existing:
+        for t in existing:
+            sgs = cmds.listConnections(cmds.listRelatives(t, shapes=True) or [], type="shadingEngine") or []
+            shaders = []
+            for sg in set(sgs):
+                shaders += cmds.listConnections(sg + ".surfaceShader", source=True, destination=False) or []
+            cmds.delete(t)
+            for sg in set(sgs):
+                if cmds.objExists(sg) and sg.startswith("HDRIForge"):
+                    cmds.delete(sg)
+            for sh in set(shaders):
+                if cmds.objExists(sh) and sh.startswith("HDRIForge"):
+                    cmds.delete(sh)
+        _refresh_renderer_ui()
+        return False
+    _ensure_arnold()
+    plane = cmds.polyPlane(name=SHADOW_CATCHER_NAME, width=20, height=20, subdivisionsX=1, subdivisionsY=1, constructionHistory=False)[0]
+    cmds.addAttr(plane, longName=BRIDGE_ATTR, dataType="string")
+    cmds.setAttr(plane + "." + BRIDGE_ATTR, SHADOW_CATCHER_KIND, type="string")
+    shader = cmds.shadingNode("aiShadowMatte", asShader=True, name="HDRIForge_ShadowMatte")
+    sg = cmds.sets(renderable=True, noSurfaceShader=True, empty=True, name="HDRIForge_ShadowMatteSG")
+    cmds.connectAttr(shader + ".outColor", sg + ".surfaceShader", force=True)
+    cmds.sets(plane, edit=True, forceElement=sg)
+    shape = (cmds.listRelatives(plane, shapes=True) or [plane])[0]
+    _set_attr_quiet(shape, "castsShadows", 0)                   # the catcher must not shadow the scene itself
+    _refresh_renderer_ui()
+    return True
+
+
 def _live_tick(*_args):
     """Main-thread timer: apply the newest map the background thread has downloaded."""
     link = _live["link"]
     if link is None or not _live["running"]:
         return
+    now = time.time()
+    if now - _live["renderer_checked"] > 1.0:               # the artist may switch renderer at any time
+        _live["renderer_checked"] = now
+        r = renderer_name()
+        if r != _live["renderer"]:
+            _live["renderer"] = r
+            link.set_client_name(_client_name())
+            _refresh_renderer_ui()
     frame = link.take_frame()
     if frame is not None:
         try:
@@ -1227,7 +1404,8 @@ def live_start(*_args):
     _ensure_arnold()
     if _live["link"] is None:
         _live["link"] = _core.ForgeLink(cache_dir=os.path.join(tempfile.gettempdir(), "hdri_forge_live_maya_%d" % os.getpid()),
-                                        client_name="Maya " + cmds.about(version=True))
+                                        client_name=_client_name())
+        _live["renderer"] = renderer_name()
     _live["running"] = True
     _live["link"].start()
     _start_timer()
@@ -1305,11 +1483,40 @@ def _refresh_live_ui():
     cmds.button(ui["live_restore"], edit=True, enable=bool(_bridge_domes()))
 
 
+
+def _on_sky_toggle(key):
+    def handler(value, *_a):
+        set_sky(**{key: bool(value)})
+    return handler
+
+
+def _on_sky_exposure(value, *_a):
+    set_sky(exposure=float(value))
+
+
+def _on_quality(label, *_a):
+    key = {"Draft": "DRAFT", "Balanced": "BALANCED", "Final": "FINAL"}.get(label)
+    if key and not apply_quality(key):
+        cmds.warning("HDRI Forge Bridge: could not set Arnold sampling (is Arnold loaded?)")
+
+
+def _refresh_renderer_ui():
+    ui = _ui
+    if not (ui.get("renderer_label") and cmds.text(ui["renderer_label"], exists=True)):
+        return
+    is_arnold = renderer_name() == "arnold"
+    cmds.text(ui["renderer_label"], edit=True, label="Renderer: " + renderer_label())
+    cmds.button(ui["renderer_use_arnold"], edit=True, visible=not is_arnold)
+    for key in ("sky_camera", "sky_light", "sky_refl", "sky_ev"):
+        cmds.control(ui[key], edit=True, enable=is_arnold)
+    cmds.button(ui["catcher_btn"], edit=True, label="Remove shadow catcher" if _shadow_catchers() else "Add shadow catcher")
+
+
 def show_ui(*_args):
     if cmds.window(WINDOW_NAME, exists=True):
         cmds.deleteUI(WINDOW_NAME)
 
-    window = cmds.window(WINDOW_NAME, title=PLUGIN_NAME, widthHeight=(360, 300), sizeable=False)
+    window = cmds.window(WINDOW_NAME, title=PLUGIN_NAME, widthHeight=(380, 400), sizeable=False)
     cmds.columnLayout(adjustableColumn=True, rowSpacing=6, columnAttach=('both', 12))
     cmds.separator(height=8, style='none')
 
@@ -1325,6 +1532,32 @@ def show_ui(*_args):
     cmds.button(label="Import HDRI", height=28, command=import_hdri)
     _ui["live_restore"] = cmds.button(label="Restore my sky", height=28, command=restore_sky, enable=False)
     cmds.setParent('..')  # end live_tab
+
+    # ── Tab: Renderer (Arnold) ──
+    renderer_tab = cmds.columnLayout(adjustableColumn=True, rowSpacing=6)
+    _ui["renderer_label"] = cmds.text(label="Renderer:", align='left', font='boldLabelFont')
+    _ui["renderer_use_arnold"] = cmds.button(label="Switch renderer to Arnold", height=24, command=use_arnold, visible=False)
+    cmds.text(label="Sky (the HDRI dome made by the bridge)", align='left')
+    _ui["sky_camera"] = cmds.checkBox(label="Visible to camera", value=_sky["show_background"], changeCommand=_on_sky_toggle("show_background"),
+                                      annotation="Show the HDRI as the background. Off keeps it lighting and reflecting but hides it from the camera")
+    _ui["sky_light"] = cmds.checkBox(label="Lights the scene", value=_sky["light_scene"], changeCommand=_on_sky_toggle("light_scene"),
+                                     annotation="The HDRI lights surfaces. Off leaves only reflections")
+    _ui["sky_refl"] = cmds.checkBox(label="In reflections", value=_sky["reflections"], changeCommand=_on_sky_toggle("reflections"),
+                                    annotation="The HDRI shows in glossy reflections and through glass")
+    _ui["sky_ev"] = cmds.floatSliderGrp(label="Sky exposure (EV)", field=True, minValue=-6, maxValue=6, fieldMinValue=-6, fieldMaxValue=6,
+                                        value=_sky["exposure"], columnWidth3=(110, 50, 140), changeCommand=_on_sky_exposure,
+                                        annotation="Brighten or darken the sky in stops, on top of the exposure Forge already baked into the map")
+    cmds.separator(height=4, style='in')
+    cmds.text(label="Arnold sampling", align='left')
+    cmds.optionMenu(label="", changeCommand=_on_quality)
+    for item in ("Keep my settings", "Draft", "Balanced", "Final"):
+        cmds.menuItem(label=item)
+    cmds.separator(height=4, style='in')
+    cmds.button(label="Standard color (no tone mapping)", height=26, command=standard_color,
+                annotation="Un-tone-mapped view transform, like Forge's preview. Choose ACES yourself for a filmic look")
+    _ui["catcher_btn"] = cmds.button(label="Add shadow catcher", height=26, command=toggle_shadow_catcher,
+                                     annotation="A ground plane that only catches shadows (aiShadowMatte), for product shots over a backplate")
+    cmds.setParent('..')  # end renderer_tab
 
     # ── Tab 1: HDRI Forge Studio ──
     studio_tab = cmds.columnLayout(adjustableColumn=True, rowSpacing=8)
@@ -1356,7 +1589,7 @@ def show_ui(*_args):
 
     cmds.tabLayout(
         tabs, edit=True,
-        tabLabel=((live_tab, 'Live HDRI'), (studio_tab, 'HDRI Forge Studio'), (blender_tab, 'Blender')),
+        tabLabel=((live_tab, 'Live HDRI'), (renderer_tab, 'Renderer'), (studio_tab, 'HDRI Forge Studio'), (blender_tab, 'Blender')),
     )
 
     cmds.setParent('..')  # end tabs
@@ -1366,6 +1599,7 @@ def show_ui(*_args):
     _refresh_status()
     _refresh_blender_status()
     _refresh_live_ui()
+    _refresh_renderer_ui()
     # Keep the selection counts fresh whenever Maya's selection changes while
     # this window is open. Tied to the window's lifetime via a scriptJob that
     # kills itself if the window has been closed.
@@ -1382,7 +1616,7 @@ def _on_selection_changed(*_args):
 # ─── Plug-in registration ───────────────────────────────────────────────────
 def initializePlugin(plugin):
     vendor = "HDRI Forge Studio"
-    version = "1.2.0"
+    version = "1.3.0"
     plugin_fn = om2.MFnPlugin(plugin, vendor, version)
 
     if cmds.menu(MENU_NAME, exists=True):

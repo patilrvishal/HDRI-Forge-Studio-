@@ -159,6 +159,22 @@ class ClientNameTests(unittest.TestCase):
         finally:
             bridge.close()
 
+    def test_the_name_can_change_while_linked_for_a_renderer_switch(self):
+        # Blender (Cycles) -> Blender (Eevee): the artist switches renderer and Forge's badge must follow
+        bridge = MockBridge()
+        try:
+            link = core.ForgeLink(cache_dir=tempfile.mkdtemp(), ports=[bridge.port], poll_interval=0.02,
+                                  probe_timeout=0.3, client_name="Blender 5.1.2 (Cycles)")
+            link.start()
+            self.assertTrue(wait_for(lambda: "Blender 5.1.2 (Cycles)" in bridge.state.get("seen_clients", [])))
+            link.set_client_name("Blender 5.1.2 (Eevee)")
+            self.assertTrue(wait_for(lambda: "Blender 5.1.2 (Eevee)" in bridge.state.get("seen_clients", [])))
+            link.set_client_name("Maya" + chr(13) + chr(10) + "X-Evil: 1")             # still sanitised on change
+            self.assertTrue(wait_for(lambda: "MayaX-Evil: 1" in bridge.state.get("seen_clients", [])))
+            link.stop()
+        finally:
+            bridge.close()
+
 
 class LinkTests(unittest.TestCase):
     def setUp(self):

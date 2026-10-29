@@ -63,6 +63,9 @@ Note: Forge-side commits `11f0fa7` (v0.1.9, Erik live link) and `e1c7e9f` (v0.1.
 | Maya Live HDRI / Import / Restore | Done | 22 checks + 6 Arnold-render checks inside Maya 2023.1; real panel buttons and QTimer path |
 | Sky orientation | Measured | Blender 0 deg, Maya 90 deg, both with a two-light mirror test and a failing control |
 | Forge shows which apps are connected | Done | Addons name themselves on status polls; both bridges list who polled in the last 4 s; the badge reads "linked · Blender 5.1.2, Maya 2023 · 2K" (seen live with both apps running) |
+| Phase 4: renderer awareness, Blender (Cycles, Eevee) | Done | `blender_renderer_test.py`: 26 checks on real Cycles renders (linear EXR) on Blender 5.1.2 |
+| Phase 4: renderer awareness, Maya (Arnold) | Done | `maya_renderer_test.py`: 27 checks on real Arnold renders (linear EXR) in Maya 2023 |
+| Forge shows each app's renderer | Done | The name sent with every poll includes it: "Blender 5.1.2 (Cycles)", "Maya 2023 (Arnold)"; follows a renderer switch |
 | Packaging / installers | Not yet | Addons are two loose files today |
 
 Bugs the tests caught on the way: a stale version counter after a Forge restart, Windows `localhost` taking 2 s (the `::1` fallback), a Maya plug-in load failure (`__file__` undefined under Plug-in Manager), and leftover Maya file nodes after Stop.
@@ -172,3 +175,31 @@ camera's name and its workspace assignment are left alone.
 Camera object (all sources): `id`, `name`, `position {x,y,z}`, `rotation {x,y,z}` (Three.js
 Euler degrees), `fov` (vertical, degrees), optional `clipStart`, `clipEnd`, `focalLength`.
 Blender positions are Z-up and converted by Forge; Maya and Erik are Y-up pass-through.
+
+## Renderer-aware controls (Cycles, Eevee, Arnold)
+
+A **Renderer** section in the Blender panel and a **Renderer** tab in the Maya window act on the sky the bridge made
+(never on the artist's own World or lights):
+
+| Control | Blender (Cycles) | Maya (Arnold) |
+|---|---|---|
+| Visible to camera | World ray visibility, camera | `aiSkyDomeLight.camera` |
+| Lights the scene | ray visibility, diffuse | `aiDiffuse`, `aiSss`, `aiVolume` |
+| In reflections | ray visibility, glossy + transmission | `aiSpecular`, `transmission` |
+| Sky exposure (EV) | World Background strength = 2^EV | `exposure` |
+| Sampling: Draft / Balanced / Final | preview + final samples, noise thresholds, denoising (Eevee: TAA samples) | AA and GI samples (options are created if missing) |
+| Standard color | view transform Standard, exposure 0, gamma 1 | "Un-tone-mapped" view transform |
+| Shadow catcher | plane with `is_shadow_catcher`, transparent film (restored on remove) | plane with `aiShadowMatte`, casts no shadow |
+
+Verified with real renders: switching a control changes only what its label says (for example "In reflections" off
+turns the mirror sphere black and leaves the diffuse sphere and the sky alone), -1 EV halves the light exactly, an
+unshadowed catcher pixel has alpha 0.000 while a shadow shows as partial alpha. Eevee has no per-ray World switches,
+so those three are Cycles-only and greyed out otherwise.
+
+**Bug found by these tests (Maya):** the Live HDRI dome showed as the background but lit nothing. A light made with
+`createNode` is not in Maya's `defaultLightSet`, so light linking gave it no objects (a lit sphere rendered 0 instead
+of 0.8). The earlier Arnold checks only looked at the sky as a background. The dome is now linked on creation, and
+applying the sky settings repairs a dome made by an older version.
+
+Test notes for Maya: `cmds.render` in headless mayapy does NOT use Arnold (it shades unlit); use `cmds.arnoldRender(
+cam=..., batch=True)`. Maya's `enableDefaultLight` adds a headlight when no visible light exists, so tests turn it off.

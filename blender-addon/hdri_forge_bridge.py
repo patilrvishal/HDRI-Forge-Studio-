@@ -1,10 +1,10 @@
 bl_info = {
     "name":     "HDRI Forge Bridge",
     "author":   "HDRI Forge Studio",
-    "version":  (1, 3, 0),
+    "version":  (1, 4, 0),
     "blender":  (4, 0, 0),
     "location": "View3D > Sidebar > HDRI Bridge",
-    "description": "Push Blender objects to HDRI Forge Studio, and watch Forge's lighting live in your World",
+    "description": "Push Blender objects to HDRI Forge Studio, and watch Forge's lighting live in your World, with Cycles and Eevee controls",
     "category": "3D View",
 }
 
@@ -915,7 +915,7 @@ _WORLD_NAMES = {LIVE_KIND: "HDRI Forge Live", IMPORT_KIND: "HDRI Forge Import"}
 # which also keeps the 180 degree case as a control that must fail).
 FORGE_TO_BLENDER_Z_ROTATION = 0.0
 
-_live = {"link": None, "running": False, "last_status": None}
+_live = {"link": None, "running": False, "last_status": None, "engine": None}
 
 
 def _bridge_worlds(kind=None):
@@ -949,6 +949,7 @@ def _build_world_nodes(world):
 def _bridge_world(scene, kind):
     """The World we own for this kind, created on demand and made the scene's World."""
     world = next(iter(_bridge_worlds(kind)), None)
+    created = world is None
     if world is None:
         world = bpy.data.worlds.new(_WORLD_NAMES[kind])
         world[BRIDGE_TAG] = kind
@@ -957,6 +958,8 @@ def _bridge_world(scene, kind):
         if scene.world is not None and not scene.world.get(BRIDGE_TAG):
             scene[PREV_WORLD_KEY] = scene.world.name       # remember the artist's own World
         scene.world = world
+    if created:
+        _apply_sky_settings(scene)               # a new World starts with the sky settings already chosen
     return world
 
 
@@ -1000,6 +1003,171 @@ def _restore_world(scene, kind=None):
         del scene[PREV_WORLD_KEY]
 
 
+
+# ── Renderer awareness (Cycles / Eevee) ────────────────────────────────────
+# Settings live on the Scene and act on every World the bridge owns (live and imported), so the artist's own
+# World is never touched.
+
+_ENGINE_LABEL = {"CYCLES": "Cycles", "BLENDER_EEVEE": "Eevee", "BLENDER_EEVEE_NEXT": "Eevee",
+                 "BLENDER_WORKBENCH": "Workbench"}
+SHADOW_CATCHER_NAME = "HDRI Forge Shadow Catcher"
+SHADOW_CATCHER_KIND = "shadow_catcher"
+
+
+def _engine_label(scene):
+    return _ENGINE_LABEL.get(scene.render.engine, scene.render.engine.replace("BLENDER_", "").title())
+
+
+def _is_cycles(scene):
+    return scene.render.engine == 'CYCLES'
+
+
+def _is_eevee(scene):
+    return scene.render.engine.startswith('BLENDER_EEVEE')
+
+
+def _client_name(scene):
+    """What Forge's badge shows for this app, for example 'Blender 5.1.2 (Cycles)'."""
+    return "Blender %s (%s)" % (bpy.app.version_string.split(" ")[0], _engine_label(scene))
+
+
+# Sampling presets. Only sample counts and noise thresholds change; nothing else in the artist's render setup.
+_CYCLES_QUALITY = {
+    'DRAFT':    {"preview": 32,  "preview_thr": 0.10, "final": 64,   "final_thr": 0.05},
+    'BALANCED': {"preview": 128, "preview_thr": 0.05, "final": 512,  "final_thr": 0.01},
+    'FINAL':    {"preview": 512, "preview_thr": 0.02, "final": 2048, "final_thr": 0.005},
+}
+_EEVEE_QUALITY = {
+    'DRAFT':    {"viewport": 16, "render": 32},
+    'BALANCED': {"viewport": 64, "render": 128},
+    'FINAL':    {"viewport": 128, "render": 512},
+}
+
+
+def _apply_sky_settings(scene):
+    """Push the Scene's sky settings onto every bridge World: ray visibility (Cycles) and exposure (any engine)."""
+    s = getattr(scene, "hdri_forge_sky", None)
+    if s is None:
+        return
+    for world in _bridge_worlds():
+        vis = getattr(world, "cycles_visibility", None)
+        if vis is not None:                       # Cycles ray visibility; Eevee has no per-ray World switches
+            vis.camera = s.show_background
+            vis.diffuse = s.light_scene
+            vis.glossy = s.reflections
+            vis.transmission = s.reflections
+        if world.use_nodes and world.node_tree:
+            bg = world.node_tree.nodes.get("Forge Background")
+            if bg is not None:
+                bg.inputs['Strength'].default_value = 2.0 ** s.exposure
+        world.update_tag()
+    scene.update_tag()
+
+
+def _sky_changed(self, context):
+    _apply_sky_settings(context.scene)
+
+
+def _quality_changed(self, context):
+    scene = context.scene
+    q = scene.hdri_forge_sky.quality
+    if q == 'KEEP':
+        return
+    if _is_cycles(scene):
+        p, c = _CYCLES_QUALITY[q], scene.cycles
+        c.preview_samples, c.samples = p["preview"], p["final"]
+        c.use_preview_adaptive_sampling = c.use_adaptive_sampling = True
+        c.preview_adaptive_threshold, c.adaptive_threshold = p["preview_thr"], p["final_thr"]
+        c.use_preview_denoising = c.use_denoising = True
+    elif _is_eevee(scene):
+        p, e = _EEVEE_QUALITY[q], scene.eevee
+        e.taa_samples, e.taa_render_samples = p["viewport"], p["render"]
+
+
+class HDRIFORGE_SkySettings(bpy.types.PropertyGroup):
+    show_background: bpy.props.BoolProperty(
+        name="Visible to camera", default=True, update=_sky_changed,
+        description="Show the HDRI as the background of the render. Off keeps it lighting and reflecting but hides it "
+                    "from the camera (Cycles)")
+    light_scene: bpy.props.BoolProperty(
+        name="Lights the scene", default=True, update=_sky_changed,
+        description="The HDRI lights surfaces (diffuse light). Off leaves only reflections (Cycles)")
+    reflections: bpy.props.BoolProperty(
+        name="In reflections", default=True, update=_sky_changed,
+        description="The HDRI shows up in glossy reflections and through glass (Cycles)")
+    exposure: bpy.props.FloatProperty(
+        name="Sky exposure (EV)", default=0.0, min=-6.0, max=6.0, soft_min=-4.0, soft_max=4.0, step=10, update=_sky_changed,
+        description="Brighten or darken the sky in stops, on top of the exposure already baked into the map by Forge")
+    quality: bpy.props.EnumProperty(
+        name="Sampling", default='KEEP', update=_quality_changed,
+        items=[('KEEP', "Keep my settings", "Do not change the render sampling"),
+               ('DRAFT', "Draft", "Fast and noisy, for placing lights"),
+               ('BALANCED', "Balanced", "A good look-dev preview"),
+               ('FINAL', "Final", "Clean results, slower")],
+        description="Sample counts and noise thresholds for the current render engine")
+
+
+def _shadow_catchers():
+    return [o for o in bpy.data.objects if o.get(BRIDGE_TAG) == SHADOW_CATCHER_KIND]
+
+
+class HDRIBRIDGE_OT_shadow_catcher(bpy.types.Operator):
+    bl_idname = "hdribridge.shadow_catcher"
+    bl_label = "Shadow catcher"
+    bl_description = ("Add a ground plane that only catches shadows, with a transparent background, for product shots "
+                      "composited over a photo or backplate. Click again to remove it. Cycles only")
+
+    def execute(self, context):
+        scene = context.scene
+        existing = _shadow_catchers()
+        if existing:
+            for o in existing:
+                mesh = o.data
+                bpy.data.objects.remove(o)
+                if mesh is not None and mesh.users == 0:
+                    bpy.data.meshes.remove(mesh)
+            if "hdri_forge_prev_film" in scene:
+                scene.render.film_transparent = bool(scene["hdri_forge_prev_film"])
+                del scene["hdri_forge_prev_film"]
+            return {'FINISHED'}
+
+        size = 10.0
+        mesh = bpy.data.meshes.new(SHADOW_CATCHER_NAME)
+        mesh.from_pydata([(-size, -size, 0), (size, -size, 0), (size, size, 0), (-size, size, 0)], [], [(0, 1, 2, 3)])
+        mesh.update()
+        obj = bpy.data.objects.new(SHADOW_CATCHER_NAME, mesh)
+        obj[BRIDGE_TAG] = SHADOW_CATCHER_KIND
+        obj.is_shadow_catcher = True
+        obj.visible_shadow = False                # the catcher must not shadow the scene itself
+        context.collection.objects.link(obj)
+        scene["hdri_forge_prev_film"] = scene.render.film_transparent
+        scene.render.film_transparent = True       # a shadow catcher only makes sense over a transparent background
+        if not _is_cycles(scene):
+            self.report({'WARNING'}, "Added, but shadow catchers only work in Cycles. Switch the render engine to Cycles")
+        return {'FINISHED'}
+
+
+class HDRIBRIDGE_OT_standard_color(bpy.types.Operator):
+    bl_idname = "hdribridge.standard_color"
+    bl_label = "Standard color"
+    bl_description = ("Set color management to Standard with no exposure or gamma offset, so renders show the HDRI's "
+                      "values untouched, like Forge's preview. Choose AgX or Filmic yourself for a filmic look")
+
+    def execute(self, context):
+        vs = context.scene.view_settings
+        try:
+            vs.view_transform = 'Standard'
+        except TypeError:
+            self.report({'WARNING'}, "This Blender has no 'Standard' view transform")
+            return {'CANCELLED'}
+        for attr, value in (("look", 'None'), ("exposure", 0.0), ("gamma", 1.0)):
+            try:
+                setattr(vs, attr, value)
+            except (TypeError, AttributeError):
+                pass
+        return {'FINISHED'}
+
+
 def _tag_redraw():
     wm = bpy.context.window_manager
     for win in wm.windows:
@@ -1012,6 +1180,11 @@ def _live_tick():
     link = _live["link"]
     if link is None or not _live["running"]:
         return None
+    engine = bpy.context.scene.render.engine
+    if engine != _live["engine"]:                  # the artist switched renderer: tell Forge
+        _live["engine"] = engine
+        link.set_client_name(_client_name(bpy.context.scene))
+        _tag_redraw()
     frame = link.take_frame()
     if frame is not None:
         try:
@@ -1032,7 +1205,8 @@ def _live_tick():
 def _live_start():
     if _live["link"] is None:
         _live["link"] = _core.ForgeLink(cache_dir=os.path.join(bpy.app.tempdir, "hdri_forge_live"),
-                                        client_name="Blender " + bpy.app.version_string.split(" ")[0])
+                                        client_name=_client_name(bpy.context.scene))
+        _live["engine"] = bpy.context.scene.render.engine
     _live["running"] = True
     _live["link"].start()
     if not bpy.app.timers.is_registered(_live_tick):
@@ -1144,6 +1318,30 @@ def _draw_live(layout, context):
         row.operator("hdribridge.restore_world", icon='LOOP_BACK')
 
 
+def _draw_renderer(layout, context):
+    scene = context.scene
+    s = scene.hdri_forge_sky
+    box = layout.box()
+    box.label(text="Renderer: " + _engine_label(scene), icon='SHADING_RENDERED')
+
+    col = box.column(align=True)
+    col.enabled = _is_cycles(scene)                # these three are Cycles ray visibility
+    col.prop(s, "show_background")
+    col.prop(s, "light_scene")
+    col.prop(s, "reflections")
+    if not _is_cycles(scene):
+        box.label(text="Visibility switches need Cycles.", icon='INFO')
+    box.prop(s, "exposure")
+    box.prop(s, "quality")
+    box.prop(scene.render, "film_transparent", text="Transparent background")
+
+    row = box.row(align=True)
+    row.operator("hdribridge.standard_color", icon='COLOR')
+    has_catcher = bool(_shadow_catchers())
+    row.operator("hdribridge.shadow_catcher", text="Remove catcher" if has_catcher else "Shadow catcher",
+                 icon='TRASH' if has_catcher else 'SHADING_BBOX', depress=has_catcher)
+
+
 class HDRIBRIDGE_PT_panel(bpy.types.Panel):
     bl_label       = "HDRI Forge Bridge"
     bl_idname      = "HDRIBRIDGE_PT_panel"
@@ -1193,6 +1391,8 @@ class HDRIBRIDGE_PT_panel(bpy.types.Panel):
 
         layout.separator()
         _draw_live(layout, context)
+        layout.separator()
+        _draw_renderer(layout, context)
 
         layout.separator()
         layout.label(text=f"Selected: {len(lights)} lights, {len(meshes)} meshes")
@@ -1217,12 +1417,16 @@ classes = [
     HDRIBRIDGE_OT_live_toggle,
     HDRIBRIDGE_OT_import_hdri,
     HDRIBRIDGE_OT_restore_world,
+    HDRIFORGE_SkySettings,
+    HDRIBRIDGE_OT_shadow_catcher,
+    HDRIBRIDGE_OT_standard_color,
     HDRIBRIDGE_PT_panel,
 ]
 
 def register():
     for cls in classes:
         bpy.utils.register_class(cls)
+    bpy.types.Scene.hdri_forge_sky = bpy.props.PointerProperty(type=HDRIFORGE_SkySettings)
     bpy.app.timers.register(_background_probe, first_interval=0.5)
     if _on_load_post not in bpy.app.handlers.load_post:
         bpy.app.handlers.load_post.append(_on_load_post)
@@ -1240,6 +1444,8 @@ def unregister():
         bpy.app.timers.unregister(_live_tick)
     if bpy.app.timers.is_registered(_background_probe):
         bpy.app.timers.unregister(_background_probe)
+    if hasattr(bpy.types.Scene, "hdri_forge_sky"):
+        del bpy.types.Scene.hdri_forge_sky
     for cls in reversed(classes):
         bpy.utils.unregister_class(cls)
 
