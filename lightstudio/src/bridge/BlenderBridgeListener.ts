@@ -62,7 +62,7 @@ interface BridgePayload {
    *  and needs remapping to Three.js's Y-up; Maya is already Y-up and needs
    *  none. Missing/unrecognized defaults to 'blender' for older addon builds
    *  that predate this field. */
-  source?: 'blender' | 'maya' | 'erik';
+  source?: 'blender' | 'maya' | 'erik' | 'unreal';
   lights?: BridgeLightData[];
   /** Pushed exclusively by the dedicated "Push Camera(s)" button - the mesh/
    *  lights/world push never includes camera data. */
@@ -75,7 +75,8 @@ interface BridgePayload {
 // Blender is Z-up: X=X  Y=Z  Z=-Y maps it to Three.js's Y-up. Maya is already
 // Y-up/right-handed like Three.js, so its coordinates pass through unchanged.
 function toThreePos(b: Vec3, source: BridgePayload['source']): THREE.Vector3 {
-  if (source === 'maya' || source === 'erik') {
+  // Unreal's plug-in converts to Y-up right-handed metres before sending, so it passes through like Maya.
+  if (source === 'maya' || source === 'erik' || source === 'unreal') {
     return new THREE.Vector3(b.x, b.y, b.z);
   }
   return new THREE.Vector3(b.x, b.z, -b.y);

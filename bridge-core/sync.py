@@ -4,7 +4,7 @@ Keep forge_link_core.py identical in every DCC addon folder.
 The addons are installed by dropping files into the DCC, so each one needs its
 own copy next to it. bridge-core/forge_link_core.py is the only file to edit.
 
-    python bridge-core/sync.py          copy it into blender-addon/ and maya-plugin/
+    python bridge-core/sync.py          copy it into blender-addon/, maya-plugin/ and the Unreal plug-in
     python bridge-core/sync.py --check  exit 1 if any copy has drifted (use in CI / before a commit)
 """
 import os
@@ -16,6 +16,7 @@ SOURCE = os.path.join(ROOT, "bridge-core", "forge_link_core.py")
 TARGETS = [
     os.path.join(ROOT, "blender-addon", "forge_link_core.py"),
     os.path.join(ROOT, "maya-plugin", "forge_link_core.py"),
+    os.path.join(ROOT, "unreal-plugin", "HDRIForgeBridge", "Content", "Python", "forge_link_core.py"),
 ]
 
 

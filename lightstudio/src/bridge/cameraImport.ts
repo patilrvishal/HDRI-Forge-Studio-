@@ -19,17 +19,18 @@ function placeRelativeToCar(cams: BridgeCameraData[], source: CameraSource): Bri
 }
 
 /** Apps Forge can pull cameras from. */
-export type CameraSource = 'erik' | 'blender' | 'maya';
+export type CameraSource = 'erik' | 'blender' | 'maya' | 'unreal';
 
 export const CAMERA_SOURCE_LABEL: Record<CameraSource, string> = {
   erik: 'Erik',
   blender: 'Blender',
   maya: 'Maya',
+  unreal: 'Unreal Engine',
 };
 
 const CAMERAS_PATH = '/__hdri_bridge_cameras';
 // Each addon runs a tiny loopback listener (see BLENDER_RECEIVE_PORT / MAYA_RECEIVE_PORT).
-const DCC_PORT: Record<'blender' | 'maya', number> = { blender: 8975, maya: 8976 };
+const DCC_PORT: Record<'blender' | 'maya' | 'unreal', number> = { blender: 8975, maya: 8976, unreal: 8977 };
 const HOSTS = ['127.0.0.1', '[::1]'];
 
 export interface RemoteCamera extends BridgeCameraData {
@@ -113,14 +114,14 @@ export function importSelectedCameras(source: CameraSource, cams: RemoteCamera[]
 
 /** Forge camera id -> the camera's id inside its source app, or null for manual cameras. */
 export function sourceOf(cameraId: string): { source: CameraSource; remoteId: string } | null {
-  const m = /^bridge-(blender|maya|erik)-(.+)$/.exec(cameraId);
+  const m = /^bridge-(blender|maya|erik|unreal)-(.+)$/.exec(cameraId);
   return m ? { source: m[1] as CameraSource, remoteId: m[2] } : null;
 }
 
 /** Re-pull ONE camera from its source app and update only that camera in Forge. */
 export async function syncCamera(cameraId: string): Promise<string> {
   const src = sourceOf(cameraId);
-  if (!src) throw new Error('This camera was not imported from Erik, Blender or Maya.');
+  if (!src) throw new Error('This camera was not imported from Erik, Blender, Maya or Unreal.');
   let cam: BridgeCameraData | undefined;
   if (src.source === 'erik') {
     const j = await fetchJson(`${await erikBase()}/cameras`).catch(() => {

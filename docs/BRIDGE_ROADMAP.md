@@ -203,3 +203,18 @@ applying the sky settings repairs a dome made by an older version.
 
 Test notes for Maya: `cmds.render` in headless mayapy does NOT use Arnold (it shades unlit); use `cmds.arnoldRender(
 cam=..., batch=True)`. Maya's `enableDefaultLight` adds a headlight when no visible light exists, so tests turn it off.
+
+## Unreal Engine bridge (verified against UE 5.8.4)
+
+`unreal-plugin/HDRIForgeBridge` is a pure-Python editor plug-in built like the Maya one and on the same `forge_link_core.py`:
+Live HDRI on an HDRI Backdrop (Sky Light fallback), Import HDRI (`.hdr` + `.ash` kept, TextureCube asset saved),
+Restore sky, cameras both ways (push to Forge, and Forge's Import cameras pulls from port 8977). Forge shows it as
+"Unreal 5.8.4 (Lumen)". See `unreal-plugin/README.md`.
+
+| Item | State | Evidence |
+|---|---|---|
+| Live link, import, restore, cameras, menu | Done | `unreal-plugin/tests/run_unreal_test.py` drives the real plug-in in a headless UE 5.8.4: 25 checks pass, also as an installed plug-in |
+| Camera maths | Done | `test_camera_math.py`: Euler angles reproduce the look direction under three.js's rotation order |
+| Map orientation | Derived, not seen | Half-turn about Z, worked out from the engine's own long-lat code; the headless run cannot render a frame to confirm by eye |
+| Forge side | Done | `unreal` accepted as a camera/bridge source (passthrough axes, port 8977) |
+

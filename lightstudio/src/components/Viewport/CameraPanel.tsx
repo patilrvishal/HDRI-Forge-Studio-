@@ -14,6 +14,7 @@ const SOURCE_LABEL: Record<SceneCamera['source'], string> = {
   blender: 'Blender',
   maya: 'Maya',
   erik: 'Erik',
+  unreal: 'Unreal',
 };
 
 export const CameraPanel: React.FC = () => {

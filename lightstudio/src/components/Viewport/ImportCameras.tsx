@@ -4,7 +4,7 @@ import {
   type CameraSource, type RemoteCamera,
 } from '../../bridge/cameraImport';
 
-const SOURCES: CameraSource[] = ['erik', 'blender', 'maya'];
+const SOURCES: CameraSource[] = ['erik', 'blender', 'maya', 'unreal'];
 
 /** Bottom-left "Import cameras" button: pick Erik / Blender / Maya, tick the
  *  cameras you want from that scene, import only those. */
