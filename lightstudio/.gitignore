@@ -26,3 +26,14 @@ src-tauri/gen
 *.njsproj
 *.sln
 *.sw?
+.modtest.mjs
+.modpos.mjs
+.apptest.mjs
+.exrtest.mjs
+.filtertest.mjs
+public/_testcar.glb
+.hdrieditttest.mjs
+.hdritest.mjs
+.hdriinc.mjs
+.hdriptenv.mjs
+.paintpick.mjs

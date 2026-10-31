@@ -1,5 +1,8 @@
+import type { LightAppearance } from '../appearance/types';
+import { newAppearance } from '../appearance/content';
+
 // Light types for the studio
-export type LightType = 
+export type LightType =
   | 'point' 
   | 'spot' 
   | 'area' 
@@ -80,6 +83,63 @@ export interface Light {
    *  area-type lights (area/overhead) - same control set as an HDRI Shape's
    *  drop shadow, applied as a darkening patch offset from the light. */
   dropShadow?: LightDropShadow;
+  /** When set, this light is an OBJECT LIGHT: it follows the scene object with this
+   *  key (see three/objectBinding.ts) - the object's face becomes the emitting
+   *  rectangle and the object glows. Position, rotation and size are derived. */
+  objectKey?: string;
+  /** Which face of the object emits ('auto' = the face pointing at the model). */
+  objectSide?: 'auto' | '+x' | '-x' | '+y' | '-y' | '+z' | '-z';
+  /** Make the object itself glow in the viewport / path tracer. Default true. */
+  objectGlow?: boolean;
+  /** What the light looks like (content layers + blends). Undefined = classic
+   *  flat light shaped only by Edge Softness. Applies to area-type and object lights. */
+  appearance?: LightAppearance;
+  /** HDR Textured Area Light settings (area-type lights only). */
+  areaTex?: TexturedAreaSettings;
+  /** How the light is blended over the map beneath it in the HDRI (default normal). */
+  blendMode?: import('../appearance/types').AppearanceBlend;
+  /** Invert the light's colours before blending. */
+  blendInvert?: boolean;
+  /** Which colour channels of the map this light writes to when it is blended in (default 'all').
+   *  'red' / 'green' / 'blue' leave the other two channels of the map untouched, so a light can tint
+   *  or subtract in one channel only. The baked map is always opaque, so there is no alpha channel
+   *  to blend into: see docs/HDRLS-PARITY-BRIEF.md. */
+  blendChannel?: BlendChannel;
+  /** How the light's rectangle is projected onto the map (default 'perspective').
+   *  'perspective' = as seen from the capture point (gnomonic, edges stretch for big lights);
+   *  'plane' = parallel projection onto the light's plane, so a big light keeps a true-to-size,
+   *  evenly spaced footprint and texture across the sphere. */
+  mapping?: LightMapping;
+}
+
+export type BlendChannel = 'all' | 'red' | 'green' | 'blue';
+export type LightMapping = 'perspective' | 'plane';
+
+/**
+ * Area Light mode: instead of being painted into the HDRI, the light becomes a real
+ * 3D rectangle carrying its appearance as an RGBA texture.
+ */
+export interface TexturedAreaSettings {
+  /** Area Light mode on/off. */
+  enabled: boolean;
+  /** Emitter is visible to the camera (off = still lights, but is not seen). */
+  camVisibility: boolean;
+  /** Smart Dolly: distance factor. Moves the light closer / further AND scales its size so the
+   *  light it delivers stays consistent (1 = where LightPaint put it). */
+  smartDolly: number;
+  /** Dolly Multiplier: moves the light without changing its size. */
+  dollyMultiplier: number;
+  /** Multiplier on the area light texture resolution (export and preview). */
+  textureScale: number;
+  /** 0-100. 100 = wide (Lambert) emission, lower = tighter beam. */
+  spread: number;
+  /** On: the size follows the dolly so the light keeps the same size in reflections on flat surfaces.
+   *  Off: the size follows the dolly so the light fills the same solid angle (same illumination). */
+  maintainReflectionSize: boolean;
+}
+
+export function createDefaultTexturedArea(): TexturedAreaSettings {
+  return { enabled: false, camVisibility: true, smartDolly: 1, dollyMultiplier: 1, spread: 100, maintainReflectionSize: true, textureScale: 1 };
 }
 
 export interface LightDropShadow {
@@ -152,4 +212,23 @@ export const LIGHT_TEMPLATES: Record<string, Partial<Light>> = {
   underlight: { type: 'underlight', name: 'Under Grid Light', color: '#4a9eff', brightness: 80, transform: { spherical: { lat: -90, lng: 0, radius: 3, height: -0.5 }, position: { x: 0, y: -0.5, z: 0 }, rotation: { x: 90, y: 0, z: 0, mode: 'euler', enabled: true, repeat: false, advanced: { lR: 0, p1: 0, p2: 0, p3: 0, rR: 0, ro: 0, roat: 0 } } } },
   rim: { type: 'rim', name: 'Rim Light', color: '#4a9eff', brightness: 180, spotAngle: 30, spotPenumbra: 0.3, transform: { spherical: { lat: 10, lng: 180, radius: 6, height: 2 }, position: { x: -6, y: 2, z: 0 }, rotation: { x: 0, y: 0, z: 0, mode: 'euler', enabled: false, repeat: false, advanced: { lR: 0, p1: 0, p2: 0, p3: 0, rR: 0, ro: 0, roat: 0 } } } },
   fill: { type: 'area', name: 'Fill Light', color: '#c8d8ff', brightness: 100, areaLight: true, falloff: 'linear', areaWidth: 3, areaHeight: 2, transform: { spherical: { lat: 30, lng: -90, radius: 5, height: 2 }, position: { x: -5, y: 2, z: 0 }, rotation: { x: 0, y: 90, z: 0, mode: 'euler', enabled: true, repeat: false, advanced: { lR: 0, p1: 0, p2: 0, p3: 0, rR: 0, ro: 0, roat: 0 } } } },
+
+  // Appearance-content-driven quick-creates, named after HDR Light Studio's
+  // Create menu. Each is an Area light pre-loaded with the matching Light
+  // Appearance master content, so it looks right the instant it's created
+  // instead of needing the Appearance editor opened first.
+  roundLight: { type: 'area', name: 'Round Light', color: '#ffffff', brightness: 150, areaLight: true, falloff: 'linear', areaWidth: 2, areaHeight: 2, appearance: newAppearance('bulb', 'Round Light') },
+  rectLight: { type: 'area', name: 'Rect Light', color: '#ffffff', brightness: 150, areaLight: true, falloff: 'linear', areaWidth: 2, areaHeight: 1.2, appearance: newAppearance('flat', 'Rect Light') },
+  scrimLight: { type: 'area', name: 'Scrim Light', color: '#ffffff', brightness: 200, areaLight: true, falloff: 'linear', areaWidth: 2, areaHeight: 2, appearance: newAppearance('scrim', 'Scrim Light') },
+  boxGradLight: { type: 'area', name: 'Box Grad Light', color: '#ffffff', brightness: 150, areaLight: true, falloff: 'linear', areaWidth: 2, areaHeight: 2, appearance: newAppearance('boxgrad', 'Box Grad Light') },
+  gradientLight: { type: 'area', name: 'Gradient Light', color: '#ffffff', brightness: 150, areaLight: true, falloff: 'linear', areaWidth: 2, areaHeight: 2, appearance: newAppearance('gradient', 'Gradient Light') },
+  pictureLight: { type: 'area', name: 'Picture Light', color: '#ffffff', brightness: 150, areaLight: true, falloff: 'linear', areaWidth: 2, areaHeight: 2, appearance: newAppearance('image', 'Picture Light') },
+  // Dark Light: subtracts from what's beneath it in the HDRI - used to carve
+  // negative fill / contact shadows into reflections. blendMode 'subtract'
+  // on a black master does that directly through the existing blend system.
+  darkLight: { type: 'area', name: 'Dark Light', color: '#000000', brightness: 150, areaLight: true, falloff: 'linear', areaWidth: 2, areaHeight: 2, blendMode: 'subtract', appearance: newAppearance('flat', 'Dark Light') },
+  // Sun Shade Light: a soft rectangular shadow cast into the environment to
+  // dim/shape a sun or large light - a black Box Grad multiplied in, so its
+  // own per-edge softness ramps shape the shade.
+  sunShadeLight: { type: 'area', name: 'Sun Shade Light', color: '#000000', brightness: 100, areaLight: true, falloff: 'linear', areaWidth: 3, areaHeight: 3, blendMode: 'multiply', appearance: newAppearance('boxgrad', 'Sun Shade Light') },
 };

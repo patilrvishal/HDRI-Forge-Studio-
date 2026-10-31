@@ -1,0 +1,17 @@
+{
+	"FileVersion": 3,
+	"Version": 1,
+	"VersionName": "1.0.0",
+	"FriendlyName": "HDRI Forge Bridge",
+	"Description": "Live HDRI link between HDRI Forge Studio and Unreal Engine: streams Forge's HDRI onto an HDRI Backdrop as you edit, imports it permanently, and exchanges cameras. Same idea as the Erik Adjuster live link.",
+	"Category": "Lighting",
+	"CreatedBy": "HDRI Forge Studio",
+	"CanContainContent": true,
+	"IsBetaVersion": true,
+	"Installed": false,
+	"Plugins": [
+		{ "Name": "PythonScriptPlugin", "Enabled": true },
+		{ "Name": "EditorScriptingUtilities", "Enabled": true },
+		{ "Name": "HDRIBackdrop", "Enabled": true, "Optional": true }
+	]
+}

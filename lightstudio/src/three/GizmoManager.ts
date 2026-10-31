@@ -28,6 +28,8 @@ export class GizmoManager {
   private mode: GizmoMode = null;
   private callbacks: GizmoCallbacks;
   private disposed = false;
+  /** Scale reported by the previous change event, so only the CHANGE is passed on. */
+  private prevScale = new THREE.Vector3(1, 1, 1);
 
   constructor(
     camera: THREE.Camera,
@@ -42,11 +44,19 @@ export class GizmoManager {
 
     this.controls = new TransformControls(camera, domElement);
     this.controls.setSize(0.8);
-    this.controls.visible = false;
+    (this.controls as unknown as { visible: boolean }).visible = false;
 
     // Orbit and gizmo both want the mouse - hand it to the gizmo mid-drag.
     this.controls.addEventListener('dragging-changed', (e) => {
-      this.orbit.enabled = !(e as unknown as { value: boolean }).value;
+      const dragging = (e as unknown as { value: boolean }).value;
+      this.orbit.enabled = !dragging;
+      const obj = this.controls.object;
+      if (obj) {
+        // A finished drag resets the object's scale: the light's size lives in its width / height, so a
+        // scale left on the object would compound the next drag (and every event within it).
+        obj.scale.set(1, 1, 1);
+      }
+      this.prevScale.set(1, 1, 1);
     });
 
     this.controls.addEventListener('objectChange', () => {
@@ -60,14 +70,26 @@ export class GizmoManager {
           y: (obj.rotation.y * 180) / Math.PI,
           z: (obj.rotation.z * 180) / Math.PI,
         },
-        scale: { x: obj.scale.x, y: obj.scale.y, z: obj.scale.z },
+        // relative change since the previous event (1 = unchanged)
+        scale: {
+          x: obj.scale.x / (this.prevScale.x || 1),
+          y: obj.scale.y / (this.prevScale.y || 1),
+          z: obj.scale.z / (this.prevScale.z || 1),
+        },
       });
+      this.prevScale.copy(obj.scale);
     });
 
     // In three r16x+ TransformControls is a helper, not a scene object - its
     // gizmo is exposed separately and must be added on its own.
     const helper = (this.controls as unknown as { getHelper?: () => THREE.Object3D }).getHelper?.();
-    scene.add(helper ?? (this.controls as unknown as THREE.Object3D));
+    const gizmoRoot = helper ?? (this.controls as unknown as THREE.Object3D);
+    // Marks this as non-scene-content, same convention as the ground fade
+    // overlay - excluded from the path-traced "final quality" preview
+    // (RenderPipeline._withPathTracerEnv), which otherwise has no way to
+    // tell the gizmo's colored arrows apart from real scene geometry.
+    gizmoRoot.userData.isProxy = true;
+    scene.add(gizmoRoot);
   }
 
   setMode(mode: GizmoMode): void {
@@ -75,14 +97,14 @@ export class GizmoManager {
     this.mode = mode;
 
     if (!mode) {
-      this.controls.visible = false;
+      (this.controls as unknown as { visible: boolean }).visible = false;
       this.controls.detach();
       this.attachedId = null;
       return;
     }
 
     this.controls.setMode(mode);
-    if (this.controls.object) this.controls.visible = true;
+    if (this.controls.object) (this.controls as unknown as { visible: boolean }).visible = true;
   }
 
   getMode(): GizmoMode {
@@ -98,7 +120,7 @@ export class GizmoManager {
 
     if (!lightId || !this.mode) {
       this.controls.detach();
-      this.controls.visible = false;
+      (this.controls as unknown as { visible: boolean }).visible = false;
       this.attachedId = null;
       return;
     }
@@ -113,13 +135,13 @@ export class GizmoManager {
 
     if (!target) {
       this.controls.detach();
-      this.controls.visible = false;
+      (this.controls as unknown as { visible: boolean }).visible = false;
       this.attachedId = null;
       return;
     }
 
     this.controls.attach(target);
-    this.controls.visible = true;
+    (this.controls as unknown as { visible: boolean }).visible = true;
     this.attachedId = lightId;
   }
 

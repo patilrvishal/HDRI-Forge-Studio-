@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import * as THREE from 'three';
+import { createPortal } from 'react-dom';
 import { useSceneHierarchyStore, HierarchyFilterType } from '../../store/sceneHierarchyStore';
 import { useMaterialEditorStore } from '../../store/materialEditorStore';
 import { useUIStore } from '../../store/uiStore';
@@ -527,7 +528,9 @@ const ContextMenu: React.FC<{
   const adjustedX = state.x + menuWidth > window.innerWidth ? state.x - menuWidth : state.x;
   const adjustedY = state.y + menuHeight > window.innerHeight ? Math.max(0, state.y - menuHeight) : state.y;
 
-  return (
+  // Portal: the glass panels use backdrop-filter, which would otherwise make them the
+  // containing block for this fixed menu and offset/clip it.
+  return createPortal(
     <div
       ref={menuRef}
       style={{
@@ -598,7 +601,8 @@ const ContextMenu: React.FC<{
           </div>
         );
       })}
-    </div>
+    </div>,
+    document.body,
   );
 };
 

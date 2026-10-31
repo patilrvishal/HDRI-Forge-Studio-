@@ -1,4 +1,5 @@
 import React, { useCallback } from 'react';
+import { SliderNumberField } from './SliderNumberField';
 
 interface SliderProps {
   label: string;
@@ -10,6 +11,9 @@ interface SliderProps {
   unit?: string;
   showValue?: boolean;
   className?: string;
+  /** Typed values may go beyond the slider's own range (default: the slider range). */
+  inputMin?: number;
+  inputMax?: number;
 }
 
 export const Slider: React.FC<SliderProps> = ({
@@ -22,6 +26,8 @@ export const Slider: React.FC<SliderProps> = ({
   unit = '',
   showValue = true,
   className = '',
+  inputMin,
+  inputMax,
 }) => {
   const handleChange = useCallback(
     (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -42,9 +48,17 @@ export const Slider: React.FC<SliderProps> = ({
         onChange={handleChange}
       />
       {showValue && (
-        <span className="slider-value">
-          {Number.isNaN(value) ? '—' : (Number.isInteger(step) ? value : value.toFixed(1))}{unit}
-        </span>
+        <>
+          <SliderNumberField
+            value={value}
+            onChange={onChange}
+            min={inputMin ?? min}
+            max={inputMax ?? max}
+            step={step}
+            label={label}
+          />
+          {unit && <span className="slider-unit">{unit}</span>}
+        </>
       )}
     </div>
   );

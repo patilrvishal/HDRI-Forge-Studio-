@@ -3,6 +3,11 @@ import { useSceneStore } from '../../store/sceneStore';
 import { useLightsStore } from '../../store/lightsStore';
 import { sphericalToCartesian } from '../../utils/math';
 import { Toggle } from '../UI/Toggle';
+import { SliderNumberField } from '../UI/SliderNumberField';
+import {
+  brightnessToIntensity, intensityToBrightness,
+  INTENSITY_SLIDER_MAX, INTENSITY_INPUT_MAX, INTENSITY_STEP,
+} from '../../utils/lightIntensity';
 
 // ------ Section toggle chevron ------------------------------------------------------------------------------------------------------------------------------
 const Chevron: React.FC<{ open: boolean }> = ({ open }) => (
@@ -15,7 +20,9 @@ const Chevron: React.FC<{ open: boolean }> = ({ open }) => (
 const MiniSlider: React.FC<{
   label: string; value: number; min: number; max: number; step?: number;
   onChange: (v: number) => void; unit?: string; color?: string;
-}> = ({ label, value, min, max, step = 0.01, onChange, unit = '', color }) => {
+  /** Typed values may go beyond the slider's own range (default: the slider range). */
+  inputMax?: number;
+}> = ({ label, value, min, max, step = 0.01, onChange, unit = '', color, inputMax }) => {
   const safeValue = Number.isFinite(value) ? value : min;
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '2px 0' }}>
@@ -25,9 +32,16 @@ const MiniSlider: React.FC<{
         onChange={(e) => onChange(parseFloat(e.target.value))}
         style={{ flex: 1, height: 3, accentColor: color ?? 'var(--accent)', cursor: 'pointer' }}
       />
-      <span style={{ fontSize: 9, color: 'var(--text-sec)', width: 36, textAlign: 'right', fontFamily: 'var(--font-mono)' }}>
-        {step >= 1 ? Math.round(safeValue) : safeValue.toFixed(2)}{unit}
-      </span>
+      <SliderNumberField
+        value={safeValue}
+        onChange={onChange}
+        min={min}
+        max={inputMax ?? max}
+        step={step}
+        label={label}
+        style={{ width: 46, height: 18, fontSize: 9, padding: '0 4px' }}
+      />
+      {unit && <span style={{ fontSize: 9, color: 'var(--text-dim)', flexShrink: 0 }}>{unit}</span>}
     </div>
   );
 };
@@ -301,7 +315,7 @@ export const ViewportDesignPanel: React.FC = () => {
                 Lat {Math.round(keyLight.transform.spherical.lat)}deg / Lng {Math.round(keyLight.transform.spherical.lng)}deg
               </span>
             </div>
-            <MiniSlider label="Brightness" value={keyLight.brightness} min={0} max={500} step={1} onChange={(v) => updateKeyLight({ brightness: v })} />
+            <MiniSlider label="Intensity" value={brightnessToIntensity(keyLight.brightness)} min={0} max={INTENSITY_SLIDER_MAX} step={INTENSITY_STEP} inputMax={INTENSITY_INPUT_MAX} onChange={(v) => updateKeyLight({ brightness: intensityToBrightness(v) })} />
             <MiniSlider label="Latitude" value={keyLight.transform.spherical.lat} min={-90} max={90} step={1} unit="deg" onChange={(v) => {
               const s = { ...keyLight.transform.spherical, lat: v };
               const cart = sphericalToCartesian(s.lat, s.lng, s.radius, s.height);
@@ -334,7 +348,7 @@ export const ViewportDesignPanel: React.FC = () => {
                 Lat {Math.round(fillLight.transform.spherical.lat)}deg / Lng {Math.round(fillLight.transform.spherical.lng)}deg
               </span>
             </div>
-            <MiniSlider label="Brightness" value={fillLight.brightness} min={0} max={500} step={1} onChange={(v) => updateFillLight({ brightness: v })} />
+            <MiniSlider label="Intensity" value={brightnessToIntensity(fillLight.brightness)} min={0} max={INTENSITY_SLIDER_MAX} step={INTENSITY_STEP} inputMax={INTENSITY_INPUT_MAX} onChange={(v) => updateFillLight({ brightness: intensityToBrightness(v) })} />
             <MiniSlider label="Latitude" value={fillLight.transform.spherical.lat} min={-90} max={90} step={1} unit="deg" onChange={(v) => {
               const s = { ...fillLight.transform.spherical, lat: v };
               const cart = sphericalToCartesian(s.lat, s.lng, s.radius, s.height);
@@ -358,7 +372,7 @@ export const ViewportDesignPanel: React.FC = () => {
               <ColorDot color={ambLight.color} onChange={(c) => updateAmbientLight({ color: c })} />
               <span style={{ fontSize: 8, color: 'var(--text-dim)' }}>{ambLight.color}</span>
             </div>
-            <MiniSlider label="Brightness" value={ambLight.brightness} min={0} max={200} step={1} onChange={(v) => updateAmbientLight({ brightness: v })} />
+            <MiniSlider label="Intensity" value={brightnessToIntensity(ambLight.brightness)} min={0} max={INTENSITY_SLIDER_MAX} step={INTENSITY_STEP} inputMax={INTENSITY_INPUT_MAX} onChange={(v) => updateAmbientLight({ brightness: intensityToBrightness(v) })} />
           </>
         )}
       </Section>
