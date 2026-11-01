@@ -43,6 +43,19 @@ The workflow is the same as with Erik Adjuster: start the live preview, edit in 
 HDRI is right use **Import HDRI** to keep it in the level. In Forge, **Import cameras > Unreal Engine** also pulls the
 cameras from this plug-in (it listens on `127.0.0.1:8977`).
 
+### Getting the same picture as Forge
+
+Forge's lights are painted INTO its HDRI, so Unreal's own lights on top of it would give a different result. While Live is on:
+
+* **Forge's HDRI replaces this scene's own lights** (on by default): every other light in the level, including lights inside
+  Blueprints such as light stands, is switched off, and an unbound post-process volume lets the exposure adapt to the HDRI-only
+  lighting (**Let the exposure adapt**). Both are undone when Live stops. The original state is written to
+  `<Project>/Saved/HDRIForgeLightsBackup.json` first, so if the editor ever crashed with Live on, the lights are switched back
+  on the next time the project opens.
+* **Isolate the selected objects** (off until you use it): select the car, choose it, and every other mesh actor is hidden in
+  the editor, so a studio room or cyclorama no longer blocks the HDRI. Choose it again to show everything. Hiding is not saved
+  with the level.
+
 Sending notes: positions are converted from Unreal (cm, Z up, left-handed) to Forge (metres, Y up); light brightness is mapped
 with a starting-point factor (12 per candela, 20 per lux) because the units differ, so adjust brightness in Forge.
 

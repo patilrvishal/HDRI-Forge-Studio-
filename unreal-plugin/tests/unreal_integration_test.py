@@ -202,6 +202,10 @@ def _step():
         # an artist sky light that Live must put out of the way, and bring back
         ctx["artist"] = eas.spawn_actor_from_class(unreal.SkyLight, unreal.Vector(0, 0, 500))
         ctx["artist"].set_actor_label("ArtistSky")
+        ctx["alight"] = eas.spawn_actor_from_class(unreal.PointLight, unreal.Vector(100, 100, 300))     # the scene's own light
+        ctx["alight"].set_actor_label("ArtistLight")
+        ctx["alight_c"] = ctx["alight"].get_component_by_class(unreal.LightComponent)
+        check(ctx["alight_c"].is_visible(), "the scene's own light is on before Live")
         state["mock"].push(512, 256, 300)
         b.live_start(ports=[PORT])
         check(b.client_name().startswith("Unreal 5.8"), "client name %r" % b.client_name())
@@ -217,6 +221,9 @@ def _step():
             check(unreal.SystemLibrary.get_console_variable_int_value("Editor.AsyncTextureCompilation") == 0, "texture builds are synchronous while Live is on")
             ctx["slot1"] = cube.get_path_name()
             check(ctx["artist"].is_temporarily_hidden_in_editor(), "the artist's own Sky Light is put out of the way")
+            check(not ctx["alight_c"].is_visible(), "Forge's HDRI replaces the scene's own lights: the scene's point light is switched off")
+            check(b._exposure_volume() is not None, "an exposure volume lets the exposure adapt to HDRI-only lighting")
+            check(os.path.exists(b._backup_path()), "the lights' original state is saved to disk first (crash safety)")
             check(abs(abs(a.get_actor_rotation().yaw) - 180.0) < 0.01, "map is turned half a turn to Forge's orientation")
             check(any("Unreal 5.8" in (c or "") for c in getattr(state["mock"], "clients", [])), "Forge sees the client name in its status poll")
             state["mock"].push(512, 256, 100)                    # a new map arrives while live
@@ -233,6 +240,8 @@ def _step():
             check(unreal.SystemLibrary.get_console_variable_int_value("Editor.AsyncTextureCompilation") == 1, "...and back to normal background builds when it stops")
             check(actor_by_tag("HDRIForgeBridge:live") is None, "Live off removes the bridge's actor")
             check(not ctx["artist"].is_temporarily_hidden_in_editor(), "...and shows the artist's sky again")
+            check(ctx["alight_c"].is_visible(), "...and switches the scene's own light back on")
+            check(b._exposure_volume() is None and not os.path.exists(b._backup_path()), "...and removes the exposure volume and the backup")
             check(not unreal.EditorAssetLibrary.does_directory_exist("/Game/HDRIForge/Live") or not unreal.EditorAssetLibrary.list_assets("/Game/HDRIForge/Live"), "...and removes the temporary live textures")
             state["step"] = 3
     elif n == 3:
@@ -321,6 +330,25 @@ def _step():
             state["step"] = 5
     elif n == 5:
         # Auto-start: remembered per project, and when on, Live starts by itself (found through the default ports)
+        # crash safety: a leftover backup (as if the editor died with Live on) is undone the next time round
+        ctx["alight_c"].set_visibility(False)
+        with open(b._backup_path(), "w") as f:
+            json.dump([{"actor": ctx["alight"].get_path_name(), "component": ctx["alight_c"].get_name(), "was_visible": True}], f)
+        b._live["override"] = []
+        b._restore_scene_lighting()
+        check(ctx["alight_c"].is_visible(), "a light left off by a crashed session is switched back on at the next start")
+        # isolate: keep the selected object, hide the other mesh actors (a studio room), then show everything again
+        keep = eas.spawn_actor_from_class(unreal.StaticMeshActor, unreal.Vector(0, 0, 20))
+        room = eas.spawn_actor_from_class(unreal.StaticMeshActor, unreal.Vector(0, 0, 40))
+        for a_, nm in ((keep, "IsoKeep"), (room, "IsoRoom")):
+            a_.set_actor_label(nm)
+            a_.static_mesh_component.set_static_mesh(unreal.load_asset("/Engine/BasicShapes/Cube.Cube"))
+        eas.set_selected_level_actors([keep])
+        n_hidden = b.isolate_selection()
+        check(n_hidden >= 1 and room.is_temporarily_hidden_in_editor() and not keep.is_temporarily_hidden_in_editor(),
+              "Isolate hides the room and keeps the selected object (%d actors hidden)" % n_hidden)
+        b.restore_isolation()
+        check(not room.is_temporarily_hidden_in_editor(), "Show everything again brings the room back")
         b.set_auto_start(False)
         saved = json.load(open(b._settings_path()))
         check(saved.get("auto_start") is False, "auto-start off is remembered in Saved/HDRIForgeBridge.json")

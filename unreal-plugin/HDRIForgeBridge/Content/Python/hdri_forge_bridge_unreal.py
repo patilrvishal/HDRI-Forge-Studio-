@@ -47,7 +47,7 @@ try:
 except ImportError:
     _core = None
 
-VERSION = "1.3.0"
+VERSION = "1.5.0"
 TAG = "HDRIForgeBridge"
 CONTENT_DIR = "/Game/HDRIForge"
 LIVE_KIND, IMPORT_KIND = "live", "import"
@@ -69,7 +69,7 @@ BRIDGE_PATH = "/__hdri_bridge_push"
 FORGE_TO_UNREAL_YAW = 180.0
 
 _live = {
-    "note": "", "link": None, "running": False, "renderer": "", "renderer_checked": 0.0,
+    "isolated": [], "override": [], "note": "", "link": None, "running": False, "renderer": "", "renderer_checked": 0.0,
     "slot": 0, "hidden": [], "last_status": None, "message": "Off",
 }
 _sky = {"exposure_ev": 0.0, "yaw": 0.0, "background": True}
@@ -77,7 +77,7 @@ _studio = {"url": None, "label": None}
 _cam = {"snapshot": [], "wanted": threading.Event(), "ready": threading.Event(), "server": None, "thread": None}
 _menu = {"built": False, "toolbar": None, "toolbar_menu": None}
 _settle = {"until": 0.0, "next": 0.0}   # after a new map: re-capture the sky a few times so late texture builds still show
-_settings = {"auto_start": True}       # remembered per project in Saved/HDRIForgeBridge.json
+_settings = {"auto_start": True, "override_lighting": True, "auto_exposure": True}       # remembered per project in Saved/HDRIForgeBridge.json
 _auto = {"at": None, "done": False}    # when to start Live on its own after the editor opens
 _jobs = queue.Queue()                  # work that must run on the editor's main thread, queued from other threads
 _main = {"tick": None}
@@ -116,6 +116,8 @@ def set_auto_start(on):
 def _auto_start_now():
     """Start Live if the setting says so, and it is not already running."""
     _auto["done"] = True
+    if not _live["running"]:
+        _restore_scene_lighting()          # a crashed session may have left the scene's lights off
     if _settings.get("auto_start") and not _live["running"]:
         try:
             live_start()
@@ -276,6 +278,188 @@ def _remove_bridge_actors(kind=None):
             _warn("could not remove %s: %s" % (actor.get_name(), e))
 
 
+# ─── Forge's HDRI replaces the scene's own lighting while Live is on ─────────
+# Forge's lights are painted INTO the HDRI, so Unreal's own lights on top of it would give a different picture from Forge's.
+# While Live is on, every other light in the level is switched off and a post-process volume lets the exposure adapt to the
+# HDRI-only lighting. Both are undone when Live stops, and the original states are written to disk first so a crash cannot
+# leave a saved level with its lights off (they are put back the next time the project opens).
+def _backup_path():
+    return os.path.join(unreal.Paths.project_saved_dir(), "HDRIForgeLightsBackup.json")
+
+
+def _scene_light_components():
+    """(actor path, component name, component) for every light component that is not the bridge's own."""
+    out = []
+    for a in _all_actors():
+        if _has_tag(a, TAG) or _is_backdrop(a):
+            continue
+        try:
+            for comp in a.get_components_by_class(unreal.LightComponent):
+                out.append((a.get_path_name(), comp.get_name(), comp))
+        except Exception:
+            continue
+    return out
+
+
+def _override_scene_lighting():
+    if not _settings.get("override_lighting") or _live["override"]:
+        return
+    entries = []
+    for apath, cname, comp in _scene_light_components():
+        try:
+            was = bool(comp.is_visible())
+            if was:
+                entries.append({"actor": apath, "component": cname, "was_visible": True})
+                comp.set_visibility(False)
+        except Exception as e:
+            _warn("could not switch off light %s: %s" % (cname, e))
+    _live["override"] = entries
+    try:
+        os.makedirs(os.path.dirname(_backup_path()), exist_ok=True)
+        with open(_backup_path(), "w", encoding="utf-8") as f:
+            json.dump(entries, f)
+    except Exception as e:
+        _warn("could not write the lights backup: %s" % e)
+    if entries:
+        _log("Forge's HDRI now lights the level: %d of this scene's own lights are switched off while Live is on" % len(entries))
+    if _settings.get("auto_exposure"):
+        _ensure_exposure_volume()
+    _redraw()
+
+
+def _restore_scene_lighting():
+    """Switch back on every light the override switched off (also leftovers from an earlier session that crashed)."""
+    entries = list(_live["override"])
+    if not entries:
+        try:
+            with open(_backup_path(), "r", encoding="utf-8") as f:
+                entries = json.load(f)
+        except Exception:
+            entries = []
+    if entries:
+        comps = {(a, c): comp for a, c, comp in _scene_light_components()}
+        for e in entries:
+            comp = comps.get((e["actor"], e["component"]))
+            if comp is not None:
+                try:
+                    comp.set_visibility(bool(e.get("was_visible", True)))
+                except Exception:
+                    pass
+    _live["override"] = []
+    try:
+        if os.path.exists(_backup_path()):
+            os.remove(_backup_path())
+    except Exception:
+        pass
+    _remove_exposure_volume()
+    _redraw()
+
+
+def _exposure_volume():
+    for a in _all_actors():
+        if _has_tag(a, "%s:exposure" % TAG):
+            return a
+    return None
+
+
+def _ensure_exposure_volume():
+    """An unbound post-process volume, above the scene's own, that lets the exposure adapt to HDRI-only lighting."""
+    if _exposure_volume() is not None:
+        return
+    try:
+        vol = _eas().spawn_actor_from_class(unreal.PostProcessVolume, unreal.Vector(0, 0, 0))
+        vol.set_actor_label("HDRIForgeExposure")
+        _set_tags(vol, [TAG, "%s:exposure" % TAG])
+        vol.set_editor_property("unbound", True)
+        vol.set_editor_property("priority", 1000.0)
+        st = vol.get_editor_property("settings")
+        st.set_editor_property("override_auto_exposure_method", True)
+        st.set_editor_property("auto_exposure_method", unreal.AutoExposureMethod.AEM_HISTOGRAM)
+        st.set_editor_property("override_auto_exposure_bias", True)
+        st.set_editor_property("auto_exposure_bias", 0.0)
+        vol.set_editor_property("settings", st)
+    except Exception as e:
+        _warn("could not create the exposure volume: %s" % e)
+
+
+def _remove_exposure_volume():
+    v = _exposure_volume()
+    if v is not None:
+        try:
+            _eas().destroy_actor(v)
+        except Exception:
+            pass
+
+
+def isolate_selection():
+    """Show ONLY the selected objects (plus the bridge's own sky): every other mesh actor, such as a studio room or cyclorama
+    that would block the HDRI, is hidden in the editor. Undo with restore_isolation(). Hidden-in-editor is not saved with the level."""
+    eas = _eas()
+    keep = {a.get_path_name() for a in (eas.get_selected_level_actors() or [])}
+    if not keep:
+        _warn("select the objects to keep first (for example the car), then isolate")
+        _live["note"] = "Isolate: select the objects to keep first"
+        return 0
+    hidden = []
+    for a in _all_actors():
+        if a.get_path_name() in keep or _has_tag(a, TAG) or _is_backdrop(a):
+            continue
+        try:
+            if a.get_components_by_class(unreal.MeshComponent) and not a.is_temporarily_hidden_in_editor():
+                a.set_is_temporarily_hidden_in_editor(True)
+                hidden.append(a.get_path_name())
+        except Exception:
+            continue
+    _live["isolated"] = hidden
+    _live["note"] = "Isolated %d selected object(s); %d other mesh actors hidden" % (len(keep), len(hidden))
+    _log(_live["note"])
+    _redraw()
+    _refresh_menu()
+    return len(hidden)
+
+
+def restore_isolation():
+    by_path = {a.get_path_name(): a for a in _all_actors()}
+    for path in _live["isolated"]:
+        a = by_path.get(path)
+        if a is not None:
+            try:
+                a.set_is_temporarily_hidden_in_editor(False)
+            except Exception:
+                pass
+    n = len(_live["isolated"])
+    _live["isolated"] = []
+    _live["note"] = "Showing everything again (%d actor(s) un-hidden)" % n
+    _redraw()
+    _refresh_menu()
+    return n
+
+
+def toggle_isolation():
+    return restore_isolation() if _live["isolated"] else isolate_selection()
+
+
+def set_override_lighting(on):
+    """Whether Forge's HDRI replaces the scene's own lights while Live is on (on by default)."""
+    _settings["override_lighting"] = bool(on)
+    _save_settings()
+    if _live["running"]:
+        if on:
+            _override_scene_lighting()
+        else:
+            _restore_scene_lighting()
+    _log("Forge overrides the scene's own lighting: %s" % ("ON" if on else "OFF"))
+    _refresh_menu()
+
+
+def set_auto_exposure(on):
+    _settings["auto_exposure"] = bool(on)
+    _save_settings()
+    if _live["running"] and _live["override"] is not None and _settings.get("override_lighting"):
+        _ensure_exposure_volume() if on else _remove_exposure_volume()
+    _refresh_menu()
+
+
 # ─── Sky settings ───────────────────────────────────────────────────────────
 def _apply_sky_settings(actor=None):
     """Exposure (EV) and turn-around, applied to every bridge actor (or just the one given)."""
@@ -399,6 +583,8 @@ def _apply_frame(frame):
     cube = _import_hdr(frame.path, CONTENT_DIR + "/Live", "HDRIForgeLive_" + slot, live=True)
     actor = _bridge_actor(LIVE_KIND)
     _show_cubemap(actor, cube)
+    if _settings.get("override_lighting") and not _live["override"]:
+        _override_scene_lighting()                               # the first map is on screen: now take the scene's own lights away
 
 
 def _run_on_main(fn):
@@ -476,6 +662,7 @@ def live_start(ports=None):
     _require_core()
     if _live["running"]:
         return
+    _restore_scene_lighting()                                    # lights a crashed earlier session left switched off
     _remove_bridge_actors()                                      # a leftover from a saved level, or an imported sky: they would add up
     kwargs = {"client_name": client_name()}
     if ports:
@@ -502,6 +689,9 @@ def live_stop():
     _live["link"] = None
     _remove_bridge_actors(LIVE_KIND)
     _show_artist_skies()
+    _restore_scene_lighting()
+    if _live["isolated"]:
+        restore_isolation()
     try:
         unreal.EditorAssetLibrary.delete_directory(CONTENT_DIR + "/Live")
     except Exception:
@@ -908,6 +1098,9 @@ def control_layout():
         ("HFLive", "Live preview", [
             ("Live", "Stop live preview" if on else "Start live preview  (Forge starts streaming by itself)", "live_toggle()"),
             ("Auto", "%s Start automatically whenever this project opens" % _box(_settings.get("auto_start")), "set_auto_start(not b._settings['auto_start'])"),
+            ("Ovr", "%s Forge's HDRI replaces this scene's own lights while live" % _box(_settings.get("override_lighting")), "set_override_lighting(not b._settings['override_lighting'])"),
+            ("AE", "%s Let the exposure adapt to the HDRI lighting" % _box(_settings.get("auto_exposure")), "set_auto_exposure(not b._settings['auto_exposure'])"),
+            ("Iso", ("Show everything again (un-hide the studio)" if _live["isolated"] else "Isolate the selected objects (hide the studio room that blocks the HDRI)"), "toggle_isolation()"),
             ("Bg", "%s Show the HDRI as the level background" % _box(_sky["background"]), "toggle_background()"),
             ("ExpUp", "Brighter  (+0.5 EV)   now %+.1f EV" % _sky["exposure_ev"], "adjust_exposure(0.5)"),
             ("ExpDn", "Darker  (-0.5 EV)", "adjust_exposure(-0.5)"),

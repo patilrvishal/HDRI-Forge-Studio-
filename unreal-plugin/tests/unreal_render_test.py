@@ -323,6 +323,7 @@ def start():
     import hdri_forge_bridge_unreal as bridge
     state["bridge"] = bridge
     state["mock"] = MockForge()
+    bridge._settings.update(auto_start=False, override_lighting=False, auto_exposure=False)   # the pictures test the map itself
     bridge.startup()
     state["handle"] = unreal.register_slate_post_tick_callback(step)
 
