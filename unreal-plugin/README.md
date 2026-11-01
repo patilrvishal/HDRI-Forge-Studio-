@@ -13,6 +13,19 @@ Built and tested against **Unreal Engine 5.8.4** (Python 3.11). It is a pure-Pyt
    (the plug-in lists them as dependencies). Enable **HDRI Backdrop** too for a visible background.
 3. An **HDRI Forge** menu appears in the main menu bar.
 
+## Running it all the time
+
+**Auto-start live** is on by default: every time the project opens, Live starts by itself a few seconds later, and because
+Forge starts streaming as soon as an app links, opening Unreal and Forge is all it takes. It is remembered per project in
+`<Project>/Saved/HDRIForgeBridge.json`. Turn it off or on from **HDRI Forge > Auto-start live** (or `b.set_auto_start(False)`).
+Nothing is added to your level until a map actually arrives from Forge.
+
+## Where to find it
+
+After you restart the editor: the **HDRI Forge** menu at the end of the menu bar (after Help), and the **Forge Live** and
+**Forge Import** buttons in the level editor toolbar (on a narrow window they sit under the three-dot overflow button at
+the right of the Play buttons). Edit > Plugins, search "HDRI Forge", shows the plug-in itself.
+
 ## Use
 
 | Menu item | What it does |

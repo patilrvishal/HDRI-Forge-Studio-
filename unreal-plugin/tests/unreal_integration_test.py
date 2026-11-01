@@ -241,6 +241,25 @@ def _step():
             check(j.get("source") == "unreal", "camera reply is tagged source=unreal")
             menus = unreal.ToolMenus.get()
             check(menus.find_menu("LevelEditor.MainMenu.HDRIForgeBridge") is not None, "the HDRI Forge menu exists in the editor")
+            state["step"] = 5
+    elif n == 5:
+        # Auto-start: remembered per project, and when on, Live starts by itself (found through the default ports)
+        b.set_auto_start(False)
+        saved = json.load(open(b._settings_path()))
+        check(saved.get("auto_start") is False, "auto-start off is remembered in Saved/HDRIForgeBridge.json")
+        b.set_auto_start(True)
+        saved = json.load(open(b._settings_path()))
+        check(saved.get("auto_start") is True, "auto-start on is remembered too")
+        check(not b._live["running"], "Live is not running before the auto-start fires")
+        b._auto_start_now()
+        check(b._live["running"], "auto-start starts Live without a click")
+        state["step"] = 6
+    elif n == 6:
+        a = actor_by_tag("HDRIForgeBridge:live")
+        if waiting(lambda: a is not None and actor_by_tag("HDRIForgeBridge:live") is not None):
+            a = actor_by_tag("HDRIForgeBridge:live")
+            check(isinstance(a.get_editor_property("Cubemap"), unreal.TextureCube), "...and the map arrives on its own")
+            b.live_stop()
             finish_all()
 
 
@@ -249,6 +268,7 @@ def start():
     import hdri_forge_bridge_unreal as bridge
     state["bridge"] = bridge
     state["mock"] = MockForge()
+    bridge._settings["auto_start"] = False            # the test starts Live itself, against the mock
     bridge.startup()
     state["handle"] = unreal.register_slate_post_tick_callback(step)
 

@@ -46,7 +46,7 @@ try:
 except ImportError:
     _core = None
 
-VERSION = "1.0.0"
+VERSION = "1.1.0"
 TAG = "HDRIForgeBridge"
 CONTENT_DIR = "/Game/HDRIForge"
 LIVE_KIND, IMPORT_KIND = "live", "import"
@@ -75,8 +75,50 @@ _sky = {"exposure_ev": 0.0, "yaw": 0.0, "background": True}
 _studio = {"url": None, "label": None}
 _cam = {"snapshot": [], "wanted": threading.Event(), "ready": threading.Event(), "server": None, "thread": None}
 _menu = {"built": False, "toolbar": None}
+_settings = {"auto_start": True}       # remembered per project in Saved/HDRIForgeBridge.json
+_auto = {"at": None, "done": False}    # when to start Live on its own after the editor opens
 _jobs = queue.Queue()                  # work that must run on the editor's main thread, queued from other threads
 _main = {"tick": None}
+
+
+# ─── Settings (remembered per project) ──────────────────────────────────────
+def _settings_path():
+    return os.path.join(unreal.Paths.project_saved_dir(), "HDRIForgeBridge.json")
+
+
+def _load_settings():
+    try:
+        with open(_settings_path(), "r", encoding="utf-8") as f:
+            _settings.update(json.load(f))
+    except Exception:
+        pass                                     # first run, or an unreadable file: keep the defaults
+
+
+def _save_settings():
+    try:
+        os.makedirs(os.path.dirname(_settings_path()), exist_ok=True)
+        with open(_settings_path(), "w", encoding="utf-8") as f:
+            json.dump(_settings, f)
+    except Exception as e:
+        _warn("could not save settings: %s" % e)
+
+
+def set_auto_start(on):
+    """Start Live by itself every time this project opens (on by default). Takes effect from the next editor start."""
+    _settings["auto_start"] = bool(on)
+    _save_settings()
+    _log("Auto-start live is %s" % ("ON: it starts by itself whenever this project opens" if on else "OFF: use the Forge Live button"))
+    _refresh_menu()
+
+
+def _auto_start_now():
+    """Start Live if the setting says so, and it is not already running."""
+    _auto["done"] = True
+    if _settings.get("auto_start") and not _live["running"]:
+        try:
+            live_start()
+        except Exception as e:
+            _warn("could not start Live automatically: %s" % e)
 
 
 # ─── Small Unreal helpers ───────────────────────────────────────────────────
@@ -338,6 +380,8 @@ def _tick(_delta=0.0):
     """The one editor tick the bridge owns. Everything that must happen on the main thread is serviced from here."""
     _service_camera_requests()
     _service_jobs()
+    if not _auto["done"] and _auto["at"] is not None and time.time() >= _auto["at"]:
+        _auto_start_now()                      # a few seconds after the editor opened, once the level exists
     _live_tick()
 
 
@@ -383,7 +427,7 @@ def live_start(ports=None):
     _require_core()
     if _live["running"]:
         return
-    _remove_bridge_actors(IMPORT_KIND)                           # an imported sky and the live one would add up
+    _remove_bridge_actors()                                      # a leftover from a saved level, or an imported sky: they would add up
     kwargs = {"client_name": client_name()}
     if ports:
         kwargs["ports"] = ports
@@ -732,6 +776,8 @@ def _build_menu(force=False):
     items = [
         ("Live", ("Stop live HDRI" if on else "Start live HDRI") , "live_toggle()"),
         ("Status", "Live: %s" % status, "print(b.live_status())"),
+        ("Auto", "Auto-start live: %s (click to turn %s)" % ("ON" if _settings.get("auto_start") else "OFF", "off" if _settings.get("auto_start") else "on"),
+         "set_auto_start(%s)" % ("False" if _settings.get("auto_start") else "True")),
         ("Import", "Import HDRI (keep this map)", "import_hdri()"),
         ("Restore", "Restore my sky", "restore_sky()"),
         ("Cameras", "Push cameras to Forge", "push_cameras_to_studio()"),
@@ -747,12 +793,16 @@ def _build_menu(force=False):
 
 def startup():
     """Called once when the editor starts (init_unreal.py)."""
+    _load_settings()
     try:
         _build_menu()
     except Exception as e:
         _warn("could not build the HDRI Forge menu: %s" % e)
     _start_listener()
-    _log("HDRI Forge Bridge %s ready (%s)" % (VERSION, client_name()))
+    if _settings.get("auto_start"):
+        _auto["at"] = time.time() + 5.0
+        _ensure_tick()
+    _log("HDRI Forge Bridge %s ready (%s, auto-start %s)" % (VERSION, client_name(), "on" if _settings.get("auto_start") else "off"))
 
 
 def shutdown():
