@@ -5,9 +5,11 @@ import { useLightsStore } from '../../store/lightsStore';
 import { useHDRIShapesStore } from '../../store/hdriShapesStore';
 import { useUIStore } from '../../store/uiStore';
 import { useHDRIAssetStore } from '../../store/hdriAssetStore';
+import { CompositeProperties } from '../Lights/CompositeProperties';
 import { LightProperties } from '../Lights/LightProperties';
 import { HDRIShapeProperties } from '../Lights/HDRIShapeProperties';
 import { CustomHDRIProperties } from '../Environment/CustomHDRIProperties';
+import { ObjectHdriLightSection } from './ObjectHdriLightSection';
 
 /* ═══════════════════════════════════════════════════════════════════
    Utility: find a Three.js object by UUID in the scene
@@ -427,6 +429,9 @@ const MeshProperties: React.FC<{
         {/* Transform */}
         <TransformSection obj={obj} onChange={() => setTick((n) => n + 1)} />
 
+        {/* HDRI include/exclude + object as light */}
+        <ObjectHdriLightSection obj={obj} />
+
         {/* Object Info */}
         <CollapsibleSection title="Object Info" defaultOpen={true} icon={
           <svg width="10" height="10" viewBox="0 0 16 16" fill="none" stroke="var(--text-dim)" strokeWidth="1.2">
@@ -546,6 +551,8 @@ const GenericProperties: React.FC<{
         {/* Transform */}
         <TransformSection obj={obj} onChange={() => setTick((n) => n + 1)} />
 
+        {nodeType === 'group' && !isColl && <ObjectHdriLightSection obj={obj} />}
+
         {/* Object Info */}
         <CollapsibleSection title="Object Info" defaultOpen={true} icon={
           <svg width="10" height="10" viewBox="0 0 16 16" fill="none" stroke="var(--text-dim)" strokeWidth="1.2">
@@ -575,6 +582,7 @@ interface DynamicPropertiesPanelProps {
 export const DynamicPropertiesPanel: React.FC<DynamicPropertiesPanelProps> = ({ sceneRef }) => {
   const selectedId = useSceneHierarchyStore((s) => s.selectedId);
   const selectedLightId = useLightsStore((s) => s.selectedLightId);
+  const selectedCompositeId = useLightsStore((s) => s.selectedCompositeId);
   const selectedShapeId = useHDRIShapesStore((s) => s.selectedShapeId);
   const selectedHDRIAssetId = useHDRIAssetStore((s) => s.selectedAssetId);
   const selectLight = useLightsStore((s) => s.selectLight);
@@ -651,6 +659,11 @@ export const DynamicPropertiesPanel: React.FC<DynamicPropertiesPanelProps> = ({ 
         <GenericProperties obj={selectedObj} nodeType={nodeType} />
       </div>
     );
+  }
+
+  // A Composite selected in the light list
+  if (selectedCompositeId) {
+    return <CompositeProperties />;
   }
 
   // Priority 2: No hierarchy selection, but a light is selected via Light List panel

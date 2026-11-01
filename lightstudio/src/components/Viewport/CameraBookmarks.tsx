@@ -1,6 +1,7 @@
 import React, { useState, useCallback, useRef, useEffect } from 'react';
 import { useSceneStore } from '../../store/sceneStore';
 import { SceneManager } from '../../three/engine';
+import { ImportCameras } from './ImportCameras';
 
 interface CameraBookmarksProps {
   sceneManagerRef: React.MutableRefObject<SceneManager | null>;
@@ -264,6 +265,7 @@ export const CameraBookmarks: React.FC<CameraBookmarksProps> = ({ sceneManagerRe
           </button>
         </div>
       )}
+      <ImportCameras />
     </div>
   );
 };

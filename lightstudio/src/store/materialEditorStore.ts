@@ -13,6 +13,11 @@ interface MaterialEditorStore {
   // ── Actions ───────────────────────────────────────────────────────
   /** Replace all materials (called after model load) */
   setMaterials: (materials: PBRMaterialState[]) => void;
+  /** Append newly-found materials without disturbing the current selection -
+   *  unlike setMaterials(), which always jumps selection back to the first
+   *  material. Used when a modelling-tool primitive/duplicate/split creates
+   *  a mesh with a material the store doesn't know about yet. */
+  addMaterials: (materials: PBRMaterialState[]) => void;
   /** Clear all materials */
   clearMaterials: () => void;
   /** Select a material by ID */
@@ -46,6 +51,11 @@ export const useMaterialEditorStore = create<MaterialEditorStore>((set, get) => 
       materials,
       selectedMaterialId: materials.length > 0 ? materials[0].id : null,
     });
+  },
+
+  addMaterials: (materials) => {
+    if (materials.length === 0) return;
+    set((state) => ({ materials: [...state.materials, ...materials] }));
   },
 
   clearMaterials: () => {
@@ -247,3 +257,7 @@ export const useMaterialEditorStore = create<MaterialEditorStore>((set, get) => 
     });
   },
 }));
+
+if (import.meta.env.DEV && typeof window !== 'undefined') {
+  (window as unknown as { __materialEditorStore?: unknown }).__materialEditorStore = useMaterialEditorStore;
+}

@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { Preset, PresetLight } from '../types/Preset';
+import type { Preset, PresetLight, PresetGroup } from '../types/Preset';
 import type { Light } from '../types/Light';
 import { createDefaultLight } from '../types/Light';
 import { presetDB } from '../services/PresetDB';
@@ -11,6 +11,9 @@ import {
   LIGHT_PROFILE_PRESETS, LIGHT_PROFILE_META,
 } from '../data/presets';
 import { generatePresetThumbnail } from '../types/Preset';
+import {
+  EXTRA_STUDIO, EXTRA_OUTDOOR, EXTRA_SPOTLIGHT, EXTRA_SIDELIGHT, EXTRA_LIGHT_PROFILES,
+} from '../data/presetsExtra';
 
 // ── Build built-in presets from data ────────────────────────────────
 
@@ -45,6 +48,15 @@ function buildBuiltins(): Preset[] {
   // Light Profiles (14) - single functional modifier presets
   LIGHT_PROFILE_META.forEach((m, i) => push(m.id, m.name, 'lightprofiles', m.description, m.tags, LIGHT_PROFILE_PRESETS[i]));
 
+  // The larger original library (data/presetsExtra.ts)
+  const extras: Array<[Preset['category'], typeof EXTRA_STUDIO]> = [
+    ['studio', EXTRA_STUDIO], ['outdoor', EXTRA_OUTDOOR], ['spotlight', EXTRA_SPOTLIGHT],
+    ['sidelights', EXTRA_SIDELIGHT], ['lightprofiles', EXTRA_LIGHT_PROFILES],
+  ];
+  for (const [category, list] of extras) {
+    for (const e of list) push(e.id, e.name, category, e.description, e.tags, e.lights);
+  }
+
   return out;
 }
 
@@ -59,12 +71,19 @@ type PresetCategory = 'sidelights' | 'studio' | 'outdoor' | 'spotlight' | 'light
 interface PresetsState {
   presets: Preset[];
   activeCategory: PresetCategory;
+  /** 'all' keeps the browser exactly as it was before groups existed. */
+  activeGroup: PresetGroup | 'all';
+  /** Tags the user picked in the filter; a preset must carry every one of them. */
+  activeTags: string[];
   searchQuery: string;
   previewingId: string | null;
   dbLoaded: boolean;
 
   // Navigation
   setActiveCategory: (cat: PresetCategory) => void;
+  setActiveGroup: (group: PresetGroup | 'all') => void;
+  toggleTag: (tag: string) => void;
+  clearTags: () => void;
   setSearchQuery: (q: string) => void;
   setPreviewPreset: (id: string | null) => void;
 
@@ -89,11 +108,21 @@ interface PresetsState {
 export const usePresetsStore = create<PresetsState>((set, get) => ({
   presets: [...BUILTIN_PRESETS],
   activeCategory: 'studio',
+  activeGroup: 'all',
+  activeTags: [],
   searchQuery: '',
   previewingId: null,
   dbLoaded: false,
 
   setActiveCategory: (cat) => set({ activeCategory: cat, previewingId: null }),
+  setActiveGroup: (group) => set({ activeGroup: group, previewingId: null }),
+  toggleTag: (tag) =>
+    set((state) => ({
+      activeTags: state.activeTags.includes(tag)
+        ? state.activeTags.filter((t) => t !== tag)
+        : [...state.activeTags, tag],
+    })),
+  clearTags: () => set({ activeTags: [] }),
   setSearchQuery: (q) => set({ searchQuery: q }),
   setPreviewPreset: (id) => set({ previewingId: id }),
 
@@ -203,10 +232,11 @@ export const usePresetsStore = create<PresetsState>((set, get) => ({
     const data = {
       version: '1.0',
       exportedAt: new Date().toISOString(),
-      presets: exportable.map(({ id, name, category, description, thumbnail, tags, lights }) => ({
+      presets: exportable.map(({ id, name, category, group, description, thumbnail, tags, lights }) => ({
         id,
         name,
         category,
+        ...(group ? { group } : {}),
         description,
         thumbnail,
         tags,
@@ -239,6 +269,7 @@ export const usePresetsStore = create<PresetsState>((set, get) => ({
         id: (p.id as string) || `imp_${generateId()}`,
         name: p.name as string,
         category: (p.category as Preset['category']) || 'custom',
+        ...(p.group ? { group: p.group as PresetGroup } : {}),
         description: (p.description as string) || '',
         thumbnail: (p.thumbnail as string) || '',
         tags: (p.tags as string[]) || [],

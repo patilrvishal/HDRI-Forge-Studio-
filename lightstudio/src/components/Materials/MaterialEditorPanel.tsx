@@ -701,7 +701,7 @@ const MaterialEditorPanel: React.FC<MaterialEditorPanelProps> = ({ materialManag
   // Render a color property row (Blender-style: label | color swatch | hex display)
   const renderColorRow = (row: PropRow) => {
     if (!selected || !row.colorKey) return null;
-    const hexVal = (selected[row.colorKey] as string) ?? '#000000';
+    const hexVal = ((selected as unknown as Record<string, unknown>)[row.colorKey] as string) ?? '#000000';
 
     return (
       <div key={row.colorKey} className="mat-param-row">

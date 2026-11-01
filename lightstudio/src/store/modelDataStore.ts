@@ -23,6 +23,47 @@ export function getRawModelFileName(): string {
 export function clearRawModelData(): void {
   rawModelArrayBuffer = null;
   rawModelFileName = 'model.glb';
+  // A new or replaced model starts a fresh scene, so the extra files imported into the old one go too
+  clearRawImportedModels();
+}
+
+/**
+ * Extra model files imported into the scene (File > Import Models). Kept so a saved scene file can carry them
+ * and bring them back exactly as they were imported.
+ */
+export interface RawImportedModel {
+  name: string;
+  data: ArrayBuffer;
+}
+
+const importedModels: RawImportedModel[] = [];
+
+export function addRawImportedModel(name: string, data: ArrayBuffer): void {
+  importedModels.push({ name, data });
+}
+
+export function getRawImportedModels(): RawImportedModel[] {
+  return importedModels;
+}
+
+export function clearRawImportedModels(): void {
+  importedModels.length = 0;
+}
+
+/** Imported models as base64 for the scene file, or null when there are none. */
+export function getImportedModelsBase64(): { name: string; dataBase64: string }[] | null {
+  if (importedModels.length === 0) return null;
+  return importedModels.map((m) => ({ name: m.name, dataBase64: arrayBufferToBase64(m.data) }));
+}
+
+function arrayBufferToBase64(buffer: ArrayBuffer): string {
+  const bytes = new Uint8Array(buffer);
+  let binary = '';
+  const chunkSize = 8192;
+  for (let i = 0; i < bytes.length; i += chunkSize) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + chunkSize));
+  }
+  return btoa(binary);
 }
 
 /**

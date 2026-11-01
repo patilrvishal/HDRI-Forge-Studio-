@@ -7,9 +7,16 @@ import { useHDRIShapesStore } from '../../store/hdriShapesStore';
 import { useCameraStore } from '../../store/cameraStore';
 import { useHistoryStore } from '../../store/historyStore';
 import { SceneExporter } from '../../three/SceneExporter';
+import { getModelingController } from '../../modeling/bridge';
+import { useObjectHdriStore } from '../../store/objectHdriStore';
+import { useAppearanceStore } from '../../appearance/appearanceStore';
 import { exportSceneAsHDR, exportSceneAsEXR } from '../../three/HDRIExporter';
 import type { SceneManager } from '../../three/engine';
 import { promptForCustomHDRI } from '../../utils/loadCustomHDRI';
+import { addProceduralSky } from '../../hdriedit/addSky';
+import { useSceneFileStore, dirName } from '../../store/sceneFileStore';
+import type { RecentScene } from '../../store/sceneFileStore';
+import { canUseNativeFiles, openSceneDialog, openSceneFromPath, saveScene, saveSceneAs } from '../../utils/sceneFiles';
 
 interface MenuItem {
   label: string;
@@ -34,6 +41,36 @@ function checkLabel(label: string, checked: boolean): string {
   return checked ? `${label}` : label;
 }
 
+/** Builds the Open Recent submenu from the remembered files. */
+function recentScenesMenu(
+  recent: RecentScene[],
+  sceneManagerRef: React.MutableRefObject<SceneManager | null> | undefined,
+): MenuDefinition {
+  if (!canUseNativeFiles()) {
+    return { none: { label: 'Available in the desktop app', disabled: true } };
+  }
+  if (recent.length === 0) {
+    return { none: { label: 'No recent files', disabled: true } };
+  }
+  const menu: MenuDefinition = {};
+  recent.forEach((r, i) => {
+    // The folder name tells apart two files with the same name
+    const folder = dirName(r.path).split(/[\\/]/).pop();
+    menu[`recent${i}`] = {
+      label: folder ? `${r.name}   -   ${folder}` : r.name,
+      action: () => {
+        void openSceneFromPath(r.path, sceneManagerRef);
+      },
+    };
+  });
+  menu.recentSep = { label: '', separator: true };
+  menu.clearRecent = {
+    label: 'Clear Recent Files',
+    action: () => useSceneFileStore.getState().clearRecent(),
+  };
+  return menu;
+}
+
 const MENU_DEFINITIONS = (
   onExportImage: (() => void) | undefined,
   onFinalRender: (() => void) | undefined,
@@ -43,15 +80,25 @@ const MENU_DEFINITIONS = (
   canUndo: boolean,
   canRedo: boolean,
   panelVisibility: PanelVisibilityState,
+  recentScenes: RecentScene[],
 ): Record<string, MenuDefinition> => ({
   Project: {
     newScene: {
       label: 'New Scene',
       shortcut: 'Ctrl+N',
-      action: () => {
-        if (!confirm('Create a new scene? Unsaved changes will be lost.')) return;
+      action: async () => {
+        // Not window.confirm() - unsupported in the packaged desktop app's
+        // WebView2 runtime, where it silently no-ops instead of showing a
+        // dialog (confirmed live; same class of bug already found once on
+        // the Looks panel's Save button).
+        const ok = await useUIStore.getState().requestConfirm('Create a new scene? Unsaved changes will be lost.', 'New Scene');
+        if (!ok) return;
         useSceneStore.getState().resetScene();
+        useSceneFileStore.getState().setCurrent(null);
         useLightsStore.getState().clearAllLights();
+        useAppearanceStore.getState().clearImages();
+        getModelingController()?.deserialize([]);
+        useObjectHdriStore.getState().clear();
         useSceneStore.getState().setCamera([5, 3, 5], [0, 0, 0]);
         if (sceneManagerRef?.current) {
           sceneManagerRef.current.setCameraState([5, 3, 5], [0, 0, 0], 45);
@@ -61,62 +108,33 @@ const MENU_DEFINITIONS = (
     open: {
       label: 'Open Scene...',
       shortcut: 'Ctrl+O',
-      action: async () => {
-        const result = await SceneExporter.openSceneFile();
-        if (!result) return;
-        const ui = useUIStore.getState();
-        try {
-          const sceneFile = SceneExporter.fromJSON(result.text);
-          const error = SceneExporter.importScene(sceneFile);
-          if (error) {
-            ui.showToast(error, 'error');
-            return;
-          }
-          // Clear undo history after full scene load
-          useHistoryStore.getState().clear();
-          // Restore camera position in 3D view
-          if (sceneManagerRef?.current) {
-            const cam = sceneFile.scene.camera;
-            sceneManagerRef.current.setCameraState(cam.position, cam.target, cam.fov);
-          }
-          ui.showToast(`Opened "${result.filename}"`, 'success');
-        } catch (err) {
-          const msg = err instanceof Error ? err.message : 'Failed to open scene file';
-          ui.showToast(msg, 'error');
-        }
+      action: () => {
+        void openSceneDialog(sceneManagerRef);
+      },
+    },
+    openRecent: {
+      label: 'Open Recent',
+      submenu: recentScenesMenu(recentScenes, sceneManagerRef),
+    },
+    importModels: {
+      label: 'Import Models (GLB, FBX, OBJ)...',
+      action: () => {
+        // The viewport owns the file picker; it adds the chosen files to the scene
+        window.dispatchEvent(new CustomEvent('lightforge:import-models'));
       },
     },
     save: {
       label: 'Save Scene',
       shortcut: 'Ctrl+S',
       action: () => {
-        const ui = useUIStore.getState();
-        try {
-          const data = SceneExporter.exportScene();
-          SceneExporter.downloadSceneFile(data);
-          ui.showToast('Scene saved', 'success');
-        } catch (err) {
-          const msg = err instanceof Error ? err.message : 'Unknown error';
-          console.error('[LightForge] Save failed:', err);
-          ui.showToast(`Save failed: ${msg}`, 'error');
-        }
+        void saveScene();
       },
     },
     saveAs: {
       label: 'Save Scene As...',
+      shortcut: 'Ctrl+Shift+S',
       action: () => {
-        const ui = useUIStore.getState();
-        const name = prompt('Enter filename:', `lightforge_scene_${Date.now()}.lightscene`);
-        if (!name) return;
-        try {
-          const data = SceneExporter.exportScene();
-          SceneExporter.downloadSceneFile(data, name);
-          ui.showToast(`Saved as "${name}"`, 'success');
-        } catch (err) {
-          const msg = err instanceof Error ? err.message : 'Unknown error';
-          console.error('[LightForge] Save failed:', err);
-          ui.showToast(`Save failed: ${msg}`, 'error');
-        }
+        void saveSceneAs();
       },
     },
     sep1: { label: '', separator: true },
@@ -190,6 +208,20 @@ const MENU_DEFINITIONS = (
     },
   },
   Create: {
+    mesh: {
+      label: 'Mesh',
+      submenu: {
+        plane: { label: 'Plane', action: () => getModelingController()?.addPrimitive('plane') },
+        cube: { label: 'Cube', action: () => getModelingController()?.addPrimitive('cube') },
+        circle: { label: 'Circle', action: () => getModelingController()?.addPrimitive('circle') },
+        uvsphere: { label: 'UV Sphere', action: () => getModelingController()?.addPrimitive('uvsphere') },
+        icosphere: { label: 'Ico Sphere', action: () => getModelingController()?.addPrimitive('icosphere') },
+        cylinder: { label: 'Cylinder', action: () => getModelingController()?.addPrimitive('cylinder') },
+        cone: { label: 'Cone', action: () => getModelingController()?.addPrimitive('cone') },
+        torus: { label: 'Torus', action: () => getModelingController()?.addPrimitive('torus') },
+        grid: { label: 'Grid', action: () => getModelingController()?.addPrimitive('grid') },
+      },
+    },
     lights: {
       label: 'Lights',
       submenu: {
@@ -204,6 +236,19 @@ const MENU_DEFINITIONS = (
         fillLight: { label: 'Fill Light', action: () => useLightsStore.getState().addLight('fill') },
       },
     },
+    appearanceLights: {
+      label: 'Lights (Appearance)',
+      submenu: {
+        roundLight: { label: 'Round Light', action: () => useLightsStore.getState().addLight('roundLight') },
+        rectLight: { label: 'Rect Light', action: () => useLightsStore.getState().addLight('rectLight') },
+        scrimLight: { label: 'Scrim Light', action: () => useLightsStore.getState().addLight('scrimLight') },
+        boxGradLight: { label: 'Box Grad Light', action: () => useLightsStore.getState().addLight('boxGradLight') },
+        gradientLight: { label: 'Gradient Light', action: () => useLightsStore.getState().addLight('gradientLight') },
+        pictureLight: { label: 'Picture Light', action: () => useLightsStore.getState().addLight('pictureLight') },
+        darkLight: { label: 'Dark Light', action: () => useLightsStore.getState().addLight('darkLight') },
+        sunShadeLight: { label: 'Sun Shade Light', action: () => useLightsStore.getState().addLight('sunShadeLight') },
+      },
+    },
     hdriShapes: {
       label: 'HDRI Shapes',
       submenu: {
@@ -215,6 +260,10 @@ const MENU_DEFINITIONS = (
     customHDRI: {
       label: 'Custom HDRI...',
       action: () => promptForCustomHDRI(),
+    },
+    proceduralSky: {
+      label: 'Procedural Sky',
+      action: () => addProceduralSky(),
     },
     camera: {
       label: 'Camera',
@@ -324,6 +373,7 @@ const THEME_OPTIONS: Array<{ value: string; label: string; dot: string }> = [
 ];
 
 const THEME_STORAGE_KEY = 'lightforge-accent-theme';
+const MODE_STORAGE_KEY = 'lightforge-color-mode';
 
 // ── Nav icon set - minimal 14x14 stroke glyphs, matching style ──────────
 const IconHome = () => (
@@ -380,21 +430,16 @@ const NAV_ICONS: Record<string, () => React.ReactElement> = {
   Help: IconHelp,
 };
 
-/** Layered hexagon "forge" logo mark, matching the app's accent. */
+/** HDRI Forge Studio brand emblem. */
 function LogoMark() {
   return (
-    <svg width="30" height="30" viewBox="0 0 32 32" fill="none">
-      <path d="M16 2 28 9v14L16 30 4 23V9z" fill="url(#logoGrad)" opacity="0.9" />
-      <path d="M16 2 28 9v14L16 30 4 23V9z" stroke="var(--theme-accent-bright)" strokeWidth="1" opacity="0.6" />
-      <path d="M16 9l7 4v8l-7 4-7-4v-8z" stroke="#fff" strokeOpacity="0.85" strokeWidth="1.3" fill="none" />
-      <path d="M9 13l7 4 7-4M16 17v8" stroke="#fff" strokeOpacity="0.55" strokeWidth="1" />
-      <defs>
-        <linearGradient id="logoGrad" x1="4" y1="2" x2="28" y2="30" gradientUnits="userSpaceOnUse">
-          <stop stopColor="var(--theme-accent-bright)" />
-          <stop offset="1" stopColor="var(--theme-accent)" />
-        </linearGradient>
-      </defs>
-    </svg>
+    <img
+      src="/logo-mark.png"
+      alt="HDRI Forge Studio"
+      width={30}
+      height={30}
+      style={{ borderRadius: 6, display: 'block', objectFit: 'contain' }}
+    />
   );
 }
 
@@ -483,6 +528,54 @@ function ThemeSwitcher() {
   );
 }
 
+/** Light/dark mode toggle, independent of the accent-color ThemeSwitcher
+ *  above - applies a separate data-mode attribute on <body> so the two
+ *  choices (accent hue, surface lightness) combine freely instead of one
+ *  overwriting the other's attribute. Same localStorage-persisted pattern
+ *  as ThemeSwitcher. Defaults to dark (no attribute) - every existing
+ *  user's current look is unchanged unless they opt into light. */
+function ColorModeToggle() {
+  const [mode, setMode] = useState<'dark' | 'light'>(() => {
+    try {
+      return localStorage.getItem(MODE_STORAGE_KEY) === 'light' ? 'light' : 'dark';
+    } catch {
+      return 'dark';
+    }
+  });
+
+  useEffect(() => {
+    if (mode === 'light') {
+      document.body.dataset.mode = 'light';
+    } else {
+      delete document.body.dataset.mode;
+    }
+    try {
+      localStorage.setItem(MODE_STORAGE_KEY, mode);
+    } catch {
+      // ignore storage errors (private browsing, etc.)
+    }
+  }, [mode]);
+
+  return (
+    <button
+      className="theme-switcher-btn"
+      onClick={() => setMode((m) => (m === 'light' ? 'dark' : 'light'))}
+      title={mode === 'light' ? 'Switch to dark mode' : 'Switch to light mode'}
+    >
+      {mode === 'light' ? (
+        <svg width="13" height="13" viewBox="0 0 16 16" fill="none">
+          <circle cx="8" cy="8" r="3.5" stroke="currentColor" strokeWidth="1.4" />
+          <path d="M8 1v2M8 13v2M1 8h2M13 8h2M3.05 3.05l1.4 1.4M11.55 11.55l1.4 1.4M3.05 12.95l1.4-1.4M11.55 4.45l1.4-1.4" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+        </svg>
+      ) : (
+        <svg width="13" height="13" viewBox="0 0 16 16" fill="none">
+          <path d="M13.5 9.5A5.5 5.5 0 0 1 6.5 2.5a5.5 5.5 0 1 0 7 7z" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round" />
+        </svg>
+      )}
+    </button>
+  );
+}
+
 export const TopMenubar: React.FC<TopMenubarProps> = ({ sceneManagerRef, onExportImage, onFinalRender }) => {
   const openMenu = useUIStore((s) => s.openMenu);
   const setOpenMenu = useUIStore((s) => s.setOpenMenu);
@@ -494,6 +587,8 @@ export const TopMenubar: React.FC<TopMenubarProps> = ({ sceneManagerRef, onExpor
   const undoStack = useHistoryStore((s) => s.undoStack);
   const redoStack = useHistoryStore((s) => s.redoStack);
 
+  const recentScenes = useSceneFileStore((s) => s.recent);
+
   const canUndo = undoStack.length > 0;
   const canRedo = redoStack.length > 0;
   const undoLabel = canUndo ? undoStack[undoStack.length - 1].label : null;
@@ -501,9 +596,9 @@ export const TopMenubar: React.FC<TopMenubarProps> = ({ sceneManagerRef, onExpor
 
   // Build menu definitions with current callbacks and history state
   const menuDefinitions = useMemo(
-    () => MENU_DEFINITIONS(onExportImage, onFinalRender, sceneManagerRef, undoLabel, redoLabel, canUndo, canRedo, panelVisibility),
+    () => MENU_DEFINITIONS(onExportImage, onFinalRender, sceneManagerRef, undoLabel, redoLabel, canUndo, canRedo, panelVisibility, recentScenes),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [onExportImage, onFinalRender, sceneManagerRef, undoLabel, redoLabel, canUndo, canRedo, panelVisibility],
+    [onExportImage, onFinalRender, sceneManagerRef, undoLabel, redoLabel, canUndo, canRedo, panelVisibility, recentScenes],
   );
 
   // Close menu on outside click
@@ -710,6 +805,7 @@ export const TopMenubar: React.FC<TopMenubarProps> = ({ sceneManagerRef, onExpor
 
       <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 4 }}>
         <div style={{ width: 1, alignSelf: 'stretch', margin: '10px 4px', background: 'var(--border-light)', flexShrink: 0 }} />
+        <ColorModeToggle />
         <ThemeSwitcher />
       </div>
     </div>

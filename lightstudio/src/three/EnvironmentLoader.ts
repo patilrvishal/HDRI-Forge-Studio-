@@ -1,9 +1,12 @@
 import * as THREE from 'three';
 import { RGBELoader } from 'three/addons/loaders/RGBELoader.js';
+import { EXRLoader } from 'three/addons/loaders/EXRLoader.js';
+import { isEXRUrl } from '../utils/hdriFormat';
 import type { HDRIPreset, EnvPanel } from '../types/Environment';
 
 export class EnvironmentLoader {
   private rgbeLoader: RGBELoader;
+  private exrLoader: EXRLoader;
   private currentEnvTexture: THREE.Texture | null = null;
   /** The original equirectangular texture (used as scene.background for 360° backplate) */
   private currentEquirectTexture: THREE.Texture | null = null;
@@ -11,6 +14,7 @@ export class EnvironmentLoader {
 
   constructor() {
     this.rgbeLoader = new RGBELoader();
+    this.exrLoader = new EXRLoader();
   }
 
   /**
@@ -89,14 +93,16 @@ export class EnvironmentLoader {
    * Returns the PMREM-processed texture for scene.environment.
    * Also stores the original equirectangular texture for use as scene.background.
    */
-  loadHDRI(
+  async loadHDRI(
     source: string | File,
     pmremGenerator: THREE.PMREMGenerator,
   ): Promise<THREE.Texture> {
-    return new Promise<THREE.Texture>((resolve, reject) => {
-      const url = typeof source === 'string' ? source : URL.createObjectURL(source);
+    const url = typeof source === 'string' ? source : URL.createObjectURL(source);
+    const isEXR = await isEXRUrl(url);
+    const loader = isEXR ? this.exrLoader : this.rgbeLoader;
 
-      this.rgbeLoader.load(
+    return new Promise<THREE.Texture>((resolve, reject) => {
+      loader.load(
         url,
         (texture) => {
           texture.mapping = THREE.EquirectangularReflectionMapping;
