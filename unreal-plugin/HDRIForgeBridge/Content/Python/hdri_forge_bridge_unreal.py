@@ -74,7 +74,7 @@ _live = {
 _sky = {"exposure_ev": 0.0, "yaw": 0.0, "background": True}
 _studio = {"url": None, "label": None}
 _cam = {"snapshot": [], "wanted": threading.Event(), "ready": threading.Event(), "server": None, "thread": None}
-_menu = {"built": False}
+_menu = {"built": False, "toolbar": None}
 _jobs = queue.Queue()                  # work that must run on the editor's main thread, queued from other threads
 _main = {"tick": None}
 
@@ -679,6 +679,43 @@ def _refresh_menu():
         pass
 
 
+# Where the one-click buttons go: the level editor's main toolbar, with the first of these that exists.
+TOOLBAR_CANDIDATES = ("LevelEditor.LevelEditorToolBar.User", "LevelEditor.LevelEditorToolBar.PlayToolBar",
+                      "LevelEditor.LevelEditorToolBar")
+
+
+def _toolbar_button(menu, name, label, tip, command, icon=None):
+    entry = unreal.ToolMenuEntry(name=name, type=unreal.MultiBlockType.TOOL_BAR_BUTTON)
+    entry.set_label(label)
+    entry.set_tool_tip(tip)
+    entry.set_string_command(unreal.ToolMenuStringCommandType.PYTHON, "", _py(command))
+    if icon:
+        try:
+            entry.set_icon(icon[0], icon[1])
+        except Exception:
+            pass
+    menu.add_menu_entry("HDRIForge", entry)
+
+
+def _build_toolbar():
+    """Two buttons in the level editor toolbar, like Erik Adjuster's: Live preview (toggle) and Import."""
+    menus = unreal.ToolMenus.get()
+    for name in TOOLBAR_CANDIDATES:
+        bar = menus.find_menu(name)
+        if bar is None:
+            continue
+        on = _live["running"]
+        _toolbar_button(bar, "HDRIForgeLive", "Forge Live: ON" if on else "Forge Live",
+                        "Stream HDRI Forge Studio's HDRI into this level as you edit. Click again to stop and restore your sky.",
+                        "b.live_toggle()", ("EditorStyle", "Icons.Sun"))
+        _toolbar_button(bar, "HDRIForgeImport", "Forge Import",
+                        "Import Forge's current HDRI into this level: saved as a TextureCube on an HDRI Backdrop, with its .ash.",
+                        "b.import_hdri()", ("EditorStyle", "Icons.Import"))
+        _menu["toolbar"] = name
+        return name
+    return None
+
+
 def _build_menu(force=False):
     if _menu["built"] and not force:
         return
@@ -686,6 +723,7 @@ def _build_menu(force=False):
     main = menus.find_menu("LevelEditor.MainMenu")
     if main is None:
         return
+    _build_toolbar()
     sub = menus.find_menu("LevelEditor.MainMenu.HDRIForgeBridge")
     if sub is None:
         sub = main.add_sub_menu("HDRIForgeBridge", "", "HDRIForgeBridge", "HDRI Forge")

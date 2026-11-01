@@ -76,7 +76,8 @@ interface LiveState {
   targetH: number;
   targetLabel: string;
   setTarget: (w: number, h: number, label: string) => void;
-  setEnabled: (on: boolean) => void;
+  /** `auto` marks a switch-on made by Auto-link rather than by the user; a manual switch-off then sticks. */
+  setEnabled: (on: boolean, auto?: boolean) => void;
   _set: (p: Partial<LiveState>) => void;
 }
 
@@ -89,11 +90,17 @@ export const useErikLiveStore = create<LiveState>((set, get) => ({
     set({ targetW: w, targetH: h, targetLabel: label });
     if (cur.enabled) schedule();
   },
-  setEnabled: (on) => { set({ enabled: on }); if (on) start(); else stop(); },
+  setEnabled: (on, auto = false) => {
+    if (!on && !auto) suppressAutoLink = true;       // the user turned it off: do not switch it back on for the app that is still linked
+    set({ enabled: on });
+    if (on) start(); else stop();
+  },
   _set: (p) => set(p),
 }));
 
 let gen = 0;
+let suppressAutoLink = false;
+let autoLinkTimer: number | null = null;
 let timer: number | null = null;
 let appsTimer: number | null = null;
 
@@ -114,6 +121,25 @@ async function refreshApps() {
     }
   } catch { /* bridge not reachable: the live link itself reports that */ }
 }
+/**
+ * Auto-link: the moment Blender, Maya or Unreal links to Forge, start streaming to it, so one click in that app is
+ * all it takes (the way Erik's own link works). If the user switches the link off by hand it stays off until every
+ * linked app has gone away and a new one appears.
+ */
+export function startAutoLink(): void {
+  if (autoLinkTimer !== null) return;
+  autoLinkTimer = window.setInterval(async () => {
+    const cur = useErikLiveStore.getState();
+    try {
+      const base = await getBase();
+      const st = await (await fetch(`${base}/status`, { cache: 'no-store' })).json() as { viewers?: Array<{ name: string }> };
+      const linked = (st.viewers ?? []).length > 0;
+      if (!linked) { suppressAutoLink = false; return; }
+      if (!cur.enabled && !suppressAutoLink) cur.setEnabled(true, true);
+    } catch { /* bridge not reachable yet */ }
+  }, 2000);
+}
+
 let unsubs: Array<() => void> = [];
 let upSource: EventSource | null = null;
 
