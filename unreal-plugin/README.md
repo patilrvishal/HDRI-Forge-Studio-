@@ -40,11 +40,16 @@ temporarily while the bridge's sky is on.
 Unreal is left-handed, Z up, centimetres. The plug-in converts cameras to Forge's right-handed Y-up metres
 (`x = Y/100, y = Z/100, z = -X/100`) before sending, so Forge needs no special handling. Forge's map is turned half a
 turn about Z (derived from the engine's own long-lat code: Unreal's map centre faces -Y, Forge's faces what becomes +Y). If the
-sun ends up in the wrong place for you, add a yaw with `set_sky(yaw=...)`.
+sun ends up in the wrong place for you, add a yaw with `set_sky(yaw=...)`. The orientation is confirmed by a rendered test:
+markers placed at known Forge directions appear at the predicted Unreal directions.
 
 ## Tests
 
 * `python -m unittest discover -s unreal-plugin/tests -v` - camera maths (no Unreal needed).
+* `... run_unreal_test.py "E:/UE4/UE_5.8" --e2e` - against the REAL, running HDRI Forge Studio: Forge must start streaming by
+  itself when Unreal links, and the map must arrive and show on the backdrop.
+* `... run_unreal_test.py "E:/UE4/UE_5.8" --render` - a real rendering editor: scene captures prove where the map lands
+  and that a new map from Forge appears in the rendered level straight away.
 * `python unreal-plugin/tests/run_unreal_test.py "E:/UE4/UE_5.8"` - drives the real plug-in inside a headless Unreal Editor
   against a mock Forge: texture import, backdrop, hiding/restoring your sky, camera maths, the camera listener, the menu.
 

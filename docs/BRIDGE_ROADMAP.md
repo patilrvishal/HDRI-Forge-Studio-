@@ -215,6 +215,7 @@ Restore sky, cameras both ways (push to Forge, and Forge's Import cameras pulls 
 |---|---|---|
 | Live link, import, restore, cameras, menu | Done | `unreal-plugin/tests/run_unreal_test.py` drives the real plug-in in a headless UE 5.8.4: 25 checks pass, also as an installed plug-in |
 | Camera maths | Done | `test_camera_math.py`: Euler angles reproduce the look direction under three.js's rotation order |
-| Map orientation | Derived, not seen | Half-turn about Z, worked out from the engine's own long-lat code; the headless run cannot render a frame to confirm by eye |
+| Map orientation | Done | Half-turn about Z, from the engine's own long-lat code, then confirmed in a rendering UE 5.8.4: coloured markers at known Forge directions land at the predicted Unreal directions (`--render`) |
+| One click | Done | Forge auto-starts streaming when Blender, Maya or Unreal links; `Forge Live` and `Forge Import` buttons sit in Unreal's toolbar; verified against the real Forge app (`--e2e`) |
 | Forge side | Done | `unreal` accepted as a camera/bridge source (passthrough axes, port 8977) |
 

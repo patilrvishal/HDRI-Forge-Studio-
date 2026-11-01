@@ -84,7 +84,8 @@ def up30(theta_deg):
     return (math.cos(el) * math.cos(th), math.sin(el), math.cos(el) * math.sin(th))
 
 
-WHITE, RED, GREEN = (200.0, 200.0, 200.0), (200.0, 0.0, 0.0), (0.0, 200.0, 0.0)
+# bright enough to read clearly, dim enough that the tone mapper does not wash the colour out to white
+WHITE, RED, GREEN = (3.0, 3.0, 3.0), (3.0, 0.0, 0.0), (0.0, 3.0, 0.0)
 MAP1 = [(up30(0), WHITE), (up30(-90), RED), (up30(90), GREEN)]       # white +X, red -Z, green +Z
 MAP2 = [(up30(180), WHITE), (up30(90), RED), (up30(-90), GREEN)]     # white moved to -X, red and green swapped
 EXPECT1 = {"+X": "red", "+Y": "white", "-X": "green", "-Y": "none"}
@@ -193,11 +194,11 @@ def classify(path):
     m = max(r, g, b)
     if m < 0.30:
         return "none", (r, g, b)
-    if min(r, g, b) > 0.6 * m:
+    if min(r, g, b) > 0.75 * m:
         return "white", (r, g, b)
-    if r > 1.6 * max(g, b):
+    if r > 1.3 * max(g, b):
         return "red", (r, g, b)
-    if g > 1.6 * max(r, b):
+    if g > 1.3 * max(r, b):
         return "green", (r, g, b)
     return "other", (r, g, b)
 
