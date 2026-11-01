@@ -26,16 +26,25 @@ After you restart the editor: the **HDRI Forge** menu at the end of the menu bar
 **Forge Import** buttons in the level editor toolbar (on a narrow window they sit under the three-dot overflow button at
 the right of the Play buttons). Edit > Plugins, search "HDRI Forge", shows the plug-in itself.
 
-## Use
+## Use: the HDRI Forge control section
 
-| Menu item | What it does |
+Everything lives in ONE place: the **HDRI Forge** drop-down button in the level editor toolbar (on a narrow window it is under
+the three-dot overflow), and the same list under **HDRI Forge** in the menu bar. It is grouped:
+
+| Group | Entries |
 |---|---|
-| **Start live HDRI** | Connects to HDRI Forge Studio (desktop app or dev server, found automatically) and shows its map on an HDRI Backdrop. Every edit in Forge arrives as progressive passes (256, 512, 1024, final); the newest always wins. Stop removes everything it made and shows your own Sky Lights again. |
-| **Import HDRI** | Saves Forge's current map and its `.ash` to `<Project>/HDRIForgeSource/` and keeps it as a real TextureCube asset in `/Game/HDRIForge/Imported` on an HDRI Backdrop. Permanent, unlike Live. |
-| **Restore my sky** | Removes every actor the bridge made and un-hides your own sky lights. |
-| **Push cameras to Forge** | Sends the selected cameras (or all Camera / Cine Camera actors if none are selected) plus the editor viewport to Forge. |
+| **Connection** | Live status of the link (found Forge? which app/port? current map pass), and the outcome of the last send |
+| **Live preview** | Start / stop the live preview (Forge starts streaming by itself) - Start automatically when the project opens - Show the HDRI as the level background - Brighter / Darker (+-0.5 EV) - Turn the sky +-15 degrees - Reset |
+| **Import into the level** | **Import HDRI** keeps the current map as a saved TextureCube on an HDRI Backdrop, with its `.ash` in `<Project>/HDRIForgeSource/` - **Restore my own sky** removes everything the bridge made |
+| **Send this scene to Forge** | **Everything** (cameras + lights + selected meshes), or **Cameras** only (selected, else all, plus the editor view), **Lights** only (point, spot, directional, rect), **Selected static meshes** only (exported as a `.glb` with Unreal's own glTF exporter) |
+| **About** | Version and the name Forge shows for this connection |
 
-In Forge, **Import cameras > Unreal Engine** pulls the same cameras from this plug-in (it listens on `127.0.0.1:8977`).
+The workflow is the same as with Erik Adjuster: start the live preview, edit in Forge and watch the level update, and when the
+HDRI is right use **Import HDRI** to keep it in the level. In Forge, **Import cameras > Unreal Engine** also pulls the
+cameras from this plug-in (it listens on `127.0.0.1:8977`).
+
+Sending notes: positions are converted from Unreal (cm, Z up, left-handed) to Forge (metres, Y up); light brightness is mapped
+with a starting-point factor (12 per candela, 20 per lux) because the units differ, so adjust brightness in Forge.
 
 From the Python console you can also call, after `import hdri_forge_bridge_unreal as b`:
 `b.set_sky(exposure_ev=0.5, yaw=15, background=True)` (exposure in EV, extra turn-around in degrees).

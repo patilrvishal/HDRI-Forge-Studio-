@@ -17,6 +17,7 @@ Verified against Unreal Engine 5.8.4 (Python 3.11). Needs the Python Editor Scri
 Utilities and (for a visible background) the HDRI Backdrop plugin; without the last one a Sky Light is used.
 """
 
+import base64
 import inspect
 import json
 import math
@@ -46,7 +47,7 @@ try:
 except ImportError:
     _core = None
 
-VERSION = "1.1.0"
+VERSION = "1.3.0"
 TAG = "HDRIForgeBridge"
 CONTENT_DIR = "/Game/HDRIForge"
 LIVE_KIND, IMPORT_KIND = "live", "import"
@@ -57,7 +58,7 @@ BACKDROP_CLASS = "/HDRIBackdrop/Blueprints/HDRIBackdrop.HDRIBackdrop_C"
 DEV_SERVER_URL = "http://localhost:5173/__hdri_bridge_push"
 DESKTOP_APP_URL = "http://localhost:8973/__hdri_bridge_push"
 CANDIDATES = [(DESKTOP_APP_URL, "Desktop App"), (DEV_SERVER_URL, "Dev Server")]
-UNREAL_RECEIVE_PORT = 8977
+UNREAL_RECEIVE_PORT = int(os.environ.get("FORGE_UNREAL_PORT", "8977"))   # the port Forge pulls cameras from; Forge expects 8977
 CAMERAS_PATH = "/__hdri_bridge_cameras"
 BRIDGE_PATH = "/__hdri_bridge_push"
 
@@ -68,13 +69,14 @@ BRIDGE_PATH = "/__hdri_bridge_push"
 FORGE_TO_UNREAL_YAW = 180.0
 
 _live = {
-    "link": None, "running": False, "renderer": "", "renderer_checked": 0.0,
+    "note": "", "link": None, "running": False, "renderer": "", "renderer_checked": 0.0,
     "slot": 0, "hidden": [], "last_status": None, "message": "Off",
 }
 _sky = {"exposure_ev": 0.0, "yaw": 0.0, "background": True}
 _studio = {"url": None, "label": None}
 _cam = {"snapshot": [], "wanted": threading.Event(), "ready": threading.Event(), "server": None, "thread": None}
-_menu = {"built": False, "toolbar": None}
+_menu = {"built": False, "toolbar": None, "toolbar_menu": None}
+_settle = {"until": 0.0, "next": 0.0}   # after a new map: re-capture the sky a few times so late texture builds still show
 _settings = {"auto_start": True}       # remembered per project in Saved/HDRIForgeBridge.json
 _auto = {"at": None, "done": False}    # when to start Live on its own after the editor opens
 _jobs = queue.Queue()                  # work that must run on the editor's main thread, queued from other threads
@@ -128,6 +130,13 @@ def _log(msg):
 
 def _warn(msg):
     unreal.log_warning("[HDRI Forge Bridge] %s" % msg)
+
+
+def _console(cmd):
+    try:
+        unreal.SystemLibrary.execute_console_command(None, cmd)
+    except Exception:
+        pass
 
 
 def _eas():
@@ -302,8 +311,11 @@ def set_sky(exposure_ev=None, yaw=None, background=None):
 
 
 # ─── Importing a map ────────────────────────────────────────────────────────
-def _import_hdr(path, dest_dir, name, save=False):
-    """Import an equirect .hdr as a TextureCube (Unreal converts a 2:1 long-lat map itself). Returns the asset."""
+def _import_hdr(path, dest_dir, name, save=False, live=False):
+    """Import an equirect .hdr as a TextureCube (Unreal converts a 2:1 long-lat map itself). Returns the asset.
+
+    `live` maps are built uncompressed (RGBA16F): Unreal's default BC6H encode of a 2048x1024 map takes seconds and runs
+    in the background, so a recapture right after the import saw the OLD sky and nothing told the viewport to redraw."""
     task = unreal.AssetImportTask()
     task.set_editor_property("filename", path)
     task.set_editor_property("destination_path", dest_dir)
@@ -320,7 +332,34 @@ def _import_hdr(path, dest_dir, name, save=False):
     if asset is None or not isinstance(asset, unreal.TextureCube):
         got = asset.get_class().get_name() if asset is not None else "nothing"
         raise RuntimeError("Unreal imported the map as %s, not a TextureCube (is it a 2:1 equirectangular .hdr?)" % got)
+    if live:
+        try:
+            asset.set_editor_property("compression_settings", unreal.TextureCompressionSettings.TC_HDR)
+        except Exception as e:
+            _warn("could not build the live map uncompressed (it will still work, only slower): %s" % e)
     return asset
+
+
+def _redraw():
+    """The editor viewport only redraws when something invalidates it; a new sky is not such a thing on its own."""
+    try:
+        unreal.EditorLevelLibrary.editor_invalidate_viewports()
+    except Exception:
+        try:
+            unreal.get_editor_subsystem(unreal.LevelEditorSubsystem).editor_invalidate_viewports()
+        except Exception:
+            pass
+
+
+def _recapture_all():
+    for _k, a in _bridge_actors():
+        comp = _sky_light_component(a)
+        if comp is not None:
+            try:
+                comp.recapture_sky()
+            except Exception:
+                pass
+    _redraw()
 
 
 def _show_cubemap(actor, cube):
@@ -336,6 +375,9 @@ def _show_cubemap(actor, cube):
             comp.recapture_sky()
         except Exception:
             pass
+    _redraw()
+    _settle["until"] = time.time() + 2.5           # keep re-capturing for a moment in case the texture finishes late
+    _settle["next"] = time.time() + 0.3
 
 
 # ─── Live HDRI ──────────────────────────────────────────────────────────────
@@ -354,7 +396,7 @@ def _apply_frame(frame):
     the one being re-imported."""
     slot = "A" if _live["slot"] == 0 else "B"
     _live["slot"] ^= 1
-    cube = _import_hdr(frame.path, CONTENT_DIR + "/Live", "HDRIForgeLive_" + slot)
+    cube = _import_hdr(frame.path, CONTENT_DIR + "/Live", "HDRIForgeLive_" + slot, live=True)
     actor = _bridge_actor(LIVE_KIND)
     _show_cubemap(actor, cube)
 
@@ -380,6 +422,13 @@ def _tick(_delta=0.0):
     """The one editor tick the bridge owns. Everything that must happen on the main thread is serviced from here."""
     _service_camera_requests()
     _service_jobs()
+    now = time.time()
+    if _live.get("note") != _menu.get("note_shown"):          # a send finished (it runs off-thread): show its outcome in the menu
+        _menu["note_shown"] = _live.get("note")
+        _refresh_menu()
+    if now < _settle["until"] and now >= _settle["next"]:
+        _settle["next"] = now + 0.3
+        _recapture_all()
     if not _auto["done"] and _auto["at"] is not None and time.time() >= _auto["at"]:
         _auto_start_now()                      # a few seconds after the editor opened, once the level exists
     _live_tick()
@@ -438,12 +487,14 @@ def live_start(ports=None):
     _live["renderer_checked"] = time.time()
     link.start()
     _ensure_tick()
+    _console("Editor.AsyncTextureCompilation 0")                  # build each new map right away, so the sky is ready when captured
     _refresh_menu()
     _log("Live HDRI on, looking for HDRI Forge Studio...")
 
 
 def live_stop():
     _live["running"] = False
+    _console("Editor.AsyncTextureCompilation 1")                 # back to Unreal's normal background builds
     link = _live["link"]
     if link is not None:
         link.stop()
@@ -687,33 +738,208 @@ def probe_studio():
     return False
 
 
-def push_cameras_to_studio():
-    """Send the level's cameras to HDRI Forge Studio. The cameras are read here, the network call runs off-thread."""
-    cams = gather_cameras()
-    if not cams:
-        _warn("no cameras in the level (add a Cine Camera Actor, or select the ones to send)")
-        return 0
+def _srgb_to_linear(c):
+    c = c / 255.0
+    return c / 12.92 if c <= 0.04045 else ((c + 0.055) / 1.055) ** 2.4
 
-    def send():
-        if not probe_studio():
-            _warn("no HDRI Forge Studio found running - open the app or start the dev server")
-            return
+
+# Unreal's light units differ from Forge's 0-1000 brightness; these factors land a default light about where Forge's own
+# defaults sit. They are a starting point: Forge's brightness is a slider, adjust it there.
+ENERGY_PER_CANDELA = 12.0
+ENERGY_PER_LUX = 20.0
+
+
+def gather_lights(only_selected=False):
+    """Point, spot, directional and rect lights of the level (or just the selected ones), in Forge's light format."""
+    eas = _eas()
+    pool = list(eas.get_selected_level_actors() or []) if only_selected else _all_actors()
+    kinds = (
+        (unreal.DirectionalLight, "SUN", ENERGY_PER_LUX),
+        (unreal.SpotLight, "SPOT", ENERGY_PER_CANDELA),
+        (unreal.RectLight, "AREA", ENERGY_PER_CANDELA),
+        (unreal.PointLight, "POINT", ENERGY_PER_CANDELA),
+    )
+    out = []
+    for a in pool:
+        for cls, kind, factor in kinds:
+            if isinstance(a, cls):
+                break
+        else:
+            continue
         try:
-            data = json.dumps({"source": "unreal", "cameras": cams}).encode("utf-8")
-            req = urllib.request.Request(_studio["url"], data=data, headers={"Content-Type": "application/json"}, method="POST")
-            with urllib.request.urlopen(req, timeout=15) as resp:
-                resp.read()
-            _log("Pushed %d camera(s) to %s" % (len(cams), _studio["label"]))
+            comp = a.get_component_by_class(unreal.LightComponent)
+            col = comp.get_editor_property("light_color")
+            entry = {
+                "id": a.get_path_name(), "name": a.get_actor_label(), "type": kind,
+                "color": {"r": _srgb_to_linear(col.r), "g": _srgb_to_linear(col.g), "b": _srgb_to_linear(col.b)},
+                "energy": min(1000.0, float(comp.get_editor_property("intensity")) * factor),
+            }
+            cam = _camera_dict(a.get_path_name(), a.get_actor_label(), a.get_actor_location(),
+                               a.get_actor_right_vector(), a.get_actor_up_vector(), a.get_actor_forward_vector(), 40.0)
+            entry["position"], entry["rotation"] = cam["position"], cam["rotation"]
+            if kind == "SPOT":
+                entry["spot_size"] = math.radians(2.0 * float(comp.get_editor_property("outer_cone_angle")))
+            if kind == "AREA":
+                entry["size"] = float(comp.get_editor_property("source_width")) * 0.01
+                entry["size_y"] = float(comp.get_editor_property("source_height")) * 0.01
+            out.append(entry)
         except Exception as e:
-            _warn("Studio unreachable: %s" % e)
-
-    threading.Thread(target=send, name="forge-push-cameras", daemon=True).start()
-    return len(cams)
+            _warn("skipped light %s: %s" % (a.get_actor_label(), e))
+    return out
 
 
-# ─── Menu ───────────────────────────────────────────────────────────────────
+def export_meshes():
+    """The selected static-mesh actors as one .glb (Unreal's own glTF exporter), in Forge's mesh format, or None."""
+    eas = _eas()
+    actors = [a for a in (eas.get_selected_level_actors() or []) if isinstance(a, unreal.StaticMeshActor)]
+    if not actors:
+        return None
+    path = os.path.join(unreal.Paths.project_saved_dir(), "HDRIForgeSource", "scene_to_forge.glb")
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    options = unreal.GLTFExportOptions()
+    ok = unreal.GLTFExporter.export_to_gltf(unreal.EditorLevelLibrary.get_editor_world(), path, options, set(actors))
+    if not ok or not os.path.exists(path):
+        raise RuntimeError("Unreal's glTF exporter could not export the selection")
+    with open(path, "rb") as f:
+        data = base64.b64encode(f.read()).decode("ascii")
+    return {"fileName": "scene_to_forge.glb", "dataBase64": data, "format": "glb",
+            "objectNames": [a.get_actor_label() for a in actors]}
+
+
+def _post_to_studio(payload, what):
+    if not probe_studio():
+        _warn("no HDRI Forge Studio found running - open the app or start the dev server")
+        _live["note"] = "Send failed: Forge not running"
+        return
+    try:
+        data = json.dumps(payload).encode("utf-8")
+        req = urllib.request.Request(_studio["url"], data=data, headers={"Content-Type": "application/json"}, method="POST")
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            resp.read()
+        _log("Sent %s to %s" % (what, _studio["label"]))
+        _live["note"] = "Sent %s to Forge" % what
+    except Exception as e:
+        _warn("Studio unreachable: %s" % e)
+        _live["note"] = "Send failed: %s" % e
+
+
+def push_to_studio(cameras=True, lights=True, meshes=True, only_selected_lights=False):
+    """Send the scene to HDRI Forge Studio: cameras, lights and the selected meshes. Read here (the main thread), sent off-thread."""
+    payload = {"source": "unreal"}
+    parts = []
+    if cameras:
+        cams = gather_cameras()
+        if cams:
+            payload["cameras"] = cams
+            parts.append("%d camera(s)" % len(cams))
+    if lights:
+        lts = gather_lights(only_selected_lights)
+        if lts:
+            payload["lights"] = lts
+            parts.append("%d light(s)" % len(lts))
+    if meshes:
+        try:
+            mesh = export_meshes()
+        except Exception as e:
+            _warn("mesh export failed: %s" % e)
+            mesh = None
+        if mesh:
+            payload["mesh"] = mesh
+            parts.append("%d mesh object(s)" % len(mesh["objectNames"]))
+    if len(payload) == 1:
+        _warn("nothing to send: the level has no cameras or lights and no static mesh is selected")
+        return None
+    what = ", ".join(parts)
+    threading.Thread(target=_post_to_studio, args=(payload, what), name="forge-send", daemon=True).start()
+    return payload
+
+
+def push_cameras_to_studio():
+    return push_to_studio(cameras=True, lights=False, meshes=False)
+
+
+# ─── Controls: one organised section, in the toolbar and in the menu bar ─────
 def _py(cmd):
     return "import hdri_forge_bridge_unreal as b; " + cmd
+
+
+def adjust_exposure(delta_ev):
+    set_sky(exposure_ev=_sky["exposure_ev"] + delta_ev)
+    _refresh_menu()
+
+
+def adjust_yaw(delta_deg):
+    set_sky(yaw=(_sky["yaw"] + delta_deg) % 360.0)
+    _refresh_menu()
+
+
+def reset_sky():
+    set_sky(exposure_ev=0.0, yaw=0.0, background=True)
+    _refresh_menu()
+
+
+def toggle_background():
+    set_sky(background=not _sky["background"])
+    _refresh_menu()
+
+
+def _box(on):
+    return "[x]" if on else "[  ]"
+
+
+def _connection_label():
+    if not _live["running"]:
+        return "Not connected. Start the live preview to link to HDRI Forge Studio"
+    st = live_status()
+    msg = st.get("message", "")
+    port = st.get("port")
+    where = " (%s, port %s)" % (st.get("mode"), port) if port else ""
+    return "%s%s" % (msg, where)
+
+
+def control_layout():
+    """The whole control section as data: (section id, heading, [(entry name, label, command)])."""
+    on = _live["running"]
+    note = _live.get("note")
+    sections = [
+        ("HFStatus", "Connection", [
+            ("Status", _connection_label(), "print(b.live_status())"),
+        ] + ([("Note", note, "print(b._live.get('note'))")] if note else [])),
+        ("HFLive", "Live preview", [
+            ("Live", "Stop live preview" if on else "Start live preview  (Forge starts streaming by itself)", "live_toggle()"),
+            ("Auto", "%s Start automatically whenever this project opens" % _box(_settings.get("auto_start")), "set_auto_start(not b._settings['auto_start'])"),
+            ("Bg", "%s Show the HDRI as the level background" % _box(_sky["background"]), "toggle_background()"),
+            ("ExpUp", "Brighter  (+0.5 EV)   now %+.1f EV" % _sky["exposure_ev"], "adjust_exposure(0.5)"),
+            ("ExpDn", "Darker  (-0.5 EV)", "adjust_exposure(-0.5)"),
+            ("YawR", "Turn the sky  +15 degrees   now %d" % round(_sky["yaw"]), "adjust_yaw(15)"),
+            ("YawL", "Turn the sky  -15 degrees", "adjust_yaw(-15)"),
+            ("Reset", "Reset exposure, turn and background", "reset_sky()"),
+        ]),
+        ("HFImport", "Import into the level", [
+            ("Import", "Import HDRI (keep this map as a saved asset)", "import_hdri()"),
+            ("Restore", "Restore my own sky (remove everything the bridge made)", "restore_sky()"),
+        ]),
+        ("HFSend", "Send this scene to Forge", [
+            ("All", "Everything: cameras + lights + selected meshes", "push_to_studio()"),
+            ("Cams", "Cameras (selected, else all) + the editor view", "push_to_studio(lights=False, meshes=False)"),
+            ("Lights", "Lights (point, spot, directional, rect)", "push_to_studio(cameras=False, meshes=False)"),
+            ("Meshes", "Selected static meshes", "push_to_studio(cameras=False, lights=False)"),
+        ]),
+        ("HFAbout", "About", [
+            ("About", "HDRI Forge Bridge %s  |  %s" % (VERSION, client_name()), "print('HDRI Forge Bridge', b.VERSION)"),
+        ]),
+    ]
+    return sections
+
+
+def _populate(menu):
+    for sec, heading, items in control_layout():
+        menu.add_section(sec, heading)
+        for name, label, cmd in items:
+            entry = unreal.ToolMenuEntry(name="HFB_%s_%s" % (sec, name), type=unreal.MultiBlockType.MENU_ENTRY)
+            entry.set_label(label)
+            entry.set_string_command(unreal.ToolMenuStringCommandType.PYTHON, "", _py(cmd if cmd.startswith("print") else "b." + cmd))
+            menu.add_menu_entry(sec, entry)
 
 
 def _refresh_menu():
@@ -723,39 +949,27 @@ def _refresh_menu():
         pass
 
 
-# Where the one-click buttons go: the level editor's main toolbar, with the first of these that exists.
+# Where the HDRI Forge control goes: the level editor's main toolbar, with the first of these that exists.
 TOOLBAR_CANDIDATES = ("LevelEditor.LevelEditorToolBar.User", "LevelEditor.LevelEditorToolBar.PlayToolBar",
                       "LevelEditor.LevelEditorToolBar")
 
 
-def _toolbar_button(menu, name, label, tip, command, icon=None):
-    entry = unreal.ToolMenuEntry(name=name, type=unreal.MultiBlockType.TOOL_BAR_BUTTON)
-    entry.set_label(label)
-    entry.set_tool_tip(tip)
-    entry.set_string_command(unreal.ToolMenuStringCommandType.PYTHON, "", _py(command))
-    if icon:
-        try:
-            entry.set_icon(icon[0], icon[1])
-        except Exception:
-            pass
-    menu.add_menu_entry("HDRIForge", entry)
-
-
 def _build_toolbar():
-    """Two buttons in the level editor toolbar, like Erik Adjuster's: Live preview (toggle) and Import."""
+    """ONE drop-down button in the toolbar, 'HDRI Forge', holding the whole organised control section."""
     menus = unreal.ToolMenus.get()
     for name in TOOLBAR_CANDIDATES:
         bar = menus.find_menu(name)
         if bar is None:
             continue
-        on = _live["running"]
-        _toolbar_button(bar, "HDRIForgeLive", "Forge Live: ON" if on else "Forge Live",
-                        "Stream HDRI Forge Studio's HDRI into this level as you edit. Click again to stop and restore your sky.",
-                        "b.live_toggle()", ("EditorStyle", "Icons.Sun"))
-        _toolbar_button(bar, "HDRIForgeImport", "Forge Import",
-                        "Import Forge's current HDRI into this level: saved as a TextureCube on an HDRI Backdrop, with its .ash.",
-                        "b.import_hdri()", ("EditorStyle", "Icons.Import"))
+        sub_name = name + ".HDRIForgeControls"
+        sub = menus.find_menu(sub_name)
+        if sub is None:
+            bar.add_section("HDRIForge")
+            sub = bar.add_sub_menu("HDRIForgeBridge", "HDRIForge", "HDRIForgeControls", "HDRI Forge",
+                                   "Live preview, import and send-to-Forge controls for HDRI Forge Studio")
+        _populate(sub)
         _menu["toolbar"] = name
+        _menu["toolbar_menu"] = sub_name
         return name
     return None
 
@@ -771,22 +985,7 @@ def _build_menu(force=False):
     sub = menus.find_menu("LevelEditor.MainMenu.HDRIForgeBridge")
     if sub is None:
         sub = main.add_sub_menu("HDRIForgeBridge", "", "HDRIForgeBridge", "HDRI Forge")
-    on = _live["running"]
-    status = _live["message"] if on else "Off"
-    items = [
-        ("Live", ("Stop live HDRI" if on else "Start live HDRI") , "live_toggle()"),
-        ("Status", "Live: %s" % status, "print(b.live_status())"),
-        ("Auto", "Auto-start live: %s (click to turn %s)" % ("ON" if _settings.get("auto_start") else "OFF", "off" if _settings.get("auto_start") else "on"),
-         "set_auto_start(%s)" % ("False" if _settings.get("auto_start") else "True")),
-        ("Import", "Import HDRI (keep this map)", "import_hdri()"),
-        ("Restore", "Restore my sky", "restore_sky()"),
-        ("Cameras", "Push cameras to Forge", "push_cameras_to_studio()"),
-    ]
-    for name, label, cmd in items:
-        entry = unreal.ToolMenuEntry(name=name, type=unreal.MultiBlockType.MENU_ENTRY)
-        entry.set_label(label)
-        entry.set_string_command(unreal.ToolMenuStringCommandType.PYTHON, "", _py("b." + cmd if not cmd.startswith("print") else cmd))
-        sub.add_menu_entry("HDRIForge", entry)
+    _populate(sub)
     menus.refresh_all_widgets()
     _menu["built"] = True
 

@@ -47,7 +47,7 @@ def main(argv):
         json.dump({"FileVersion": 3, "EngineAssociation": "5.8", "Plugins": plugins}, f)
 
     out = os.path.join(work, "result.txt")
-    env = dict(os.environ, FORGE_TEST_OUT=out, FORGE_TEST_PNG=work, FORGE_PLUGIN_PYTHON=os.path.join(PLUGIN, "Content", "Python"))
+    env = dict(os.environ, FORGE_TEST_OUT=out, FORGE_TEST_PNG=work, FORGE_UNREAL_PORT="8987", FORGE_PLUGIN_PYTHON=os.path.join(PLUGIN, "Content", "Python"))
     script = os.path.join(HERE, "unreal_render_test.py" if render else ("unreal_e2e_test.py" if e2e else "unreal_integration_test.py")).replace("\\", "/")
     # -ExecutePythonScript quits the editor as soon as the script returns, but this test needs the editor to keep
     # ticking (texture imports, actor spawns and the HTTP listener are serviced from the tick), so it is run as a
