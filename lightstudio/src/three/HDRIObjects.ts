@@ -7,6 +7,8 @@ interface CastMesh {
   mesh: THREE.Mesh;
   bvh: MeshBVH;
   inverse: THREE.Matrix4;
+  /** World-space bounds: most rays miss most objects, and this test is far cheaper than walking a BVH. */
+  box: THREE.Box3;
   color: THREE.Color;
   opacity: number;
 }
@@ -75,9 +77,12 @@ export class HdriObjectCaster {
           if (c) color = c.clone();
         }
         color.multiplyScalar(Math.max(0, cfg.intensity));
+        if (!m.geometry.boundingBox) m.geometry.computeBoundingBox();
+        const box = m.geometry.boundingBox!.clone().applyMatrix4(m.matrixWorld).expandByScalar(1e-3);
         caster.meshes.push({
           mesh: m,
           bvh,
+          box,
           inverse: new THREE.Matrix4().copy(m.matrixWorld).invert(),
           color,
           opacity: Math.max(0, Math.min(1, cfg.opacity / 100)),
@@ -91,11 +96,53 @@ export class HdriObjectCaster {
     return this.meshes.length;
   }
 
+  // Which objects can a ray in a given direction possibly hit? A coarse equirectangular grid answers that with one lookup,
+  // so each pixel only tests the handful of objects in its cell instead of every object in the scene.
+  private static readonly GW = 128;
+  private static readonly GH = 64;
+  private grid: number[][] | null = null;
+  private gridOrigin = new THREE.Vector3(NaN, NaN, NaN);
+  private sphere = new THREE.Sphere();
+  private cellDir = new THREE.Vector3();
+  private toC = new THREE.Vector3();
+
+  private buildGrid(origin: THREE.Vector3): void {
+    const GW = HdriObjectCaster.GW, GH = HdriObjectCaster.GH;
+    const cells: number[][] = Array.from({ length: GW * GH }, () => []);
+    const cellRad = Math.hypot(Math.PI / GH, (2 * Math.PI) / GW) * 0.75 + 0.01;       // generous half-diagonal of a cell
+    this.meshes.forEach((c, mi) => {
+      c.box.getBoundingSphere(this.sphere);
+      this.toC.copy(this.sphere.center).sub(origin);
+      const d = this.toC.length();
+      if (d <= this.sphere.radius * 1.001) { for (const cell of cells) cell.push(mi); return; }     // the viewer is inside it: every direction
+      this.toC.divideScalar(d);
+      const ang = Math.asin(Math.min(1, this.sphere.radius / d)) + cellRad;
+      const cosAng = Math.cos(Math.min(Math.PI, ang));
+      for (let gy = 0; gy < GH; gy++) {
+        const phi = ((gy + 0.5) / GH) * Math.PI;
+        for (let gx = 0; gx < GW; gx++) {
+          const theta = ((gx + 0.5) / GW - 0.5) * 2 * Math.PI;
+          this.cellDir.set(Math.sin(phi) * Math.cos(theta), Math.cos(phi), Math.sin(phi) * Math.sin(theta));
+          if (this.cellDir.dot(this.toC) >= cosAng) cells[gy * GW + gx].push(mi);
+        }
+      }
+    });
+    this.grid = cells;
+    this.gridOrigin.copy(origin);
+  }
+
   cast(origin: THREE.Vector3, dir: THREE.Vector3): ObjectHit | null {
     this.ray.origin.copy(origin);
     this.ray.direction.copy(dir);
+    if (!this.grid || !this.gridOrigin.equals(origin)) this.buildGrid(origin);
+    const GW = HdriObjectCaster.GW, GH = HdriObjectCaster.GH;
+    const gx = Math.min(GW - 1, Math.max(0, Math.floor((Math.atan2(dir.z, dir.x) / (2 * Math.PI) + 0.5) * GW)));
+    const gy = Math.min(GH - 1, Math.max(0, Math.floor((Math.acos(Math.max(-1, Math.min(1, dir.y))) / Math.PI) * GH)));
+    const candidates = this.grid![gy * GW + gx];
     let best: ObjectHit | null = null;
-    for (const c of this.meshes) {
+    for (let ci = 0; ci < candidates.length; ci++) {
+      const c = this.meshes[candidates[ci]];
+      if (!this.ray.intersectsBox(c.box) && !c.box.containsPoint(origin)) continue;      // large flat objects (floor, walls) pass the grid for every direction: their tight box still rejects most rays
       this.local.copy(this.ray).applyMatrix4(c.inverse);
       const hit = c.bvh.raycastFirst(this.local, THREE.DoubleSide);
       if (!hit) continue;

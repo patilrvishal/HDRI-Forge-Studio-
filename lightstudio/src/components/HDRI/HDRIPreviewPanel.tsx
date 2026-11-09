@@ -367,11 +367,20 @@ export const HDRIPreviewPanel: React.FC = () => {
     if (!livePreview) return;
 
     if (timerRef.current) window.clearTimeout(timerRef.current);
+    let superseded = false;
     timerRef.current = window.setTimeout(() => {
-      void renderPreview();
+      // Progressive: a quick 512 pass shows the change at once, then the full resolution follows if nothing newer came in.
+      void (async () => {
+        if (resIndex >= 2) {
+          await renderPreview(0);
+          if (superseded) return;
+        }
+        await renderPreview();
+      })();
     }, DEBOUNCE_MS);
 
     return () => {
+      superseded = true;
       if (timerRef.current) window.clearTimeout(timerRef.current);
     };
   }, [livePreview, lights, environment, hdriAssets, shapes, resIndex, renderPreview, objectHdriVersion]);
