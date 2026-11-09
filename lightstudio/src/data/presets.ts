@@ -68,6 +68,13 @@ function plDown(name: string, color: string, brightness: number, lng: number, he
   return l;
 }
 
+/** Area light aimed by hand: rotated about the vertical axis by yawDeg (a light emits along its own -Z). */
+function plAim(name: string, color: string, brightness: number, lng: number, height: number, radius: number, w: number, h: number, yawDeg: number): PresetLight {
+  const l = pl(name, 'area', color, brightness, 0, lng, height, radius, { areaLight: true, falloff: 'linear', areaWidth: w, areaHeight: h, edgeSoftness: 35 });
+  l.transform = { ...l.transform, rotation: { ...l.transform.rotation, x: 0, y: yawDeg, z: 0, enabled: true } };
+  return l;
+}
+
 // ═══════════════════════════════════════════════════════════════════
 //  STUDIO PRESETS (6)
 // ═══════════════════════════════════════════════════════════════════
@@ -88,10 +95,10 @@ export const STUDIO_PRESETS: PresetLight[][] = [
   // 3. High Key White
   [
     // built to the rig sheet: two rounded ceiling soft panels and two 1.2 m softboxes at 45 degrees
-    plDown('Ceiling Panel Large', '#ffffff', 120, 0, 2.85, 0.6, 2.4, 1.2),
-    plDown('Ceiling Panel Medium', '#ffffff', 120, 180, 2.85, 0.9, 1.8, 1.0),
-    pl('Softbox Left', 'area', '#ffffff', 140, 0, 249.1, 1.45, 2.25, { areaLight: true, falloff: 'linear', areaWidth: 1.2, areaHeight: 1.2, edgeSoftness: 35 }),
-    pl('Softbox Right', 'area', '#ffffff', 140, 0, 110.9, 1.45, 2.25, { areaLight: true, falloff: 'linear', areaWidth: 1.2, areaHeight: 1.2, edgeSoftness: 35 }),
+    plDown('Ceiling Panel Large', '#ffffff', 120, 0, 2.85, 0.5, 2.4, 1.2),
+    plDown('Ceiling Panel Medium', '#ffffff', 120, 180, 2.28, 0.4, 1.8, 1.0),
+    plAim('Softbox Left', '#ffffff', 80, 256, 1.45, 2.886, 1.2, 1.2, -135),
+    plAim('Softbox Right', '#ffffff', 80, 104, 1.45, 2.886, 1.2, 1.2, 135),
   ],
   // 4. Low Key Dramatic
   [

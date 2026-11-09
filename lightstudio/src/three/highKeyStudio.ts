@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import type { Light } from '../types/Light';
 import { softbox, tripod } from './cycStudio';
+import { lightFacing } from './lightFacing';
 
 /**
  * The "High Key White" studio, built to the rig sheet: a white cyclorama room 6.0 m wide, 4.0 m deep and 3.0 m high with
@@ -33,8 +34,9 @@ const std = (color: number, roughness: number, metalness = 0, extra: Partial<THR
 interface PathPt { x: number; z: number; nx: number; nz: number }
 
 /** The room outline in plan (left wall, rounded back corner, back wall, rounded back corner, right wall) with inward normals. */
-function planPath(): PathPt[] {
+function planPath(): { all: PathPt[]; left: PathPt[]; back: PathPt[]; right: PathPt[] } {
   const pts: PathPt[] = [];
+  const marks: number[] = [];
   const line = (x0: number, z0: number, x1: number, z1: number, nx: number, nz: number, n = 6) => {
     for (let i = 0; i <= n; i++) pts.push({ x: x0 + ((x1 - x0) * i) / n, z: z0 + ((z1 - z0) * i) / n, nx, nz });
   };
@@ -46,10 +48,12 @@ function planPath(): PathPt[] {
   };
   line(-HALF_W, FRONT_Z, -HALF_W, BACK_Z + R_PLAN, 1, 0, 6);
   arc(-HALF_W + R_PLAN, BACK_Z + R_PLAN, Math.PI, Math.PI * 1.5);
+  marks.push(pts.length - 1);                       // end of the left wall + its corner
   line(-HALF_W + R_PLAN, BACK_Z, HALF_W - R_PLAN, BACK_Z, 0, 1, 8);
+  marks.push(pts.length - 1);                       // end of the back wall
   arc(HALF_W - R_PLAN, BACK_Z + R_PLAN, Math.PI * 1.5, Math.PI * 2);
   line(HALF_W, BACK_Z + R_PLAN, HALF_W, FRONT_Z, -1, 0, 6);
-  return pts;
+  return { all: pts, left: pts.slice(0, marks[0] + 1), back: pts.slice(marks[0], marks[1] + 1), right: pts.slice(marks[1]) };
 }
 
 /** Wall profile as (inward offset t, height y): floor fillet, straight wall, curl into the ceiling. */
@@ -114,35 +118,40 @@ export function buildHighKeyStudio(group: THREE.Group, lights: Light[]): void {
   group.userData.reflBox = [-HALF_W, 0, BACK_Z, HALF_W, H, FRONT_Z + 6];
 
   // glossy white floor, running out past the open front so the model never floats in a void
-  const floor = new THREE.Mesh(new THREE.PlaneGeometry(HALF_W * 2, FRONT_Z - BACK_Z + 12), std(0xe6e7ea, 0.16, 0));
+  const floor = new THREE.Mesh(new THREE.PlaneGeometry(HALF_W * 2, FRONT_Z - BACK_Z + 12), std(0x9fa1a8, 0.16, 0));
   floor.name = 'Floor';
   floor.userData.mirrorFloor = true;
   floor.rotation.x = -Math.PI / 2;
   floor.position.set(0, -0.0005, (FRONT_Z + BACK_Z) / 2 + 6);
   floor.userData.reflective = true;
-  floor.userData.reflectIntensity = 1.8;
+  floor.userData.reflectIntensity = 0.8;
   group.add(floor);
 
   // the white room: floor fillet, rounded corners, walls curling into the ceiling
   const path = planPath();
-  const walls = new THREE.Mesh(
-    room(path, wallProfile()),
-    std(0xf1f2f4, 0.6, 0, { side: THREE.DoubleSide, emissive: 0xffffff, emissiveIntensity: 0.03 }),   // a little glow stands in for the bounce light
-  );
-  walls.name = 'Cyc Walls';
-  walls.userData.reflective = true;
-  walls.userData.reflectIntensity = 0.5;
-  group.add(walls);
+  const profile = wallProfile();
+  // three wall parts so each can be edited on its own; a little glow stands in for the bounce light (more on the back wall,
+  // which the room's light reaches most, less on the sides)
+  for (const [seg, name, glow] of [[path.left, 'Side Wall Left', 0.03], [path.back, 'Back Wall', 0.24], [path.right, 'Side Wall Right', 0.03]] as [PathPt[], string, number][]) {
+    const w = new THREE.Mesh(
+      room(seg, profile),
+      std(0xf1f2f4, 0.6, 0, { side: THREE.DoubleSide, emissive: 0xe4e8f2, emissiveIntensity: glow }),
+    );
+    w.name = name;
+    w.userData.reflective = true;
+    w.userData.reflectIntensity = 0.5;
+    group.add(w);
+  }
 
   // dark ceiling inside the curl
-  const ceil = new THREE.Mesh(new THREE.PlaneGeometry(HALF_W * 2, FRONT_Z - BACK_Z), std(0x2c2d31, 0.8, 0.15));
+  const ceil = new THREE.Mesh(new THREE.PlaneGeometry(HALF_W * 2, FRONT_Z - BACK_Z), std(0x4a4b50, 0.8, 0.15, { emissive: 0x303238, emissiveIntensity: 0.6 }));
   ceil.name = 'Ceiling';
   ceil.rotation.x = Math.PI / 2;
   ceil.position.set(0, H, (FRONT_Z + BACK_Z) / 2);
   group.add(ceil);
 
   // glowing rim along the top of the walls
-  const rimPts = path.map((p) => new THREE.Vector3(p.x + p.nx * R_TOP * 0.9, H - 0.07, p.z + p.nz * R_TOP * 0.9));
+  const rimPts = path.all.map((p) => new THREE.Vector3(p.x + p.nx * R_TOP * 0.9, H - 0.07, p.z + p.nz * R_TOP * 0.9));
   const rim = new THREE.Mesh(
     new THREE.TubeGeometry(new THREE.CatmullRomCurve3(rimPts), 160, 0.025, 6, false),
     std(0xffffff, 0.5, 0, { emissive: 0xffffff, emissiveIntensity: 4 }),
@@ -186,9 +195,11 @@ export function buildHighKeyStudio(group: THREE.Group, lights: Light[]): void {
     const sb = softbox(l.areaWidth ?? 1.2, l.areaHeight ?? 1.2);
     sb.name = `${l.name} Fixture`;
     sb.position.set(p.x, p.y, p.z);
-    sb.lookAt(0, Math.min(1.3, p.y), 0);
+    const pos = new THREE.Vector3(p.x, p.y, p.z);
+    const facing = lightFacing(pos, l.transform.rotation);
+    sb.lookAt(pos.clone().add(facing));
     group.add(sb);
-    const away = new THREE.Vector3(p.x, 0, p.z).normalize();
+    const away = new THREE.Vector3(-facing.x, 0, -facing.z).normalize();
     const stand = tripod(p.x + away.x * 1.05, p.z + away.z * 1.05, p.y - 0.1, away);
     stand.name = `${l.name} Stand`;
     group.add(stand);

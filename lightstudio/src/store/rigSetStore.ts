@@ -24,7 +24,11 @@ export interface RigLook {
 }
 export const defaultRigLook = (): RigLook => ({ brightness: 1, darkness: 0, tint: '#ffffff', tintAmount: 0 });
 
+export interface CameraRequest { id: number; pos: [number, number, number]; target: [number, number, number]; hfov: number }
+
 interface RigSetState {
+  cameraRequest: CameraRequest | null;
+  requestCamera: (c: Omit<CameraRequest, 'id'>) => void;
   look: RigLook;
   setLook: (patch: Partial<RigLook>) => void;
   resetLook: () => void;
@@ -47,6 +51,8 @@ interface RigSetState {
 }
 
 export const useRigSetStore = create<RigSetState>((set) => ({
+  cameraRequest: null,
+  requestCamera: (c) => set((s) => ({ cameraRequest: { ...c, id: (s.cameraRequest?.id ?? 0) + 1 } })),
   look: defaultRigLook(),
   setLook: (patch) => set((s) => ({ look: { ...s.look, ...patch } })),
   resetLook: () => set({ look: defaultRigLook() }),

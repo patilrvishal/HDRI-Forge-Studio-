@@ -1,5 +1,5 @@
 import { RIG_CARDS } from '../../data/rigCards';
-import { RIG_SETS } from '../../data/rigSets';
+import { RIG_SETS, RIG_CAMERAS } from '../../data/rigSets';
 import { useRigSetStore } from '../../store/rigSetStore';
 import React, { useEffect, useRef, useMemo, useCallback, useState } from 'react';
 import { usePresetsStore } from '../../store/presetsStore';
@@ -272,7 +272,10 @@ export const PresetBrowser: React.FC<PresetBrowserProps> = ({ onGenerateThumbnai
       setLightsFromPreset(newLights);
       setPreviewPreset(null);
       if (newLights.length > 0) selectLight(newLights[0].id);
-      if (asRig) rs.setRig(RIG_SETS[preset.name], newLights.map((l) => l.id), preset.name);
+      if (asRig) {
+        rs.setRig(RIG_SETS[preset.name], newLights.map((l) => l.id), preset.name);
+        if (RIG_CAMERAS[preset.name]) rs.requestCamera(RIG_CAMERAS[preset.name]);      // open on the card's own view
+      }
       showToast(`Applied "${preset.name}"`);
     },
     [presets, setLightsFromPreset, setPreviewPreset, selectLight, showToast],

@@ -137,7 +137,7 @@ export const SHADOW_SHARE = 0.55;
  * brightest ones gets a wide spot light at the same place, facing the same way, carrying a share of its output with a
  * soft shadow map. Together they give the room and the model real contact and cast shadows.
  */
-export function syncShadowLights(group: THREE.Group, lights: Array<{ id: string; name: string; color: string; brightness: number; areaWidth?: number; areaHeight?: number; position: THREE.Vector3; facingDown: boolean }>): void {
+export function syncShadowLights(group: THREE.Group, lights: Array<{ id: string; name: string; color: string; brightness: number; areaWidth?: number; areaHeight?: number; position: THREE.Vector3; facing: THREE.Vector3 }>): void {
   for (const c of [...group.children]) {
     if (c.userData.rigShadow) {
       group.remove(c);
@@ -151,7 +151,7 @@ export function syncShadowLights(group: THREE.Group, lights: Array<{ id: string;
     spot.name = `${l.name} Shadow`;
     spot.userData.rigShadow = true;
     spot.position.copy(l.position);
-    const dir = l.facingDown ? new THREE.Vector3(0, -1, 0) : l.position.clone().negate().normalize();
+    const dir = l.facing;
     spot.target.position.copy(l.position).addScaledVector(dir, 5);
     // candela of a lit rectangle ~ luminance x area; the companion carries SHADOW_SHARE of it
     spot.intensity = (l.brightness / 100) * Math.max(0.02, (l.areaWidth ?? 1) * (l.areaHeight ?? 1)) * SHADOW_SHARE;
@@ -165,3 +165,5 @@ export function syncShadowLights(group: THREE.Group, lights: Array<{ id: string;
     group.add(spot, spot.target);
   }
 }
+
+export { lightFacing } from './lightFacing';

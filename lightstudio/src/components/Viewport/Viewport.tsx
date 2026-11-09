@@ -27,6 +27,7 @@ import { CameraSwitcher } from './CameraSwitcher';
 import { useRigSetStore } from '../../store/rigSetStore';
 import { buildRigSet } from '../../three/rigSet';
 import { findRigGroup, makeRigGroup, removeRigGroup, fillRigGroup, applyDefaultHdriInclude, applyMaterialOverrides, syncShadowLights, SHADOW_SHARE } from '../../three/rigGroup';
+import { lightFacing } from '../../three/lightFacing';
 import { applySetReflections } from '../../three/setReflections';
 import { registerShadedProvider, createShadedProvider } from '../../three/hdriShading';
 import { ViewportPropertiesPanel } from './ViewportPropertiesPanel';
@@ -1165,6 +1166,18 @@ export const Viewport: React.FC<ViewportProps> = ({ sceneManagerRef, onScreensho
     [lights, rigLightIds],
   );
   const rigRebuild = useRigSetStore((s) => s.rebuild);
+  const cameraRequest = useRigSetStore((s) => s.cameraRequest);
+  useEffect(() => {
+    const sm = sceneManagerRef.current;
+    if (!sm || !cameraRequest) return;
+    const el = sm.renderer.domElement;
+    const aspect = Math.max(0.2, el.clientWidth / Math.max(1, el.clientHeight));
+    sm.camera.fov = (2 * Math.atan(Math.tan((cameraRequest.hfov * Math.PI) / 360) / aspect) * 180) / Math.PI;
+    sm.camera.updateProjectionMatrix();
+    sm.camera.position.set(...cameraRequest.pos);
+    sm.controls.target.set(...cameraRequest.target);
+    sm.controls.update();
+  }, [cameraRequest, sceneManagerRef]);
   const lastRigName = useRef('');
   useEffect(() => {
     const sm = sceneManagerRef.current;
@@ -1211,7 +1224,7 @@ export const Viewport: React.FC<ViewportProps> = ({ sceneManagerRef, onScreensho
 
   // Shadow-casting companions for the rig's strongest area lights (brightness, size and position all feed them).
   const rigShadowSig = useMemo(
-    () => lights.filter((l) => rigLightIds.includes(l.id)).map((l) => [l.id, l.color, l.brightness, l.areaWidth, l.areaHeight, l.transform.position.x, l.transform.position.y, l.transform.position.z, l.transform.rotation.enabled, l.transform.rotation.x].join(',')).join('|'),
+    () => lights.filter((l) => rigLightIds.includes(l.id)).map((l) => [l.id, l.color, l.brightness, l.areaWidth, l.areaHeight, l.transform.position.x, l.transform.position.y, l.transform.position.z, l.transform.rotation.enabled, l.transform.rotation.x, l.transform.rotation.y].join(',')).join('|'),
     [lights, rigLightIds],
   );
   useEffect(() => {
@@ -1227,7 +1240,7 @@ export const Viewport: React.FC<ViewportProps> = ({ sceneManagerRef, onScreensho
       syncShadowLights(group, rl.map((l) => ({
         id: l.id, name: l.name, color: l.color, brightness: l.brightness, areaWidth: l.areaWidth, areaHeight: l.areaHeight,
         position: new THREE.Vector3(l.transform.position.x, l.transform.position.y, l.transform.position.z),
-        facingDown: !!l.transform.rotation.enabled && Math.abs(l.transform.rotation.x + 90) < 1,
+        facing: lightFacing(new THREE.Vector3(l.transform.position.x, l.transform.position.y, l.transform.position.z), l.transform.rotation),
       })));
       // the four brightest hand a share of their output to their shadow casters
       const strongest = [...rl].sort((a, b) => b.brightness * (b.areaWidth ?? 1) * (b.areaHeight ?? 1) - a.brightness * (a.areaWidth ?? 1) * (a.areaHeight ?? 1)).slice(0, 4);
