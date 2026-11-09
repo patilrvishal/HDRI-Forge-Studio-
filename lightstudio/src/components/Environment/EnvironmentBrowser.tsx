@@ -1,4 +1,4 @@
-import React, { useCallback, useRef, useState, useMemo } from 'react';
+import React, { useCallback, useEffect, useRef, useState, useMemo } from 'react';
 import { useSceneStore } from '../../store/sceneStore';
 import { setRawHDRIData } from '../../store/hdriDataStore';
 import { useHDRIAssetStore } from '../../store/hdriAssetStore';
@@ -6,6 +6,7 @@ import { Slider } from '../UI/Slider';
 import { Toggle } from '../UI/Toggle';
 import { HDRI_PRESETS, getHDRIPresetById } from '../../types/Environment';
 import type { HDRIPreset } from '../../types/Environment';
+import { renderPresetThumbnails } from '../../three/EnvPresetThumbnails';
 
 interface EnvironmentBrowserProps {
   onClose: () => void;
@@ -33,6 +34,10 @@ const EnvironmentBrowser: React.FC<EnvironmentBrowserProps> = ({ onClose, onPres
   const fileInputRef = useRef<HTMLInputElement>(null);
   const backplateInputRef = useRef<HTMLInputElement>(null);
   const [customLoading, setCustomLoading] = useState(false);
+
+  // real renders of every preset (the same scene the viewport lights with), filled in as they finish
+  const [thumbs, setThumbs] = useState<Record<string, string>>({});
+  useEffect(() => renderPresetThumbnails(HDRI_PRESETS, (id, url) => setThumbs((t) => ({ ...t, [id]: url }))), []);
 
   // Filter presets
   const filteredPresets = useMemo(() => {
@@ -401,7 +406,7 @@ const EnvironmentBrowser: React.FC<EnvironmentBrowserProps> = ({ onClose, onPres
           <div
             style={{
               display: 'grid',
-              gridTemplateColumns: 'repeat(auto-fill, minmax(110px, 1fr))',
+              gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))',
               gap: 8,
               overflowY: 'auto',
               flex: 1,
@@ -435,8 +440,10 @@ const EnvironmentBrowser: React.FC<EnvironmentBrowserProps> = ({ onClose, onPres
                   <div
                     style={{
                       width: '100%',
-                      height: 64,
-                      background: `linear-gradient(135deg, ${preset.thumbnailGradient[0]}, ${preset.thumbnailGradient[1]}, ${preset.thumbnailGradient[2]})`,
+                      aspectRatio: '16 / 9',
+                      background: thumbs[preset.id]
+                        ? `center / cover no-repeat url(${thumbs[preset.id]})`
+                        : `linear-gradient(135deg, ${preset.thumbnailGradient[0]}, ${preset.thumbnailGradient[1]}, ${preset.thumbnailGradient[2]})`,
                       position: 'relative',
                     }}
                   >
