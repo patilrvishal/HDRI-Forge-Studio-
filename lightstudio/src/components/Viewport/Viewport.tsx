@@ -925,12 +925,15 @@ export const Viewport: React.FC<ViewportProps> = ({ sceneManagerRef, onScreensho
     clearPendingHDRIData();
   }, [pendingHDRIData, sceneManagerRef, envLoaderRef, clearPendingHDRIData]);
 
-  // Angle Hunt Mode: lock the viewport to the active camera once one exists.
-  // With no active camera yet, stay free-look so switching into the mode
-  // doesn't strand the user in a frozen empty view before they've picked or
-  // pushed a shot.
+  // Angle Hunt Mode: the 360 orbit control is OFF. The view stays frozen on the last frame (the current view, or the
+  // active camera's shot) and the only way to change it is the camera switcher. If the scene has cameras but none is
+  // active yet, jump to the most recently added one so there is always a real shot to look at.
   useEffect(() => {
-    sceneManagerRef.current?.setViewportLocked(workspaceMode === 'angleHunt' && !!activeCameraId);
+    sceneManagerRef.current?.setViewportLocked(workspaceMode === 'angleHunt');
+    if (workspaceMode === 'angleHunt' && !activeCameraId) {
+      const cams = useCameraStore.getState().cameras;
+      if (cams.length > 0) useCameraStore.getState().setActiveCamera(cams[cams.length - 1].id);
+    }
   }, [workspaceMode, activeCameraId, sceneManagerRef]);
 
   // Sync render settings

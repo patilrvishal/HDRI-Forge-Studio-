@@ -1,5 +1,6 @@
 ﻿import React from 'react';
 import { useCameraStore } from '../../store/cameraStore';
+import { useViewportModeStore } from '../../store/viewportModeStore';
 
 export const CameraSwitcher: React.FC = () => {
   const cameras = useCameraStore((s) => s.cameras);
@@ -7,6 +8,8 @@ export const CameraSwitcher: React.FC = () => {
   const setActiveCamera = useCameraStore((s) => s.setActiveCamera);
   const updateCamera = useCameraStore((s) => s.updateCamera);
 
+  const workspaceMode = useViewportModeStore((s) => s.mode);
+  const angleHunt = workspaceMode === 'angleHunt';
   const active = cameras.find((c) => c.id === activeCameraId) ?? null;
 
   return (
@@ -20,7 +23,7 @@ export const CameraSwitcher: React.FC = () => {
           color: 'var(--text-sec)', backdropFilter: 'blur(4px)',
         }}
       >
-        <option value="">Perspective</option>
+        <option value="">{angleHunt ? 'Last frame (frozen)' : 'Perspective'}</option>
         {cameras.map((c) => (
           <option key={c.id} value={c.id}>{c.name}</option>
         ))}
@@ -32,7 +35,7 @@ export const CameraSwitcher: React.FC = () => {
           or deactivated (picking "Perspective" above) to orbit freely
           again. No effect in Angle Hunt Mode, which is already always
           locked regardless of this flag. */}
-      {active && (
+      {active && !angleHunt && (
         <button
           onClick={() => updateCamera(active.id, { locked: !active.locked })}
           title={active.locked ? 'Camera locked - click to unlock and allow orbit-drag to adjust it' : 'Camera unlocked - orbit-drag adjusts it. Click to lock.'}

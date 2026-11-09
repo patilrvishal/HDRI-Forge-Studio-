@@ -634,7 +634,9 @@ export class SceneManager {
     const cam = store?.getState().getActiveCamera() ?? null;
 
     if (!cam) {
-      if (!this.controls.enabled) this.controls.enabled = true;
+      // Angle Hunt with no camera picked: freeze on the last frame instead of leaving the 360 orbit control on.
+      const wantEnabled = !this._viewportLocked;
+      if (this.controls.enabled !== wantEnabled) this.controls.enabled = wantEnabled;
       return false;
     }
 
