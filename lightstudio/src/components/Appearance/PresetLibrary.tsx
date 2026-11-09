@@ -168,10 +168,17 @@ export const PresetLibrary: React.FC<Props> = ({ onApply, onAudition, current, c
             }}
             style={{ cursor: 'pointer', textAlign: 'center' }}
           >
-            <div style={{ aspectRatio: '1 / 1', background: '#151515', border: '1px solid var(--border, #333)', borderRadius: 6, display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
-              <img src={DESIGNED_THUMBS[it.name] && !it.user ? DESIGNED_THUMBS[it.name] : thumbFor(it.id, it.build, it.aspect)} alt={it.name} style={{ maxWidth: '100%', maxHeight: '100%', display: 'block' }} />
-            </div>
-            <div style={{ fontSize: 11, color: 'var(--text-sec)', marginTop: 3, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{it.name}</div>
+            {DESIGNED_THUMBS[it.name] && !it.user ? (
+              // the supplied artwork IS the whole card (tile, border, glow, reflection and name), shown exactly as designed
+              <img src={DESIGNED_THUMBS[it.name]} alt={it.name} draggable={false} style={{ width: '100%', display: 'block' }} />
+            ) : (
+              <>
+                <div style={{ aspectRatio: '1 / 1', background: '#151515', border: '1px solid var(--border, #333)', borderRadius: 6, display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
+                  <img src={thumbFor(it.id, it.build, it.aspect)} alt={it.name} style={{ maxWidth: '100%', maxHeight: '100%', display: 'block' }} />
+                </div>
+                <div style={{ fontSize: 11, color: 'var(--text-sec)', marginTop: 3, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{it.name}</div>
+              </>
+            )}
           </div>
         ))}
         {!shown.length && <div style={{ gridColumn: '1/-1', fontSize: 10, color: 'var(--text-dim)' }}>No presets match.</div>}
