@@ -96,16 +96,17 @@ function roundedRect(w: number, d: number, r: number): THREE.Shape {
 function ceilingPanel(w: number, d: number, name: string): THREE.Group {
   const g = new THREE.Group();
   g.name = name;
+  const FR = 0.16;                          // frame margin: the lit panel sits INSIDE the housing frame
   const r = Math.min(w, d) * 0.22;
   const body = new THREE.Mesh(
-    new THREE.ExtrudeGeometry(roundedRect(w, d, r), { depth: 0.1, bevelEnabled: true, bevelThickness: 0.03, bevelSize: 0.03, bevelSegments: 4, curveSegments: 14 }),
+    new THREE.ExtrudeGeometry(roundedRect(w + FR * 2, d + FR * 2, r + FR), { depth: 0.1, bevelEnabled: true, bevelThickness: 0.03, bevelSize: 0.03, bevelSegments: 4, curveSegments: 14 }),
     std(0x35373d, 0.5, 0.35),
   );
   body.rotation.x = Math.PI / 2;            // extrusion axis points down
   body.position.y = 0.0;
   g.add(body);
   const face = new THREE.Mesh(
-    new THREE.ShapeGeometry(roundedRect(w - 0.12, d - 0.12, Math.max(0.05, r - 0.06)), 14),
+    new THREE.ShapeGeometry(roundedRect(w, d, r), 14),
     std(0xffffff, 0.7, 0, { emissive: 0xffffff, emissiveIntensity: 2.6, side: THREE.DoubleSide }),
   );
   face.rotation.x = Math.PI / 2;
@@ -184,7 +185,7 @@ export function buildHighKeyStudio(group: THREE.Group, lights: Light[]): void {
     for (const sx of [-1, 1]) for (const sz of [-1, 1]) {                // four hangers to the ceiling
       const rod = new THREE.Mesh(new THREE.CylinderGeometry(0.008, 0.008, H - p.y, 6), rails);
       rod.name = `${l.name} Hanger`;
-      rod.position.set(p.x + sx * ((l.areaWidth ?? 2) / 2 - 0.2), (H + p.y) / 2, p.z + sz * ((l.areaHeight ?? 1) / 2 - 0.15));
+      rod.position.set(p.x + sx * ((l.areaWidth ?? 2) / 2 + 0.05), (H + p.y) / 2, p.z + sz * ((l.areaHeight ?? 1) / 2 + 0.05));
       group.add(rod);
     }
   }

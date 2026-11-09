@@ -95,8 +95,8 @@ export const STUDIO_PRESETS: PresetLight[][] = [
   // 3. High Key White
   [
     // built to the rig sheet: two rounded ceiling soft panels and two 1.2 m softboxes at 45 degrees
-    plDown('Ceiling Panel Large', '#ffffff', 120, 0, 2.85, 0.5, 2.4, 1.2),
-    plDown('Ceiling Panel Medium', '#ffffff', 120, 180, 2.28, 0.4, 1.8, 1.0),
+    plDown('Ceiling Panel Large', '#ffffff', 120, 0, 2.85, 0.5, 3.4, 1.7),
+    plDown('Ceiling Panel Medium', '#ffffff', 120, 180, 2.28, 0.4, 2.4, 1.3),
     plAim('Softbox Left', '#ffffff', 80, 256, 1.45, 2.886, 1.2, 1.2, -135),
     plAim('Softbox Right', '#ffffff', 80, 104, 1.45, 2.886, 1.2, 1.2, 135),
   ],
