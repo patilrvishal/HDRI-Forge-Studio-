@@ -123,6 +123,7 @@ export function buildCycStudio(group: THREE.Group, lights: Light[]): void {
   // ── floor: polished concrete everywhere, white sweep in front of the cyc ────────────────────
   const concrete = new THREE.Mesh(new THREE.PlaneGeometry(40, 40), std(0x74767b, 0.34, 0.0));
   concrete.name = 'Floor';
+  concrete.userData.mirrorFloor = true;
   concrete.rotation.x = -Math.PI / 2;
   concrete.position.set(0, -0.002, -5);
   group.add(concrete);
@@ -136,6 +137,8 @@ export function buildCycStudio(group: THREE.Group, lights: Light[]): void {
   profile.push([WALL_Z, CYC_H]);
   const cyc = new THREE.Mesh(sweep(profile, CYC_HALF), std(0xeeeeee, 0.78, 0, { side: THREE.DoubleSide }));
   cyc.name = 'Cyclorama';
+  cyc.userData.mirrorFloor = true;            // the floor sweep is glossy white
+  cyc.userData.mirrorRoughness = 0.45;
   cyc.receiveShadow = true;
   group.add(cyc);
 

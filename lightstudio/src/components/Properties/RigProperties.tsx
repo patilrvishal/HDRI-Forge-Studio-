@@ -1,12 +1,12 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import * as THREE from 'three';
 import { useLightsStore } from '../../store/lightsStore';
-import { useRigSetStore, type MatOverride } from '../../store/rigSetStore';
+import { useRigSetStore, defaultRigLook, type MatOverride } from '../../store/rigSetStore';
 import { useObjectHdriStore } from '../../store/objectHdriStore';
 import { useSceneHierarchyStore } from '../../store/sceneHierarchyStore';
 import { objectKey } from '../../three/objectBinding';
 import { setIncludeInHdri } from '../../three/objectLightApi';
-import { applyMaterialOverrides, partMaterials } from '../../three/rigGroup';
+import { applyMaterialOverrides, partMaterials, lookFactor } from '../../three/rigGroup';
 import { Slider } from '../UI/Slider';
 import { Toggle } from '../UI/Toggle';
 import { ColorPicker } from '../UI/ColorPicker';
@@ -47,6 +47,9 @@ const Row: React.FC<{ label: string; children: React.ReactNode }> = ({ label, ch
 
 const hex = (c: THREE.Color): string => '#' + c.getHexString();
 
+/** Each light's colour before a tint was laid over it, so the tint can be changed or removed. */
+const tintBase = new Map<string, string>();
+
 /** Editing controls for one part of the set (colour / roughness / metalness for its body, strength + colour for its glow). */
 export const PartEditor: React.FC<{ part: THREE.Object3D; group: THREE.Group; compact?: boolean }> = ({ part, group, compact }) => {
   const [tick, setTick] = useState(0);
@@ -83,15 +86,15 @@ export const PartEditor: React.FC<{ part: THREE.Object3D; group: THREE.Group; co
       </Row>
       {b && (
         <>
-          <Row label="Colour"><ColorPicker color={hex(b.color)} onChange={(c) => apply({ color: c })} /></Row>
+          <Row label="Colour"><ColorPicker color={hex((b.userData.rigOrig?.color as THREE.Color | undefined) ?? b.color)} onChange={(c) => apply({ color: c })} /></Row>
           <Slider label="Roughness" value={b.roughness} min={0} max={1} step={0.01} onChange={(v) => apply({ roughness: v })} />
           <Slider label="Metalness" value={b.metalness} min={0} max={1} step={0.01} onChange={(v) => apply({ metalness: v })} />
         </>
       )}
       {g && (
         <>
-          <Row label="Glow colour"><ColorPicker color={hex(g.emissive)} onChange={(c) => apply({ glowColor: c })} /></Row>
-          <Slider label="Glow strength" value={g.emissiveIntensity} min={0} max={20} step={0.1} onChange={(v) => apply({ glow: v })} />
+          <Row label="Glow colour"><ColorPicker color={hex((g.userData.rigOrig?.emissive as THREE.Color | undefined) ?? g.emissive)} onChange={(c) => apply({ glowColor: c })} /></Row>
+          <Slider label="Glow strength" value={(g.userData.rigOrig?.intensity as number | undefined) ?? g.emissiveIntensity} min={0} max={20} step={0.1} onChange={(v) => apply({ glow: v })} />
         </>
       )}
       {!b && !g && <div style={{ fontSize: 12, color: 'var(--text-dim)' }}>This part has no material to edit.</div>}
@@ -173,10 +176,31 @@ export const RigGroupProperties: React.FC<{ group: THREE.Group }> = ({ group }) 
     if (b) b.items.push(p); else details.push(p);
   }
   const rigLights = lightIds.filter((id) => lights.some((l) => l.id === id));
-  const scaleAll = (f: number) => rigLights.forEach((id) => {
-    const l = useLightsStore.getState().lights.find((x) => x.id === id);
-    if (l) useLightsStore.getState().updateLight(id, { brightness: Math.max(0, Math.round(l.brightness * f)) });
-  });
+  const look = useRigSetStore((s) => s.look);
+  const setLook = useRigSetStore((s) => s.setLook);
+
+  /** Moves a whole-rig slider: the lights follow (brightness by ratio, colour pulled toward the tint) and the materials re-apply. */
+  const changeLook = (patch: Partial<typeof look>) => {
+    const prev = useRigSetStore.getState().look;
+    const next = { ...prev, ...patch };
+    setLook(patch);
+    const ratio = lookFactor(next) / lookFactor(prev);
+    const tint = new THREE.Color(next.tint);
+    for (const id of rigLights) {
+      const l = useLightsStore.getState().lights.find((x) => x.id === id);
+      if (!l) continue;
+      const upd: { brightness?: number; color?: string } = {};
+      if (ratio !== 1) upd.brightness = Math.max(0, Math.round(l.brightness * ratio * 100) / 100);
+      if (patch.tint !== undefined || patch.tintAmount !== undefined) {
+        const base = (tintBase.get(id) ?? (tintBase.set(id, l.color), l.color));
+        upd.color = '#' + new THREE.Color(base).lerp(tint, next.tintAmount).getHexString();
+      }
+      if (upd.brightness !== undefined || upd.color !== undefined) useLightsStore.getState().updateLight(id, upd);
+    }
+    applyMaterialOverrides(group, useRigSetStore.getState().overrides);
+    useObjectHdriStore.getState().touch();
+  };
+  const resetLook = () => changeLook({ ...defaultRigLook() });
 
   return (
     <div style={{ overflowY: 'auto', flex: 1 }}>
@@ -185,10 +209,15 @@ export const RigGroupProperties: React.FC<{ group: THREE.Group }> = ({ group }) 
         <div style={{ fontSize: 12, color: 'var(--text-dim)', marginTop: 2 }}>
           Rig &middot; {rigLights.length} light{rigLights.length !== 1 ? 's' : ''} &middot; {parts.length} parts
         </div>
+        <div style={{ marginTop: 8 }}>
+          <Slider label="Brightness" value={Math.round(look.brightness * 100)} min={0} max={300} step={1} unit="%" inputMax={1000} onChange={(v) => changeLook({ brightness: v / 100 })} />
+          <Slider label="Darkness" value={Math.round(look.darkness * 100)} min={0} max={100} step={1} unit="%" onChange={(v) => changeLook({ darkness: v / 100 })} />
+          <Row label="Tint"><ColorPicker color={look.tint} onChange={(c) => changeLook({ tint: c, tintAmount: look.tintAmount === 0 ? 0.35 : look.tintAmount })} /></Row>
+          <Slider label="Tint amount" value={Math.round(look.tintAmount * 100)} min={0} max={100} step={1} unit="%" onChange={(v) => changeLook({ tintAmount: v / 100 })} />
+        </div>
         <div style={{ display: 'flex', gap: 6, marginTop: 8, flexWrap: 'wrap' }}>
-          <button className="btn-sm" style={{ fontSize: 12 }} onClick={() => scaleAll(0.8)} title="All rig lights 20% dimmer">Lights &minus;20%</button>
-          <button className="btn-sm" style={{ fontSize: 12 }} onClick={() => scaleAll(1.25)} title="All rig lights 25% brighter">Lights +25%</button>
-          <button className="btn-sm" style={{ fontSize: 12 }} onClick={() => clearOverrides()} title="Put every material back to the rig's own look">Reset materials</button>
+          <button className="btn-sm" style={{ fontSize: 12 }} onClick={resetLook} title="Brightness 100%, no darkness, no tint">Reset look</button>
+          <button className="btn-sm" style={{ fontSize: 12 }} onClick={() => clearOverrides()} title="Put every part's material back to the rig's own look">Reset materials</button>
         </div>
       </div>
 

@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { objectKey } from './objectBinding';
 import { useObjectHdriStore, defaultObjectHdri, type ObjectHdriSettings } from '../store/objectHdriStore';
 import { disposeRigSet } from './rigSet';
-import type { MatOverride } from '../store/rigSetStore';
+import { useRigSetStore, type MatOverride } from '../store/rigSetStore';
 
 /** The hierarchy group a rig makes in the scene: named after the rig, holding its lights and its studio-set parts. */
 export function findRigGroup(scene: THREE.Scene): THREE.Group | null {
@@ -87,26 +87,35 @@ export function partMaterials(part: THREE.Object3D): { body: THREE.MeshStandardM
   return { body: [...body], glow: [...glow] };
 }
 
+/** Net strength the look gives the lights (brightness x how much darkness is left), never fully zero so it can be undone. */
+export const lookFactor = (look: { brightness: number; darkness: number }): number => Math.max(0.02, look.brightness * (1 - look.darkness * 0.9));
+
 /**
- * Applies remembered edits to the parts they are named after. Passing null puts every part back to the colours it was
- * built with (the group is rebuilt, which also drops the edits).
+ * Applies the remembered per-part edits and the whole-rig look (brightness, darkness, tint) to the materials. Every part starts
+ * from the colours it was built with (or the user's edit), so moving a slider back always returns to the original.
  */
 export function applyMaterialOverrides(group: THREE.Group, overrides: Record<string, MatOverride> | null): void {
   if (overrides === null) return;
+  const look = useRigSetStore.getState().look;
+  const tint = new THREE.Color(look.tint);
+  const dark = 1 - look.darkness * 0.92;
   for (const part of group.children) {
     if (!part.userData.rigPart) continue;
-    const ov = overrides[part.name];
-    if (!ov) continue;
+    const ov = overrides[part.name] ?? {};
     const { body, glow } = partMaterials(part);
     for (const m of body) {
-      if (ov.color !== undefined) m.color.set(ov.color);
-      if (ov.roughness !== undefined) m.roughness = ov.roughness;
-      if (ov.metalness !== undefined) m.metalness = ov.metalness;
+      const o = (m.userData.rigOrig ??= { color: m.color.clone(), roughness: m.roughness, metalness: m.metalness });
+      const base = ov.color !== undefined ? new THREE.Color(ov.color) : (o.color as THREE.Color).clone();
+      m.color.copy(base).lerp(tint, look.tintAmount).multiplyScalar(dark);
+      m.roughness = ov.roughness ?? o.roughness;
+      m.metalness = ov.metalness ?? o.metalness;
       m.needsUpdate = true;
     }
     for (const m of glow) {
-      if (ov.glowColor !== undefined) m.emissive.set(ov.glowColor);
-      if (ov.glow !== undefined) m.emissiveIntensity = ov.glow;
+      const o = (m.userData.rigOrig ??= { emissive: m.emissive.clone(), intensity: m.emissiveIntensity });
+      const base = ov.glowColor !== undefined ? new THREE.Color(ov.glowColor) : (o.emissive as THREE.Color).clone();
+      m.emissive.copy(base).lerp(tint, look.tintAmount);
+      m.emissiveIntensity = (ov.glow ?? o.intensity) * look.brightness * (1 - look.darkness * 0.5);
       m.needsUpdate = true;
     }
   }

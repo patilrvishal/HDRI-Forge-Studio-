@@ -117,6 +117,7 @@ export function buildRigSet(kind: RigSetKind, lights: Light[]): THREE.Group {
       new THREE.MeshStandardMaterial({ color: 0x0b0c10, roughness: 0.16, metalness: 0.05 }),
     );
     floor.name = 'Floor';
+    floor.userData.mirrorFloor = true;
     floor.rotation.x = -Math.PI / 2;
     floor.position.y = -0.0005;
     floor.receiveShadow = true;

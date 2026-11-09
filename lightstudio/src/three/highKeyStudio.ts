@@ -116,6 +116,7 @@ export function buildHighKeyStudio(group: THREE.Group, lights: Light[]): void {
   // glossy white floor, running out past the open front so the model never floats in a void
   const floor = new THREE.Mesh(new THREE.PlaneGeometry(HALF_W * 2, FRONT_Z - BACK_Z + 12), std(0xe6e7ea, 0.16, 0));
   floor.name = 'Floor';
+  floor.userData.mirrorFloor = true;
   floor.rotation.x = -Math.PI / 2;
   floor.position.set(0, -0.0005, (FRONT_Z + BACK_Z) / 2 + 6);
   floor.userData.reflective = true;

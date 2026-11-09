@@ -77,6 +77,7 @@ export function buildStripTunnel(group: THREE.Group, lights: Light[]): void {
   // floor: polished concrete (dark, glossy)
   const floor = new THREE.Mesh(new THREE.PlaneGeometry(HALF_W * 2 + 0.01, FRONT_Z - WALL_Z), std(0xa4a6ac, 0.2, 0.0));
   floor.name = 'Floor';
+  floor.userData.mirrorFloor = true;
   floor.userData.reflective = true;
   floor.userData.reflectIntensity = 3;
   floor.rotation.x = -Math.PI / 2;
@@ -85,6 +86,7 @@ export function buildStripTunnel(group: THREE.Group, lights: Light[]): void {
   // beyond the opening, so the model never floats in a void
   const apron = new THREE.Mesh(new THREE.PlaneGeometry(40, 30), std(0x2a2b2e, 0.3, 0));
   apron.name = 'Floor Apron';
+  apron.userData.mirrorFloor = true;
   apron.userData.reflective = true;
   apron.rotation.x = -Math.PI / 2;
   apron.position.set(0, -0.002, FRONT_Z + 15);
@@ -99,6 +101,8 @@ export function buildStripTunnel(group: THREE.Group, lights: Light[]): void {
   profile.push([WALL_Z, H]);
   const cyc = new THREE.Mesh(sweep(profile, HALF_W), std(0x3c3d42, 0.8, 0, { side: THREE.DoubleSide }));
   cyc.name = 'Cyc Wall';
+  cyc.userData.mirrorFloor = true;            // its swept surface also forms the floor, which is polished concrete
+  cyc.userData.mirrorRoughness = 0.22;
   group.add(cyc);
 
   // side walls: dark panelled steel, with vertical panel seams

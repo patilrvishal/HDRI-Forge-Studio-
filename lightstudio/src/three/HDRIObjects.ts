@@ -14,6 +14,8 @@ interface CastMesh {
   opacity: number;
   /** Take the surface's lit radiance (shading, glow, reflections) from the shaded map instead of its flat colour. */
   shaded: boolean;
+  /** A glossy floor (its roughness): below the horizon it mirrors the room above it, like a polished floor does. */
+  mirror: number | null;
 }
 
 export interface ObjectHit {
@@ -93,6 +95,7 @@ export class HdriObjectCaster {
           color,
           opacity: Math.max(0, Math.min(1, cfg.opacity / 100)),
           shaded: cfg.colorMode === 'material',
+          mirror: m.userData?.mirrorFloor ? ((m.userData.mirrorRoughness as number | undefined) ?? ((Array.isArray(m.material) ? m.material[0] : m.material) as THREE.MeshStandardMaterial).roughness ?? 0.3) : null,
         });
       });
     }
@@ -170,7 +173,26 @@ export class HdriObjectCaster {
       if (!best || dist < best.dist) {
         if (c.shaded && this.shadedMap) {
           sampleShaded(this.shadedMap, dir.x, dir.y, dir.z, this.shadeOut);
-          best = { dist, r: this.shadeOut[0], g: this.shadeOut[1], b: this.shadeOut[2], alpha: c.opacity };
+          let r = this.shadeOut[0], g = this.shadeOut[1], b = this.shadeOut[2];
+          if (c.mirror !== null && dir.y < 0) {
+            // polished floor: mix in the room mirrored in the floor plane. Fresnel makes it a near-mirror at low angles, and
+            // roughness spreads each reflection (taps around the mirrored direction) into soft streaks.
+            const cosT = -dir.y;
+            const F = (0.12 + 0.88 * Math.pow(1 - cosT, 4)) * (1 - c.mirror * 0.4);       // polished concrete reflects more than plain dielectric
+            const spread = 0.04 + c.mirror * 0.35;
+            let mr = 0, mg = 0, mb = 0;
+            const taps: Array<[number, number]> = [[0, 0], [spread, 0], [-spread, 0], [0, spread], [0, -spread]];
+            for (const [ox, oz] of taps) {
+              const rx = dir.x + ox, rz = dir.z + oz, ry = -dir.y;
+              const l = Math.hypot(rx, ry, rz) || 1;
+              sampleShaded(this.shadedMap, rx / l, ry / l, rz / l, this.shadeOut);
+              mr += this.shadeOut[0]; mg += this.shadeOut[1]; mb += this.shadeOut[2];
+            }
+            r = r * (1 - F) + (mr / taps.length) * F;
+            g = g * (1 - F) + (mg / taps.length) * F;
+            b = b * (1 - F) + (mb / taps.length) * F;
+          }
+          best = { dist, r, g, b, alpha: c.opacity };
         } else {
           best = { dist, r: c.color.r, g: c.color.g, b: c.color.b, alpha: c.opacity };
         }
