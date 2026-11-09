@@ -111,7 +111,7 @@ export const PresetLibrary: React.FC<Props> = ({ onApply, onAudition, current, c
             key={c}
             className="btn-sm"
             onClick={() => setCat(c)}
-            style={{ opacity: cat === c ? 1 : 0.6, outline: cat === c ? '1px solid var(--accent-bright, #4af)' : 'none', fontSize: 10 }}
+            style={{ opacity: cat === c ? 1 : 0.7, outline: cat === c ? '1px solid var(--accent)' : 'none', outlineOffset: 1, fontSize: 12, borderRadius: 999, padding: '5px 12px' }}
           >
             {c}
           </button>
@@ -146,10 +146,10 @@ export const PresetLibrary: React.FC<Props> = ({ onApply, onAudition, current, c
             }}
             style={{ cursor: 'pointer', textAlign: 'center' }}
           >
-            <div style={{ aspectRatio: '1 / 1', background: '#151515', border: '1px solid var(--border, #333)', borderRadius: 4, display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
+            <div style={{ aspectRatio: '1 / 1', background: '#151515', border: '1px solid var(--border, #333)', borderRadius: 6, display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
               <img src={thumbFor(it.id, it.build, it.aspect)} alt={it.name} style={{ maxWidth: '100%', maxHeight: '100%', display: 'block' }} />
             </div>
-            <div style={{ fontSize: 9, color: 'var(--text-sec)', marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{it.name}</div>
+            <div style={{ fontSize: 11, color: 'var(--text-sec)', marginTop: 3, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{it.name}</div>
           </div>
         ))}
         {!shown.length && <div style={{ gridColumn: '1/-1', fontSize: 10, color: 'var(--text-dim)' }}>No presets match.</div>}

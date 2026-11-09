@@ -12,6 +12,9 @@ import { useLightsStore } from '../../store/lightsStore';
 import { useHDRIShapesStore } from '../../store/hdriShapesStore';
 import { useUIStore } from '../../store/uiStore';
 import { newAppearance } from '../../appearance/content';
+import { useSceneStore } from '../../store/sceneStore';
+import { HDRI_PRESETS } from '../../types/Environment';
+import { renderPresetThumbnails } from '../../three/EnvPresetThumbnails';
 
 /**
  * Left column laid out like HDR Light Studio: the Light List on top and, below it, the Preset Library with its six
@@ -41,19 +44,46 @@ const hint: React.CSSProperties = { fontSize: 12, color: 'var(--text-dim)', padd
 
 type ApplyFn = React.ComponentProps<typeof PresetLibrary>['onApply'];
 
-const ElementTile: React.FC<{ label: string; onClick: () => void; children: React.ReactNode }> = ({ label, onClick, children }) => (
-  <button
-    onClick={onClick}
-    title={`Add ${label}`}
-    style={{
-      display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6, padding: '12px 6px', cursor: 'pointer',
-      background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 8, color: 'var(--text)', fontSize: 12,
-    }}
-  >
-    <svg width="44" height="44" viewBox="0 0 44 44" fill="none" stroke="currentColor" strokeWidth="1.6">{children}</svg>
-    {label}
-  </button>
+/** Card in the same look as the Light tab's presets: dark tile, thin border, orange highlight, label underneath. */
+const LibCard: React.FC<{ label: string; onClick: () => void; active?: boolean; title?: string; children: React.ReactNode }> = ({ label, onClick, active, title, children }) => (
+  <div className={`lib-card ${active ? 'active' : ''}`} onClick={onClick} title={title ?? label}>
+    <div className="lib-thumb">{children}</div>
+    <div className="lib-name">{label}</div>
+  </div>
 );
+
+const ENV_CATS = [
+  { key: 'all', label: 'All' },
+  { key: 'studio', label: 'Studio' },
+  { key: 'outdoor', label: 'Outdoor' },
+  { key: 'creative', label: 'Creative' },
+] as const;
+
+/** Env tab: the built-in environments as globe cards (real renders of each environment), click to apply. */
+const EnvLibrary: React.FC = () => {
+  const [cat, setCat] = useState<'all' | 'studio' | 'outdoor' | 'creative'>('all');
+  const [thumbs, setThumbs] = useState<Record<string, string>>({});
+  const presetId = useSceneStore((s) => s.environment.presetId);
+  const setPreset = useSceneStore((s) => s.setEnvironmentPreset);
+  React.useEffect(() => renderPresetThumbnails(HDRI_PRESETS, (id, url) => setThumbs((t) => ({ ...t, [id]: url }))), []);
+  const list = cat === 'all' ? HDRI_PRESETS : HDRI_PRESETS.filter((p) => p.category === cat);
+  return (
+    <>
+      <div className="lib-pills">
+        {ENV_CATS.map((c) => (
+          <button key={c.key} className={`lib-pill ${cat === c.key ? 'active' : ''}`} onClick={() => setCat(c.key)}>{c.label}</button>
+        ))}
+      </div>
+      <div className="lib-grid">
+        {list.map((p) => (
+          <LibCard key={p.id} label={p.name} title={`${p.name} - ${p.description}`} active={presetId === p.id} onClick={() => setPreset(p.id)}>
+            {thumbs[p.id] ? <img src={thumbs[p.id]} alt={p.name} /> : null}
+          </LibCard>
+        ))}
+      </div>
+    </>
+  );
+};
 
 export const HdrlsLeftColumn: React.FC<{
   sceneRef: React.MutableRefObject<THREE.Scene | null>;
@@ -112,7 +142,7 @@ export const HdrlsLeftColumn: React.FC<{
   });
 
   return (
-    <div ref={boxRef} style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0 }}>
+    <div ref={boxRef} className="hdrls-lib" style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0 }}>
       {/* Light List (top) */}
       <div style={{ flex: `0 0 ${split * 100}%`, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 8px', flexShrink: 0 }}>
@@ -181,6 +211,7 @@ export const HdrlsLeftColumn: React.FC<{
                   Open Environment Browser
                 </button>
               </div>
+              <EnvLibrary />
               <EnvironmentAssetsPanel />
               <div style={{ borderTop: '1px solid var(--border)', marginTop: 8, paddingTop: 8 }}>
                 <GradientBackgroundPanel />
@@ -206,19 +237,20 @@ export const HdrlsLeftColumn: React.FC<{
             </div>
           )}
           {tab === 'element' && (
-            <div style={{ padding: 10, display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8 }}>
-              <ElementTile label="Rectangle" onClick={() => useHDRIShapesStore.getState().addShape('rectangle')}>
-                <rect x="7" y="12" width="30" height="20" rx="2" />
-              </ElementTile>
-              <ElementTile label="Circle" onClick={() => useHDRIShapesStore.getState().addShape('circle')}>
-                <circle cx="22" cy="22" r="13" />
-              </ElementTile>
-              <ElementTile label="Gradient strip" onClick={() => useHDRIShapesStore.getState().addShape('gradient-strip')}>
-                <rect x="5" y="16" width="34" height="12" rx="2" />
-                <path d="M12 16v12M20 16v12M28 16v12" opacity="0.5" />
-              </ElementTile>
-              <div style={{ ...hint, gridColumn: '1 / -1', padding: 0 }}>Elements are painted straight into the HDRI, not into a light.</div>
-            </div>
+            <>
+              <div style={hint}>{LIB_TABS[4].hint}. Click to add.</div>
+              <div className="lib-grid">
+                <LibCard label="Rectangle" onClick={() => useHDRIShapesStore.getState().addShape('rectangle')}>
+                  <svg width="64%" viewBox="0 0 44 28" fill="#e8e8e8"><rect x="4" y="3" width="36" height="22" rx="2" /></svg>
+                </LibCard>
+                <LibCard label="Circle" onClick={() => useHDRIShapesStore.getState().addShape('circle')}>
+                  <svg width="46%" viewBox="0 0 28 28" fill="#e8e8e8"><circle cx="14" cy="14" r="12" /></svg>
+                </LibCard>
+                <LibCard label="Gradient Strip" onClick={() => useHDRIShapesStore.getState().addShape('gradient-strip')}>
+                  <svg width="70%" viewBox="0 0 44 16"><defs><linearGradient id="gs" x1="0" x2="1"><stop offset="0" stopColor="#f2f2f2" /><stop offset="1" stopColor="#2a2a2a" /></linearGradient></defs><rect x="2" y="2" width="40" height="12" rx="2" fill="url(#gs)" /></svg>
+                </LibCard>
+              </div>
+            </>
           )}
           {tab === 'effect' && (
             <div style={{ padding: '0 8px 8px' }}>
