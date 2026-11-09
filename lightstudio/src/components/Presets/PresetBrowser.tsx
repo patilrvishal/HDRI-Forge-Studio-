@@ -265,12 +265,14 @@ export const PresetBrowser: React.FC<PresetBrowserProps> = ({ onGenerateThumbnai
       const preset = presets.find((p) => p.id === id);
       if (!preset) return;
       const newLights = presetToLights(preset);
+      // a built-in rig replaces the previous rig, and its studio set (room + fixtures) goes in with it
+      const rs = useRigSetStore.getState();
+      const asRig = rs.auto && preset.isDefault && !!RIG_SETS[preset.name];
+      if (asRig) rs.lightIds.forEach((lid) => useLightsStore.getState().removeLight(lid));
       setLightsFromPreset(newLights);
       setPreviewPreset(null);
       if (newLights.length > 0) selectLight(newLights[0].id);
-      // the rig's studio set (floor / cyc wall) goes in with it, so the viewport matches the card
-      const rs = useRigSetStore.getState();
-      if (rs.auto && preset.isDefault && RIG_SETS[preset.name]) rs.setKind(RIG_SETS[preset.name]);
+      if (asRig) rs.setRig(RIG_SETS[preset.name], newLights.map((l) => l.id));
       showToast(`Applied "${preset.name}"`);
     },
     [presets, setLightsFromPreset, setPreviewPreset, selectLight, showToast],
@@ -301,10 +303,12 @@ export const PresetBrowser: React.FC<PresetBrowserProps> = ({ onGenerateThumbnai
         const preset = presets.find((p) => p.id === shownId);
         if (preset) {
           const newLights = presetToLights(preset);
+          const rs = useRigSetStore.getState();
+          const asRig = rs.auto && preset.isDefault && !!RIG_SETS[preset.name];
+          if (asRig) rs.lightIds.forEach((lid) => useLightsStore.getState().removeLight(lid));
           setLightsFromPreset(newLights);                          // then apply it the normal way (history, selection)
           if (newLights.length > 0) selectLight(newLights[0].id);
-          const rs = useRigSetStore.getState();
-          if (rs.auto && preset.isDefault && RIG_SETS[preset.name]) rs.setKind(RIG_SETS[preset.name]);
+          if (asRig) rs.setRig(RIG_SETS[preset.name], newLights.map((l) => l.id));
           showToast(`Applied "${preset.name}"`);
         }
       }

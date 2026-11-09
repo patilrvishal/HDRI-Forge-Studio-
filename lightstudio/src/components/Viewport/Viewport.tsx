@@ -1154,14 +1154,15 @@ export const Viewport: React.FC<ViewportProps> = ({ sceneManagerRef, onScreensho
 
   // Studio set that goes with the applied rig (floor / cyc wall): replace it whenever the chosen set changes.
   const rigSetKind = useRigSetStore((s) => s.kind);
+  const rigLightIds = useRigSetStore((s) => s.lightIds);
   useEffect(() => {
     const sm = sceneManagerRef.current;
     if (!sm) return;
     const scene = sm.scene;
     const old = scene.getObjectByName(RIG_SET_NAME);
     if (old) { scene.remove(old); disposeRigSet(old); }
-    if (rigSetKind) scene.add(buildRigSet(rigSetKind));
-  }, [rigSetKind, sceneManagerRef]);
+    if (rigSetKind) scene.add(buildRigSet(rigSetKind, lights.filter((l) => rigLightIds.includes(l.id))));
+  }, [rigSetKind, rigLightIds, lights, sceneManagerRef]);
 
   // Sync lights to scene
   useEffect(() => {
