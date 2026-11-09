@@ -27,6 +27,12 @@ const DESIGNED_THUMBS: Record<string, string> = {
   'Strip Centre Fade': '/presetthumbs/strip_centre_fade.png',
   'Tall Strip': '/presetthumbs/tall_strip.png',
   'Tube Light': '/presetthumbs/tube_light.png',
+  'Disc': '/presetthumbs/disc.png',
+  'Hexagon': '/presetthumbs/hexagon.png',
+  'Triangle': '/presetthumbs/triangle.png',
+  'Pentagon': '/presetthumbs/pentagon.png',
+  'Diamond': '/presetthumbs/diamond.png',
+  'Round Hexagon': '/presetthumbs/round_hexagon.png',
 };
 
 /** Icon shown inside each category pill (white when idle, orange when active). */
