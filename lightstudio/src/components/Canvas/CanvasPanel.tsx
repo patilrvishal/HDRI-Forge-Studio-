@@ -296,20 +296,42 @@ export const CanvasPanel: React.FC = () => {
     setTool('select');
   };
 
+  // Fit the 2:1 HDRI map to the whole free area of the panel (the biggest 2:1 box that fits), like HDR Light Studio's Canvas.
+  const fitRef = useRef<HTMLDivElement | null>(null);
+  const [fit, setFit] = useState<{ w: number; h: number } | null>(null);
+  useEffect(() => {
+    const el = fitRef.current;
+    if (!el) return;
+    const measure = () => {
+      const cw = el.clientWidth - 16;
+      const ch = el.clientHeight - 6;
+      if (cw <= 0 || ch <= 0) return;
+      const w = Math.floor(Math.min(cw, ch * 2));
+      setFit({ w, h: Math.floor(w / 2) });
+    };
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0 }}>
       <div style={{ display: 'flex', gap: 6, alignItems: 'center', padding: '4px 8px', flexWrap: 'wrap' }}>
         {([['select', 'Select / Move'], ['sun', 'Paint Sun'], ['curve', 'Draw Lumi-Curve']] as [Tool, string][]).map(([t, label]) => (
-          <button key={t} className="btn-sm" onClick={() => setTool(t)} style={{ outline: tool === t ? '1px solid var(--accent-bright, #4af)' : 'none', opacity: tool === t ? 1 : 0.75 }}>
+          <button key={t} className="btn-sm" onClick={() => setTool(t)} style={{ fontSize: 12, padding: '5px 12px', outline: tool === t ? '1px solid var(--accent-bright, #4af)' : 'none', opacity: tool === t ? 1 : 0.75 }}>
             {label}
           </button>
         ))}
-        <span style={{ fontSize: 10, color: 'var(--text-dim)' }}>
-          Drag a light to move it (<b>Shift</b> horizontal lock · <b>Ctrl</b> vertical lock · <b>Alt</b> fine) · drag a corner to resize (<b>Shift</b> = keep total energy) · wheel scales the selected light
+        <span
+          title="Drag a light to move it (Shift = horizontal lock, Ctrl = vertical lock, Alt = fine). Drag a corner to resize (Shift = keep total energy). Mouse wheel scales the selected light."
+          style={{ fontSize: 12, color: 'var(--text-dim)', cursor: 'help', border: '1px solid var(--border-light)', borderRadius: 999, padding: '2px 9px' }}
+        >
+          ? Controls
         </span>
         {status && <span style={{ fontSize: 10, color: 'var(--text-sec)' }}>{status}</span>}
       </div>
-      <div style={{ flex: 1, minHeight: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '0 8px 6px' }}>
+      <div ref={fitRef} style={{ flex: 1, minHeight: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '0 8px 6px' }}>
         <canvas
           ref={canvasRef}
           width={CW}
@@ -318,7 +340,7 @@ export const CanvasPanel: React.FC = () => {
           onPointerMove={onMove}
           onPointerUp={onUp}
           onWheel={onWheel}
-          style={{ maxWidth: '100%', maxHeight: '100%', aspectRatio: '2 / 1', borderRadius: 4, border: '1px solid var(--border, #333)', cursor: tool === 'select' ? 'default' : 'crosshair', touchAction: 'none' }}
+          style={{ width: fit ? fit.w : undefined, height: fit ? fit.h : undefined, maxWidth: '100%', maxHeight: '100%', aspectRatio: '2 / 1', borderRadius: 4, border: '1px solid var(--border, #333)', cursor: tool === 'select' ? 'default' : 'crosshair', touchAction: 'none' }}
         />
       </div>
     </div>

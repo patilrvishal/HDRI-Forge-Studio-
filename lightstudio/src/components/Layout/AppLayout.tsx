@@ -2,7 +2,7 @@ import React, { useRef, useState, useCallback, useEffect } from 'react';
 import { TopMenubar } from '../Toolbar/TopMenubar';
 import { LeftToolbar } from '../Toolbar/LeftToolbar';
 import { Viewport } from '../Viewport/Viewport';
-import { LightListPanel } from '../Lights/LightListPanel';
+import { HdrlsLeftColumn } from './HdrlsLeftColumn';
 import { LightProfileGrid } from '../Lights/LightProfileGrid';
 import { DynamicPropertiesPanel } from '../Properties/DynamicPropertiesPanel';
 import { PresetBrowser } from '../Presets/PresetBrowser';
@@ -170,7 +170,7 @@ export const AppLayout: React.FC = () => {
   const viewportDesignVisible = panelVisibility.viewportDesign;
 
   // Bottom panel: side-by-side tabs (mutually exclusive)
-  const [bottomTab, setBottomTab] = useState<'hdri' | 'canvas' | 'presets' | 'customHdri'>('hdri');
+  const [bottomTab, setBottomTab] = useState<'hdri' | 'canvas' | 'presets' | 'customHdri'>('canvas');
 
   // History state for status bar
   const undoCount = useHistoryStore((s) => s.undoStack.length);
@@ -182,7 +182,7 @@ export const AppLayout: React.FC = () => {
   // Sync right tab from store (e.g. viewport click sets it to 'matEdit')
   useEffect(() => {
     if (storeRightTab && storeRightTab !== rightTab) {
-      setRightTab(storeRightTab);
+      setRightTab(storeRightTab === 'preview' ? 'properties' : storeRightTab);
     }
   }, [storeRightTab]);
   const [, setScreenshotUrl] = useState<string | null>(null);
@@ -469,83 +469,10 @@ export const AppLayout: React.FC = () => {
               flexDirection: 'column',
             }}
           >
-            <div className="panel-header">
-              <h3>
-                <svg width="10" height="10" viewBox="0 0 10 10" fill="currentColor" style={{ opacity: 0.6 }}>
-                  <circle cx="5" cy="5" r="3" />
-                </svg>
-                {leftTab === 'lights' ? 'Lights & Shapes' : leftTab === 'environment' ? 'Environment' : 'Scene Hierarchy'}
-              </h3>
-              <div style={{ display: 'flex', gap: 2, alignItems: 'center' }}>
-                {leftTab === 'lights' && (
-                  <>
-                    <button
-                      className="btn-icon"
-                      style={{ width: 20, height: 20 }}
-                      onClick={() => useLightsStore.getState().addLight()}
-                      title="Add Light"
-                      aria-label="Add Light"
-                    >
-                      <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5">
-                        <path d="M6 1v10M1 6h10" />
-                      </svg>
-                    </button>
-                    <button
-                      className="btn-icon"
-                      style={{ width: 20, height: 20 }}
-                      onClick={() => useHDRIShapesStore.getState().addShape('rectangle')}
-                      title="Add HDRI Shape"
-                      aria-label="Add HDRI Shape"
-                    >
-                      <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5">
-                        <rect x="1.5" y="2.5" width="9" height="7" rx="1" />
-                      </svg>
-                    </button>
-                  </>
-                )}
-                <PanelCloseButton panel="leftPanel" />
-              </div>
-            </div>
-
-            {/* Tab bar */}
-            <div className="tab-bar tab-bar-purple" style={{ flexShrink: 0 }}>
-              {(['lights', 'environment', 'scene'] as const).map((tab) => (
-                <button
-                  key={tab}
-                  className={`tab-item ${leftTab === tab ? 'active' : ''}`}
-                  onClick={() => setLeftTab(tab)}
-                  style={{ flex: 1, justifyContent: 'center' }}
-                >
-                  {tab === 'lights' ? 'Lights' : tab === 'environment' ? 'Env' : 'Scene'}
-                </button>
-              ))}
-            </div>
-
-            {/* Tab content */}
-            <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-              {leftTab === 'lights' ? (
-                <>
-                  <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
-                    <LightListPanel />
-                  </div>
-                  <LightProfileSection />
-                  <LightPresetLibrarySection />
-                </>
-              ) : leftTab === 'environment' ? (
-                <>
-                  <EnvironmentAssetsPanel />
-                  <div style={{ borderTop: '1px solid var(--border)', marginTop: 8, paddingTop: 8 }}>
-                    <GradientBackgroundPanel />
-                  </div>
-                </>
-              ) : (
-                <ErrorBoundary>
-                  <SceneHierarchy sceneRef={sceneRef} />
-                  <div style={{ borderTop: '1px solid var(--border)', marginTop: 8, paddingTop: 8 }}>
-                    <SceneCameraSlot />
-                  </div>
-                </ErrorBoundary>
-              )}
+            <div style={{ flex: 1, minHeight: 0 }}>
+              <ErrorBoundary>
+                <HdrlsLeftColumn sceneRef={sceneRef} onGenerateThumbnail={handleGenerateThumbnail} />
+              </ErrorBoundary>
             </div>
           </div>
         </div>
@@ -557,9 +484,9 @@ export const AppLayout: React.FC = () => {
             side="left"
             onResize={(newSize) => setLeftPanelWidth(newSize)}
             getCurrentSize={() => leftPanelWidth}
-            minSize={150}
-            maxSize={500}
-            onDoubleClick={() => setLeftPanelWidth(220)}
+            minSize={260}
+            maxSize={600}
+            onDoubleClick={() => setLeftPanelWidth(340)}
           />
         )}
 
@@ -605,9 +532,9 @@ export const AppLayout: React.FC = () => {
               side="top"
               onResize={(newSize) => setBottomPanelHeight(newSize)}
               getCurrentSize={() => bottomPanelHeight}
-              minSize={100}
-              maxSize={400}
-              onDoubleClick={() => setBottomPanelHeight(240)}
+              minSize={120}
+              maxSize={700}
+              onDoubleClick={() => setBottomPanelHeight(380)}
             />
           )}
 
@@ -716,8 +643,17 @@ export const AppLayout: React.FC = () => {
               // to reveal a focused value box (the header tab bar is wider than the panel)
               overflow: 'clip',
               borderLeft: 'none',
+              display: 'flex',
+              flexDirection: 'column',
             }}
           >
+            {/* Light Preview: always visible on top, like HDR Light Studio */}
+            <div style={{ height: '36%', minHeight: 190, maxHeight: 420, flexShrink: 0, overflow: 'hidden', borderBottom: '2px solid var(--border-light)' }}>
+              <ErrorBoundary>
+                <LightPreview />
+              </ErrorBoundary>
+            </div>
+
             {/* Tab bar with close button */}
             <div
               style={{
@@ -734,13 +670,7 @@ export const AppLayout: React.FC = () => {
                   onClick={() => setRightTab('properties')}
                 >
                   <CubeIcon />
-                  Properties
-                </div>
-                <div
-                  className={`tab-item ${rightTab === 'preview' ? 'active' : ''}`}
-                  onClick={() => setRightTab('preview')}
-                >
-                  Light Prev
+                  Light Properties
                 </div>
                 <div
                   className={`tab-item ${rightTab === 'material' ? 'active' : ''}`}
@@ -761,17 +691,12 @@ export const AppLayout: React.FC = () => {
             </div>
 
             {/* Tab content */}
-            <div className="panel-body" style={{ overflow: 'hidden', padding: 0, display: 'flex', flexDirection: 'column' }}>
+            <div className="panel-body" style={{ overflow: 'hidden', padding: 0, display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
               {rightTab === 'properties' && (
                 <div className="glossy-3d-trial" style={{ flex: 1, overflow: 'hidden' }}>
                   <ErrorBoundary>
                     <DynamicPropertiesPanel sceneRef={sceneRef} />
                   </ErrorBoundary>
-                </div>
-              )}
-              {rightTab === 'preview' && (
-                <div style={{ flex: 1, overflow: 'hidden' }}>
-                  <LightPreview />
                 </div>
               )}
               {rightTab === 'material' && (
