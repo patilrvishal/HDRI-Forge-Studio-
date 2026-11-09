@@ -37,6 +37,9 @@ const DESIGNED_THUMBS: Record<string, string> = {
   'Golden Hour': '/presetthumbs/golden_hour.png',
   'Overcast': '/presetthumbs/overcast.png',
   'High Noon': '/presetthumbs/high_noon.png',
+  'Ring Light': '/presetthumbs/ring_light.png',
+  'Thin Ring': '/presetthumbs/thin_ring.png',
+  'Soft Ring': '/presetthumbs/soft_ring.png',
 };
 
 /** Icon shown inside each category pill (white when idle, orange when active). */
