@@ -14,6 +14,7 @@ import { useUIStore } from '../../store/uiStore';
 import { newAppearance } from '../../appearance/content';
 import { useSceneStore } from '../../store/sceneStore';
 import { HDRI_PRESETS } from '../../types/Environment';
+import { ENV_CARDS, ENV_PILL_ICONS } from '../../data/envCards';
 import { renderPresetThumbnails } from '../../three/EnvPresetThumbnails';
 
 /**
@@ -71,11 +72,19 @@ const EnvLibrary: React.FC = () => {
     <>
       <div className="lib-pills">
         {ENV_CATS.map((c) => (
-          <button key={c.key} className={`lib-pill ${cat === c.key ? 'active' : ''}`} onClick={() => setCat(c.key)}>{c.label}</button>
+          <button key={c.key} className={`lib-pill ${cat === c.key ? 'active' : ''}`} onClick={() => setCat(c.key)} style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+            <img src={`/pillicons/${ENV_PILL_ICONS[c.key]}${cat === c.key ? '_on' : ''}.png`} alt="" draggable={false} style={{ width: 16, height: 16 }} />
+            {c.label}
+          </button>
         ))}
       </div>
-      <div className="lib-grid">
-        {list.map((p) => (
+      <div className="lib-grid" style={{ gridTemplateColumns: 'repeat(2, 1fr)' }}>
+        {list.map((p) => ENV_CARDS[p.id] ? (
+          <div key={p.id} className={`env-card ${presetId === p.id ? 'active' : ''}`} onClick={() => setPreset(p.id)} title={`${p.name} - ${p.description}`}>
+            <img src={ENV_CARDS[p.id]} alt={p.name} draggable={false} />
+            {presetId === p.id && <span className="env-check">&#10003;</span>}
+          </div>
+        ) : (
           <LibCard key={p.id} label={p.name} title={`${p.name} - ${p.description}`} active={presetId === p.id} onClick={() => setPreset(p.id)}>
             {thumbs[p.id] ? <img src={thumbs[p.id]} alt={p.name} /> : null}
           </LibCard>

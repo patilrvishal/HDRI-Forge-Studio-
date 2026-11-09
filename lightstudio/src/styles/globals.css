@@ -2627,3 +2627,10 @@ button:disabled, [aria-disabled="true"] { cursor: not-allowed; }
 .lib-card .lib-thumb img { width: 100%; height: 100%; object-fit: contain; display: block; }
 .lib-card .lib-name { font-size: 11px; color: var(--text-sec); margin-top: 3px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .lib-card.active .lib-name { color: var(--text); }
+
+/* Designed environment cards: the artwork is the tile; the active one gets the orange ring and a check badge. */
+.env-card { position: relative; cursor: pointer; border-radius: 12px; transition: filter 0.15s; }
+.env-card img { width: 100%; display: block; }
+.env-card:hover { filter: brightness(1.14); }
+.env-card.active::after { content: ''; position: absolute; inset: 0; border: 2px solid var(--accent); border-radius: 12px; box-shadow: 0 0 12px rgba(255, 138, 43, 0.45); pointer-events: none; }
+.env-check { position: absolute; top: 8px; right: 8px; width: 18px; height: 18px; border-radius: 50%; background: var(--accent); color: #fff; font-size: 11px; display: flex; align-items: center; justify-content: center; z-index: 1; }

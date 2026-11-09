@@ -7,6 +7,7 @@ import { Toggle } from '../UI/Toggle';
 import { HDRI_PRESETS, getHDRIPresetById } from '../../types/Environment';
 import type { HDRIPreset } from '../../types/Environment';
 import { renderPresetThumbnails } from '../../three/EnvPresetThumbnails';
+import { ENV_CARDS } from '../../data/envCards';
 
 interface EnvironmentBrowserProps {
   onClose: () => void;
@@ -472,6 +473,21 @@ const EnvironmentBrowser: React.FC<EnvironmentBrowserProps> = ({ onClose, onPres
           >
             {filteredPresets.map((preset) => {
               const isActive = environment.presetId === preset.id;
+              if (ENV_CARDS[preset.id]) {
+                // designed card: the artwork is the whole tile (sphere render + name)
+                return (
+                  <div
+                    key={preset.id}
+                    className={`env-card ${isActive ? 'active' : ''}`}
+                    onClick={() => previewPreset(preset)}
+                    onDoubleClick={() => applyPreset(preset)}
+                    title={`${preset.name} - ${preset.description}`}
+                  >
+                    <img src={ENV_CARDS[preset.id]} alt={preset.name} draggable={false} />
+                    {isActive && <span className="env-check">&#10003;</span>}
+                  </div>
+                );
+              }
               return (
                 <div
                   key={preset.id}
