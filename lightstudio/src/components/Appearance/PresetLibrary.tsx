@@ -40,6 +40,10 @@ const DESIGNED_THUMBS: Record<string, string> = {
   'Ring Light': '/presetthumbs/ring_light.png',
   'Thin Ring': '/presetthumbs/thin_ring.png',
   'Soft Ring': '/presetthumbs/soft_ring.png',
+  'Horizontal Blinds': '/presetthumbs/horizontal_blinds.png',
+  'Vertical Blinds': '/presetthumbs/vertical_blinds.png',
+  'Barn Doors': '/presetthumbs/barn_doors.png',
+  'Half Flag': '/presetthumbs/half_flag.png',
 };
 
 /** Icon shown inside each category pill (white when idle, orange when active). */

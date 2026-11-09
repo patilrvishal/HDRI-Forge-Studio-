@@ -369,7 +369,7 @@ const SECTIONS: ManualSection[] = [
         'Texture scale: multiplier on the texture resolution used for preview and export.',
         'Export area-light pack writes one RGBA EXR (or PNG) per light plus a JSON with where each rectangle sits, for rebuilding the lights in another 3D app. Export EXR / PNG saves a single light.',
       ] },
-      { type: 'tip', data: 'Path tracer: place a light with the Venetian Blinds preset in Area Light mode beside a glossy model and the blinds appear in its reflections.' },
+      { type: 'tip', data: 'Path tracer: place a light with the Horizontal Blinds preset in Area Light mode beside a glossy model and the blinds appear in its reflections.' },
     ],
   },
   {

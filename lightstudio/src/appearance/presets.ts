@@ -206,8 +206,8 @@ const blinds = (n: number, duty: number, rotation: number) => {
   }
   return layer('gradient', { mode: 'linear', rotation, valueRamp: stops([0, 1], [1, 1]), alphaRamp: stops(...s) }, { name: 'Blinds' });
 };
-add('Blinds & Flags', 'Venetian Blinds', 1, ['blinds', 'gobo'], () => build('Venetian Blinds', layer('flat'), { am: [blinds(7, 0.55, 90)] }));
-add('Blinds & Flags', 'Vertical Slats', 1, ['blinds', 'gobo'], () => build('Vertical Slats', layer('flat'), { am: [blinds(6, 0.5, 0)] }));
+add('Blinds & Flags', 'Horizontal Blinds', 1, ['blinds', 'gobo'], () => build('Horizontal Blinds', layer('flat'), { am: [blinds(7, 0.55, 90)] }));
+add('Blinds & Flags', 'Vertical Blinds', 1, ['blinds', 'gobo'], () => build('Vertical Blinds', layer('flat'), { am: [blinds(6, 0.5, 0)] }));
 add('Blinds & Flags', 'Barn Doors', 1, ['flag', 'cutter'], () =>
   build('Barn Doors', layer('flat'), { am: [boxMask(0.3, 0.3, 0.02, 0.02, 0.02)] }));
 add('Blinds & Flags', 'Half Flag', 1, ['flag', 'cutter'], () =>
