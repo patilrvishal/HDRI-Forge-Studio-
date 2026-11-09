@@ -91,7 +91,9 @@ export class SceneManager {
     // Soft "spotlight pool" on the floor - a wide, dim additive glow centred
     // at the origin so the ground reads as lit from above rather than a flat
     // grid on a flat colour. Independent of any light rig or loaded model.
-    this.scene.add(createFloorSpotlightPool());
+    const pool = createFloorSpotlightPool();
+    pool.name = 'FloorSpotlightPool';
+    this.scene.add(pool);
 
     this.camera = new THREE.PerspectiveCamera(45, 1, 0.1, 1000);
     this.camera.position.set(5, 3, 5);
@@ -362,6 +364,28 @@ export class SceneManager {
       this.groundOverlay.position.y = -0.003;
       this.groundOverlay.userData.isProxy = true; // hide from SceneHierarchy
       this.scene.add(this.groundOverlay);
+    }
+  }
+
+  private _fogBeforeSet: THREE.Fog | THREE.FogExp2 | null = null;
+  private _gridBeforeSet = true;
+  /**
+   * A studio set (rig room) is in the scene: hide the editor's own floor dressing (grid, glow pool, ground, fog) so the set's
+   * floor and walls are what you see, then bring it all back when the set is removed.
+   */
+  setStudioSetActive(active: boolean): void {
+    const pool = this.scene.getObjectByName('FloorSpotlightPool');
+    if (active) {
+      if (this._fogBeforeSet === null && this.scene.fog) this._fogBeforeSet = this.scene.fog;
+      this.scene.fog = null;
+      if (this.grid && this.grid.visible) { this._gridBeforeSet = true; this.grid.visible = false; }
+      if (pool) pool.visible = false;
+      if (this.ground) this.ground.visible = false;
+    } else {
+      if (this._fogBeforeSet) { this.scene.fog = this._fogBeforeSet; this._fogBeforeSet = null; }
+      if (this.grid && this._gridBeforeSet) this.grid.visible = true;
+      if (pool) pool.visible = true;
+      if (this.ground) this.ground.visible = true;
     }
   }
 

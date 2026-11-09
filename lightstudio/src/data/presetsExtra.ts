@@ -38,6 +38,15 @@ function spot(
   return pl(name, 'spot', color, brightness, 0, lng, height, radius, { spotAngle: angle, spotPenumbra: penumbra });
 }
 
+/** LED strip hung at (x, 2.9, z), facing down, 0.15 m wide and 2.0 m long (long side along Z). */
+function stripDown(name: string, x: number, z: number): PresetLight {
+  const r = Math.hypot(x, z);
+  const lng = (Math.atan2(x, z) * 180) / Math.PI;
+  const l = area(name, '#f4f8ff', 200, lng < 0 ? lng + 360 : lng, 2.9, r, 0.15, 2.0, 30);
+  l.transform = { ...l.transform, rotation: { ...l.transform.rotation, x: -90, y: 0, z: 0, enabled: true } };
+  return l;
+}
+
 const ring = (n: number, make: (lng: number, i: number) => PresetLight): PresetLight[] =>
   Array.from({ length: n }, (_, i) => make((360 / n) * i, i));
 
@@ -45,8 +54,8 @@ const ring = (n: number, make: (lng: number, i: number) => PresetLight): PresetL
 export const EXTRA_STUDIO: ExtraPreset[] = [
   { id: 'studio_twin_softbox', name: 'Twin Softboxes', description: 'Two large softboxes either side, the classic car-studio pair', tags: ['softbox', 'symmetrical', 'car'],
     lights: [area('Left Softbox', '#fff8f0', 260, 150, 3, 5, 2.5, 2, 70), area('Right Softbox', '#fff8f0', 260, 30, 3, 5, 2.5, 2, 70)] },
-  { id: 'studio_strip_tunnel', name: 'Strip Tunnel', description: 'Rows of overhead strips, long clean reflections down the bodywork', tags: ['strips', 'tunnel', 'car', 'overhead'],
-    lights: [-1, 0, 1].flatMap((k) => [area(`Strip ${k + 2}`, '#f4f8ff', 200, 90 + k * 55, 6, 1.2, 0.5, 5, 30)]) },
+  { id: 'studio_strip_tunnel', name: 'Strip Tunnel', description: 'A dark tunnel with six LED strips hung across the ceiling, long clean reflections down the bodywork', tags: ['strips', 'tunnel', 'car', 'overhead'],
+    lights: [-2.5, -1.5, -0.5, 0.5, 1.5, 2.5].map((x, i) => stripDown(`Strip ${i + 1}`, x, 0.5)) },
   { id: 'studio_panel_ring', name: 'Panel Ring', description: 'Six panels in a ring, even all-round wraparound', tags: ['ring', 'even', 'product'],
     lights: ring(6, (lng, i) => area(`Panel ${i + 1}`, '#ffffff', 150, lng, 2.5, 5, 1.6, 2.2, 60)) },
   { id: 'studio_cyc_white', name: 'Cyc Wall White', description: 'A white cyclorama with two 1.2 m softboxes at 45 degrees and a soft top row, bright infinity look', tags: ['cyc', 'white', 'highkey', 'clean'],

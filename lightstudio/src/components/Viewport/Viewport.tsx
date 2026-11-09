@@ -1162,6 +1162,7 @@ export const Viewport: React.FC<ViewportProps> = ({ sceneManagerRef, onScreensho
     const old = scene.getObjectByName(RIG_SET_NAME);
     if (old) { scene.remove(old); disposeRigSet(old); }
     if (rigSetKind) scene.add(buildRigSet(rigSetKind, lights.filter((l) => rigLightIds.includes(l.id))));
+    sm.setStudioSetActive(!!rigSetKind);
   }, [rigSetKind, rigLightIds, lights, sceneManagerRef]);
 
   // Sync lights to scene

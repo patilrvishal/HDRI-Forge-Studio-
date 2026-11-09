@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import type { RigSetKind } from '../data/rigSets';
 import type { Light } from '../types/Light';
 import { buildCycStudio } from './cycStudio';
+import { buildStripTunnel } from './tunnelStudio';
 
 export const RIG_SET_NAME = 'StudioRigSet';
 
@@ -92,6 +93,11 @@ export function buildRigSet(kind: RigSetKind, lights: Light[]): THREE.Group {
   group.name = RIG_SET_NAME;
   group.userData.rigSet = kind;
 
+  if (kind === 'strip_tunnel') {
+    buildStripTunnel(group, lights);
+    group.traverse((o) => { (o as THREE.Mesh).raycast = () => {}; });
+    return group;
+  }
   if (kind === 'cyc_white') {
     // The full Cyc Wall White studio from the rig sheet (cyclorama, truss ceiling with panel row, softboxes on tripods).
     buildCycStudio(group, lights);
