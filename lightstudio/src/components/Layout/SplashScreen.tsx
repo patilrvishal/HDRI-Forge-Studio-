@@ -4,6 +4,9 @@ import { setIntroEnabled } from '../../utils/introPref';
 
 /** The intro video, bundled from /public. */
 const INTRO_SRC = '/intro.mp4';
+/** Only the first part of the video is shown; the sound fades out over the last half second before it ends. */
+const INTRO_SECONDS = 10;
+const AUDIO_FADE_SECONDS = 0.5;
 /** If the video cannot play at all, fall back to the quick logo splash after this long. */
 const FALLBACK_AFTER_MS = 2500;
 
@@ -118,6 +121,11 @@ export function SplashScreen({ onDone }: { onDone: () => void }) {
           playsInline
           preload="auto"
           onEnded={finish}
+          onTimeUpdate={(e) => {
+            const v = e.currentTarget;
+            if (v.currentTime >= INTRO_SECONDS) finish();
+            else if (v.currentTime > INTRO_SECONDS - AUDIO_FADE_SECONDS) v.volume = Math.max(0, (INTRO_SECONDS - v.currentTime) / AUDIO_FADE_SECONDS);
+          }}
           onError={() => setFailed(true)}
           style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'contain', background: '#000' }}
         />
