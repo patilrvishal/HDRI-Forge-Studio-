@@ -26,7 +26,7 @@ import { useViewportModeStore } from '../../store/viewportModeStore';
 import { CameraSwitcher } from './CameraSwitcher';
 import { useRigSetStore } from '../../store/rigSetStore';
 import { buildRigSet } from '../../three/rigSet';
-import { findRigGroup, makeRigGroup, removeRigGroup, fillRigGroup, applyDefaultHdriInclude } from '../../three/rigGroup';
+import { findRigGroup, makeRigGroup, removeRigGroup, fillRigGroup, applyDefaultHdriInclude, applyMaterialOverrides } from '../../three/rigGroup';
 import { applySetReflections } from '../../three/setReflections';
 import { ViewportPropertiesPanel } from './ViewportPropertiesPanel';
 import { CameraPanel } from './CameraPanel';
@@ -1163,6 +1163,7 @@ export const Viewport: React.FC<ViewportProps> = ({ sceneManagerRef, onScreensho
     () => lights.filter((l) => rigLightIds.includes(l.id)).map((l) => [l.id, l.name, l.color, l.areaWidth, l.areaHeight, l.transform.position.x, l.transform.position.y, l.transform.position.z].join(',')).join('|'),
     [lights, rigLightIds],
   );
+  const rigRebuild = useRigSetStore((s) => s.rebuild);
   const lastRigName = useRef('');
   useEffect(() => {
     const sm = sceneManagerRef.current;
@@ -1177,6 +1178,7 @@ export const Viewport: React.FC<ViewportProps> = ({ sceneManagerRef, onScreensho
       if (!group) { group = makeRigGroup(rigName || 'Studio Rig'); scene.add(group); }
       const built = buildRigSet(rigSetKind, lights.filter((l) => rigLightIds.includes(l.id)));
       fillRigGroup(group, built);
+      applyMaterialOverrides(group, useRigSetStore.getState().overrides);   // the user's colour / roughness / metalness edits
       applySetReflections(sm.renderer, scene, group);     // glossy surfaces reflect the room (strips streak across the floor)
       applyDefaultHdriInclude(group, lastRigName.current && lastRigName.current !== group.name ? lastRigName.current : undefined);
       lastRigName.current = group.name;
@@ -1185,7 +1187,7 @@ export const Viewport: React.FC<ViewportProps> = ({ sceneManagerRef, onScreensho
     }
     sm.setStudioSetActive(!!rigSetKind);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rigSetKind, rigName, rigSig, sceneManagerRef]);
+  }, [rigSetKind, rigName, rigSig, rigRebuild, sceneManagerRef]);
 
   // The rig's lights live inside its hierarchy group. The light objects are created by the sync effect below, so the move
   // waits until that has run.

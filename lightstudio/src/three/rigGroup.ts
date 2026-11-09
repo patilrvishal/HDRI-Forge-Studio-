@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { objectKey } from './objectBinding';
 import { useObjectHdriStore, defaultObjectHdri, type ObjectHdriSettings } from '../store/objectHdriStore';
 import { disposeRigSet } from './rigSet';
+import type { MatOverride } from '../store/rigSetStore';
 
 /** The hierarchy group a rig makes in the scene: named after the rig, holding its lights and its studio-set parts. */
 export function findRigGroup(scene: THREE.Scene): THREE.Group | null {
@@ -70,4 +71,43 @@ export function applyDefaultHdriInclude(group: THREE.Group, previousName?: strin
     for (const [k, v] of Object.entries(add)) if (!next[k]) next[k] = v;     // keep any manual choice
     return { settings: next, version: s.version + 1 };
   });
+}
+
+const isGlow = (m: THREE.MeshStandardMaterial): boolean => !!m.emissive && m.emissive.r + m.emissive.g + m.emissive.b > 0.01;
+
+/** The standard materials of a part, split into the lit body and the glowing (emissive) surfaces. */
+export function partMaterials(part: THREE.Object3D): { body: THREE.MeshStandardMaterial[]; glow: THREE.MeshStandardMaterial[] } {
+  const body = new Set<THREE.MeshStandardMaterial>();
+  const glow = new Set<THREE.MeshStandardMaterial>();
+  part.traverse((o) => {
+    const m = (o as THREE.Mesh).material as THREE.MeshStandardMaterial | undefined;
+    if (!m || !(m as THREE.MeshStandardMaterial).isMeshStandardMaterial) return;
+    (isGlow(m) ? glow : body).add(m);
+  });
+  return { body: [...body], glow: [...glow] };
+}
+
+/**
+ * Applies remembered edits to the parts they are named after. Passing null puts every part back to the colours it was
+ * built with (the group is rebuilt, which also drops the edits).
+ */
+export function applyMaterialOverrides(group: THREE.Group, overrides: Record<string, MatOverride> | null): void {
+  if (overrides === null) return;
+  for (const part of group.children) {
+    if (!part.userData.rigPart) continue;
+    const ov = overrides[part.name];
+    if (!ov) continue;
+    const { body, glow } = partMaterials(part);
+    for (const m of body) {
+      if (ov.color !== undefined) m.color.set(ov.color);
+      if (ov.roughness !== undefined) m.roughness = ov.roughness;
+      if (ov.metalness !== undefined) m.metalness = ov.metalness;
+      m.needsUpdate = true;
+    }
+    for (const m of glow) {
+      if (ov.glowColor !== undefined) m.emissive.set(ov.glowColor);
+      if (ov.glow !== undefined) m.emissiveIntensity = ov.glow;
+      m.needsUpdate = true;
+    }
+  }
 }

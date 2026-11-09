@@ -10,6 +10,7 @@ import { LightProperties } from '../Lights/LightProperties';
 import { HDRIShapeProperties } from '../Lights/HDRIShapeProperties';
 import { CustomHDRIProperties } from '../Environment/CustomHDRIProperties';
 import { ObjectHdriLightSection } from './ObjectHdriLightSection';
+import { RigGroupProperties, RigPartProperties } from './RigProperties';
 
 /* ═══════════════════════════════════════════════════════════════════
    Utility: find a Three.js object by UUID in the scene
@@ -637,6 +638,22 @@ export const DynamicPropertiesPanel: React.FC<DynamicPropertiesPanelProps> = ({ 
   try {
   // Priority 1: Hierarchy has a selection -> route by object type
   if (selectedObj && nodeType) {
+    // A rig group (or one of its parts): lights, room and fixtures, organised and editable
+    if (selectedObj.userData.isRigSet && selectedObj instanceof THREE.Group) {
+      return (
+        <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+          <RigGroupProperties group={selectedObj} />
+        </div>
+      );
+    }
+    if (selectedObj.userData.rigPart && selectedObj.parent?.userData.isRigSet) {
+      return (
+        <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+          <RigPartProperties part={selectedObj} group={selectedObj.parent as THREE.Group} />
+        </div>
+      );
+    }
+
     if (nodeType === 'light') {
       return (
         <div style={{ flex: 1, overflowY: 'auto' }}>
