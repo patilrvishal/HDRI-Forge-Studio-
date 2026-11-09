@@ -859,7 +859,7 @@ lights.forEach((l, i) => {
     }
     return { m, off, flip: !!l.flipX, grade: needsGrading(l) };
   });
-  const objCaster = HdriObjectCaster.build(scene);
+  const objCaster = HdriObjectCaster.build(scene, capturePoint);
   const lightDist = lights.map((l) => (l.type === 'directional' || l.type === 'hemisphere' ? Infinity : l.position.distanceTo(capturePoint)));
   // For each pixel, calculate analytical radiance
   for (let y = 0; y < height; y++) {

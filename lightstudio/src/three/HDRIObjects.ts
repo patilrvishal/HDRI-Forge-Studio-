@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { MeshBVH } from 'three-mesh-bvh';
 import { findObjectByKey } from './objectBinding';
 import { useObjectHdriStore } from '../store/objectHdriStore';
+import { getShadedMap, sampleShaded, type ShadedMap } from './hdriShading';
 
 interface CastMesh {
   mesh: THREE.Mesh;
@@ -11,6 +12,8 @@ interface CastMesh {
   box: THREE.Box3;
   color: THREE.Color;
   opacity: number;
+  /** Take the surface's lit radiance (shading, glow, reflections) from the shaded map instead of its flat colour. */
+  shaded: boolean;
 }
 
 export interface ObjectHit {
@@ -54,7 +57,10 @@ export class HdriObjectCaster {
   private normal = new THREE.Vector3();
   private up = new THREE.Vector3(0, 1, 0);
 
-  static build(scene: THREE.Scene): HdriObjectCaster | null {
+  private shadedMap: ShadedMap | null = null;
+  private shadeOut: [number, number, number] = [0, 0, 0];
+
+  static build(scene: THREE.Scene, origin: THREE.Vector3 = new THREE.Vector3()): HdriObjectCaster | null {
     const settings = useObjectHdriStore.getState().settings;
     const keys = Object.keys(settings).filter((k) => settings[k].include);
     if (!keys.length) return null;
@@ -86,10 +92,13 @@ export class HdriObjectCaster {
           inverse: new THREE.Matrix4().copy(m.matrixWorld).invert(),
           color,
           opacity: Math.max(0, Math.min(1, cfg.opacity / 100)),
+          shaded: cfg.colorMode === 'material',
         });
       });
     }
-    return caster.meshes.length ? caster : null;
+    if (!caster.meshes.length) return null;
+    if (caster.meshes.some((m) => m.shaded)) caster.shadedMap = getShadedMap(scene, origin);
+    return caster;
   }
 
   get count(): number {
@@ -159,7 +168,12 @@ export class HdriObjectCaster {
         if (dir.dot(side) >= 0) continue;
       }
       if (!best || dist < best.dist) {
-        best = { dist, r: c.color.r, g: c.color.g, b: c.color.b, alpha: c.opacity };
+        if (c.shaded && this.shadedMap) {
+          sampleShaded(this.shadedMap, dir.x, dir.y, dir.z, this.shadeOut);
+          best = { dist, r: this.shadeOut[0], g: this.shadeOut[1], b: this.shadeOut[2], alpha: c.opacity };
+        } else {
+          best = { dist, r: c.color.r, g: c.color.g, b: c.color.b, alpha: c.opacity };
+        }
       }
     }
     return best;

@@ -28,6 +28,7 @@ import { useRigSetStore } from '../../store/rigSetStore';
 import { buildRigSet } from '../../three/rigSet';
 import { findRigGroup, makeRigGroup, removeRigGroup, fillRigGroup, applyDefaultHdriInclude, applyMaterialOverrides } from '../../three/rigGroup';
 import { applySetReflections } from '../../three/setReflections';
+import { registerShadedProvider, createShadedProvider } from '../../three/hdriShading';
 import { ViewportPropertiesPanel } from './ViewportPropertiesPanel';
 import { CameraPanel } from './CameraPanel';
 import { GizmoManager, type GizmoMode } from '../../three/GizmoManager';
@@ -1169,6 +1170,7 @@ export const Viewport: React.FC<ViewportProps> = ({ sceneManagerRef, onScreensho
     const sm = sceneManagerRef.current;
     if (!sm) return;
     const scene = sm.scene;
+    registerShadedProvider(createShadedProvider(sm.renderer));      // lets the HDRI use the room's real shading
     let group = findRigGroup(scene);
     if (group && (!rigSetKind || group.name !== rigName)) {
       removeRigGroup(scene, group);
