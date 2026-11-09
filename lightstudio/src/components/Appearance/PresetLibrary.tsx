@@ -33,6 +33,10 @@ const DESIGNED_THUMBS: Record<string, string> = {
   'Pentagon': '/presetthumbs/pentagon.png',
   'Diamond': '/presetthumbs/diamond.png',
   'Round Hexagon': '/presetthumbs/round_hexagon.png',
+  'Clear Day': '/presetthumbs/clear_day.png',
+  'Golden Hour': '/presetthumbs/golden_hour.png',
+  'Overcast': '/presetthumbs/overcast.png',
+  'High Noon': '/presetthumbs/high_noon.png',
 };
 
 /** Icon shown inside each category pill (white when idle, orange when active). */
