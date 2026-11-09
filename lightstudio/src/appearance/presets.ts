@@ -176,8 +176,8 @@ add('Curves', 'Loop', 1, ['curve', 'ring'], () =>
     points: curveFrom([{ x: 0, y: 0.7 }, { x: 0.7, y: 0 }, { x: 0, y: -0.7 }, { x: -0.7, y: 0 }], true),
     closed: true, greenOffset: 0.14, blueOffset: 0.14,
   })));
-add('Curves', 'Rim Arc', 2, ['curve', 'rim'], () =>
-  build('Rim Arc', layer('lumicurve', {
+add('Curves', 'Arc', 2, ['curve', 'rim'], () =>
+  build('Arc', layer('lumicurve', {
     points: curveFrom([{ x: -0.8, y: -0.35 }, { x: 0, y: 0.25 }, { x: 0.8, y: -0.35 }]),
     greenOffset: 0.2, blueOffset: 0.08, symmetrical: false, greenRamp: cosStops([0, 1], [1, 0]), blueRamp: cosStops([0, 1], [0.4, 0.3], [1, 0]),
     lengthRamp: cosStops([0, 0], [0.5, 1], [1, 0]),

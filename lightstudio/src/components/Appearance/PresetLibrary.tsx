@@ -44,6 +44,10 @@ const DESIGNED_THUMBS: Record<string, string> = {
   'Vertical Blinds': '/presetthumbs/vertical_blinds.png',
   'Barn Doors': '/presetthumbs/barn_doors.png',
   'Half Flag': '/presetthumbs/half_flag.png',
+  'Neon Wave': '/presetthumbs/neon_wave.png',
+  'Loop': '/presetthumbs/loop.png',
+  'Arc': '/presetthumbs/arc.png',
+  'Taper Streak': '/presetthumbs/taper_streak.png',
 };
 
 /** Icon shown inside each category pill (white when idle, orange when active). */
