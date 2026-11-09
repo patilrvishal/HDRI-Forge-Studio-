@@ -43,6 +43,14 @@ export function fillRigGroup(group: THREE.Group, built: THREE.Group): void {
     group.add(child);
     i++;
   }
+  // the room and its fixtures cast and receive shadows (glowing faces do not: they are the light)
+  group.traverse((o) => {
+    const m = o as THREE.Mesh;
+    if (!m.isMesh) return;
+    const mat = m.material as THREE.MeshStandardMaterial;
+    m.receiveShadow = true;
+    m.castShadow = !(mat && mat.emissive && mat.emissive.r + mat.emissive.g + mat.emissive.b > 0.01);
+  });
   group.userData.reflBox = built.userData.reflBox;
   group.userData.rigSet = built.userData.rigSet;
 }
@@ -118,5 +126,42 @@ export function applyMaterialOverrides(group: THREE.Group, overrides: Record<str
       m.emissiveIntensity = (ov.glow ?? o.intensity) * look.brightness * (1 - look.darkness * 0.5);
       m.needsUpdate = true;
     }
+  }
+}
+
+/** Share of an area light's output that moves to its shadow-casting companion. */
+export const SHADOW_SHARE = 0.55;
+
+/**
+ * Shadow casters for the rig's strongest area lights. An area light cannot cast shadows in the renderer, so each of the
+ * brightest ones gets a wide spot light at the same place, facing the same way, carrying a share of its output with a
+ * soft shadow map. Together they give the room and the model real contact and cast shadows.
+ */
+export function syncShadowLights(group: THREE.Group, lights: Array<{ id: string; name: string; color: string; brightness: number; areaWidth?: number; areaHeight?: number; position: THREE.Vector3; facingDown: boolean }>): void {
+  for (const c of [...group.children]) {
+    if (c.userData.rigShadow) {
+      group.remove(c);
+      (c as THREE.SpotLight).shadow?.map?.dispose();
+      (c as THREE.SpotLight).target?.removeFromParent();
+    }
+  }
+  const top = [...lights].sort((a, b) => b.brightness * (b.areaWidth ?? 1) * (b.areaHeight ?? 1) - a.brightness * (a.areaWidth ?? 1) * (a.areaHeight ?? 1)).slice(0, 4);
+  for (const l of top) {
+    const spot = new THREE.SpotLight(new THREE.Color(l.color), 0, 0, Math.PI / 2.1, 1, 2);
+    spot.name = `${l.name} Shadow`;
+    spot.userData.rigShadow = true;
+    spot.position.copy(l.position);
+    const dir = l.facingDown ? new THREE.Vector3(0, -1, 0) : l.position.clone().negate().normalize();
+    spot.target.position.copy(l.position).addScaledVector(dir, 5);
+    // candela of a lit rectangle ~ luminance x area; the companion carries SHADOW_SHARE of it
+    spot.intensity = (l.brightness / 100) * Math.max(0.02, (l.areaWidth ?? 1) * (l.areaHeight ?? 1)) * SHADOW_SHARE;
+    spot.castShadow = true;
+    spot.shadow.mapSize.set(2048, 2048);
+    spot.shadow.camera.near = 0.15;
+    spot.shadow.camera.far = 40;
+    spot.shadow.bias = -0.0004;
+    spot.shadow.normalBias = 0.02;
+    spot.shadow.radius = 6;
+    group.add(spot, spot.target);
   }
 }

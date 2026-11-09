@@ -26,7 +26,7 @@ import { useViewportModeStore } from '../../store/viewportModeStore';
 import { CameraSwitcher } from './CameraSwitcher';
 import { useRigSetStore } from '../../store/rigSetStore';
 import { buildRigSet } from '../../three/rigSet';
-import { findRigGroup, makeRigGroup, removeRigGroup, fillRigGroup, applyDefaultHdriInclude, applyMaterialOverrides } from '../../three/rigGroup';
+import { findRigGroup, makeRigGroup, removeRigGroup, fillRigGroup, applyDefaultHdriInclude, applyMaterialOverrides, syncShadowLights, SHADOW_SHARE } from '../../three/rigGroup';
 import { applySetReflections } from '../../three/setReflections';
 import { registerShadedProvider, createShadedProvider } from '../../three/hdriShading';
 import { ViewportPropertiesPanel } from './ViewportPropertiesPanel';
@@ -1208,6 +1208,44 @@ export const Viewport: React.FC<ViewportProps> = ({ sceneManagerRef, onScreensho
     }, 0);
     return () => window.clearTimeout(t);
   }, [lights, rigLightIds, rigName, rigSetKind, sceneManagerRef]);
+
+  // Shadow-casting companions for the rig's strongest area lights (brightness, size and position all feed them).
+  const rigShadowSig = useMemo(
+    () => lights.filter((l) => rigLightIds.includes(l.id)).map((l) => [l.id, l.color, l.brightness, l.areaWidth, l.areaHeight, l.transform.position.x, l.transform.position.y, l.transform.position.z, l.transform.rotation.enabled, l.transform.rotation.x].join(',')).join('|'),
+    [lights, rigLightIds],
+  );
+  useEffect(() => {
+    if (!rigSetKind) return;
+    let affected: Array<[THREE.RectAreaLight, number]> = [];
+    const t = window.setTimeout(() => {
+      const sm = sceneManagerRef.current;
+      const lm = lightManagerRef.current;
+      if (!sm || !lm) return;
+      const group = findRigGroup(sm.scene);
+      if (!group) return;
+      const rl = lights.filter((l) => rigLightIds.includes(l.id) && (l.type === 'area' || l.areaLight) && l.visible !== false);
+      syncShadowLights(group, rl.map((l) => ({
+        id: l.id, name: l.name, color: l.color, brightness: l.brightness, areaWidth: l.areaWidth, areaHeight: l.areaHeight,
+        position: new THREE.Vector3(l.transform.position.x, l.transform.position.y, l.transform.position.z),
+        facingDown: !!l.transform.rotation.enabled && Math.abs(l.transform.rotation.x + 90) < 1,
+      })));
+      // the four brightest hand a share of their output to their shadow casters
+      const strongest = [...rl].sort((a, b) => b.brightness * (b.areaWidth ?? 1) * (b.areaHeight ?? 1) - a.brightness * (a.areaWidth ?? 1) * (a.areaHeight ?? 1)).slice(0, 4);
+      for (const l of strongest) {
+        const obj = lm.getLightObject(l.id) as THREE.RectAreaLight | null;
+        if (!obj) continue;
+        obj.userData.shadowShare = SHADOW_SHARE;
+        obj.intensity = (l.brightness / 100) * (1 - SHADOW_SHARE);
+        affected.push([obj, l.brightness / 100]);
+      }
+    }, 60);
+    return () => {
+      window.clearTimeout(t);
+      for (const [obj, full] of affected) { delete obj.userData.shadowShare; obj.intensity = full; }     // back to the full output
+      affected = [];
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rigSetKind, rigName, rigShadowSig, sceneManagerRef]);
 
   // Sync lights to scene
   useEffect(() => {

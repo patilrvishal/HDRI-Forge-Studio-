@@ -167,6 +167,9 @@ export class LightManager {
     // Map brightness 0-1000 to intensity 0-10
     const intensity = (lightData.brightness / 1000) * 10;
     light.intensity = intensity;
+    // a rig light that has a shadow-casting companion hands part of its light to it (the area light itself cannot cast shadows)
+    const share = light.userData.shadowShare as number | undefined;
+    if (share) light.intensity = intensity * (1 - share);
 
     // Area / overhead lights: push the dimensions onto the actual THREE light
     if (light instanceof THREE.RectAreaLight) {
