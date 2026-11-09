@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { isTauri } from '@tauri-apps/api/core';
 import { setIntroEnabled } from '../../utils/introPref';
 
 /** The intro video, bundled from /public. */
@@ -10,22 +9,12 @@ const AUDIO_FADE_SECONDS = 0.5;
 /** If the video cannot play at all, fall back to the quick logo splash after this long. */
 const FALLBACK_AFTER_MS = 2500;
 
-/** Put the desktop window into real full screen for the intro, and report what it was before so it can be restored. */
-async function setWindowFullscreen(on: boolean): Promise<boolean | null> {
-  if (!isTauri()) return null;
-  try {
-    const { getCurrentWindow } = await import('@tauri-apps/api/window');
-    const win = getCurrentWindow();
-    const was = await win.isFullscreen();
-    await win.setFullscreen(on);
-    return was;
-  } catch {
-    return null;
-  }
-}
+/** Splash size: a standard software loading screen is a centered 16:9 box, not the whole display. */
+const SPLASH_WIDTH = 'min(960px, 72vw)';
 
 /**
- * Startup intro: the video plays full screen while the workspace loads behind it, then fades away to the app.
+ * Startup intro: the video plays as a standard-size, centered loading screen while the workspace loads behind it, then fades
+ * away to the app. The window itself is left exactly as it is.
  * Click, Space, Enter, Escape or the Skip button end it early. If the video cannot be played the old logo splash shows.
  */
 export function SplashScreen({ onDone }: { onDone: () => void }) {
@@ -38,23 +27,17 @@ export function SplashScreen({ onDone }: { onDone: () => void }) {
   neverRef.current = never;
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const finished = useRef(false);
-  const wasFullscreen = useRef<boolean | null>(null);
 
   const finish = useCallback(() => {
     if (finished.current) return;
     finished.current = true;
     if (neverRef.current) setIntroEnabled(false);
     setFading(true);
-    // leave full screen only if the intro was what put the window there
-    void (async () => {
-      if (wasFullscreen.current === false) await setWindowFullscreen(false);
-    })();
     window.setTimeout(onDone, 450);
   }, [onDone]);
 
-  // full screen window for the duration of the video
+  // the Skip button shows shortly after the video starts
   useEffect(() => {
-    void setWindowFullscreen(true).then((was) => { wasFullscreen.current = was; });
     const skipTimer = window.setTimeout(() => setShowSkip(true), 800);
     return () => window.clearTimeout(skipTimer);
   }, []);
@@ -106,7 +89,7 @@ export function SplashScreen({ onDone }: { onDone: () => void }) {
         position: 'fixed',
         inset: 0,
         zIndex: 99999,
-        background: '#000',
+        background: 'radial-gradient(circle at 50% 50%, #0b0f16 0%, #020305 80%)',
         opacity: fading ? 0 : 1,
         transition: 'opacity 450ms ease',
         pointerEvents: fading ? 'none' : 'auto',
@@ -127,7 +110,11 @@ export function SplashScreen({ onDone }: { onDone: () => void }) {
             else if (v.currentTime > INTRO_SECONDS - AUDIO_FADE_SECONDS) v.volume = Math.max(0, (INTRO_SECONDS - v.currentTime) / AUDIO_FADE_SECONDS);
           }}
           onError={() => setFailed(true)}
-          style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'contain', background: '#000' }}
+          style={{
+            position: 'absolute', left: '50%', top: '50%', transform: 'translate(-50%, -50%)',
+            width: SPLASH_WIDTH, aspectRatio: '16 / 9', objectFit: 'cover', background: '#000',
+            borderRadius: 14, boxShadow: '0 0 0 1px rgba(255,255,255,0.07), 0 24px 80px rgba(0,0,0,0.7)',
+          }}
         />
       ) : (
         <div
