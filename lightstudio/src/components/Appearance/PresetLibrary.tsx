@@ -22,6 +22,11 @@ const DESIGNED_THUMBS: Record<string, string> = {
   'Bulb Cool': '/presetthumbs/bulb_cool.png',
   'Spot Tight': '/presetthumbs/spot_tight.png',
   'Sun Disc': '/presetthumbs/sun_disc.png',
+  'Strip Light': '/presetthumbs/strip_light.png',
+  'Strip Fade Left': '/presetthumbs/strip_fade_left.png',
+  'Strip Centre Fade': '/presetthumbs/strip_centre_fade.png',
+  'Tall Strip': '/presetthumbs/tall_strip.png',
+  'Tube Light': '/presetthumbs/tube_light.png',
 };
 
 /** Icon shown inside each category pill (white when idle, orange when active). */
