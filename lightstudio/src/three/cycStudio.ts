@@ -129,7 +129,7 @@ export function buildCycStudio(group: THREE.Group, lights: Light[]): void {
   group.add(concrete);
 
   // ── cyclorama: floor sweep + 1 m cove + wall, 6 m wide, matte white ─────────────────────────
-  const profile: [number, number][] = [[3.2, -0.0005], [WALL_Z + CYC_R, -0.0005]];
+  const profile: [number, number][] = [[WALL_Z + CYC_R, -0.0005]];          // cove and wall only: the sweep's floor is its own part below
   for (let i = 1; i <= 24; i++) {
     const a = (i / 24) * (Math.PI / 2);
     profile.push([WALL_Z + CYC_R - Math.sin(a) * CYC_R, CYC_R - Math.cos(a) * CYC_R - 0.0005]);
@@ -137,8 +137,12 @@ export function buildCycStudio(group: THREE.Group, lights: Light[]): void {
   profile.push([WALL_Z, CYC_H]);
   const cyc = new THREE.Mesh(sweep(profile, CYC_HALF), std(0xeeeeee, 0.78, 0, { side: THREE.DoubleSide }));
   cyc.name = 'Cyclorama';
-  cyc.userData.mirrorFloor = true;            // the floor sweep is glossy white
-  cyc.userData.mirrorRoughness = 0.45;
+  const cycFloor = new THREE.Mesh(new THREE.PlaneGeometry(CYC_HALF * 2, 3.2 - (WALL_Z + CYC_R)), std(0xeeeeee, 0.45, 0));
+  cycFloor.name = 'Cyc Floor';
+  cycFloor.userData.mirrorFloor = true;       // glossy white sweep
+  cycFloor.rotation.x = -Math.PI / 2;
+  cycFloor.position.set(0, -0.0005, (3.2 + WALL_Z + CYC_R) / 2);
+  group.add(cycFloor);
   cyc.receiveShadow = true;
   group.add(cyc);
 

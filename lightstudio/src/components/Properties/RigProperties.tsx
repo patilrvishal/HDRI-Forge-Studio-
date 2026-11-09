@@ -61,7 +61,7 @@ export const PartEditor: React.FC<{ part: THREE.Object3D; group: THREE.Group; co
 
   const apply = useCallback((patch: MatOverride) => {
     setOverride(part.name, patch);
-    applyMaterialOverrides(group, { [part.name]: { ...(useRigSetStore.getState().overrides[part.name] ?? {}), ...patch } });
+    applyMaterialOverrides(group, useRigSetStore.getState().overrides);      // every part's remembered edits, not just this one
     useObjectHdriStore.getState().touch();                 // the HDRI uses the colours too
     setTick((n) => n + 1);
   }, [group, part.name, setOverride]);

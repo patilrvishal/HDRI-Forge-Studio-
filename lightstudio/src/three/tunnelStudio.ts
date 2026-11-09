@@ -93,7 +93,7 @@ export function buildStripTunnel(group: THREE.Group, lights: Light[]): void {
   group.add(apron);
 
   // far wall: charcoal cyc with a 1 m cove into the floor
-  const profile: [number, number][] = [[FRONT_Z - 0.0, -0.0005], [WALL_Z + R, -0.0005]];
+  const profile: [number, number][] = [[WALL_Z + R, -0.0005]];          // cove and wall only: the floor is its own part, so editing Floor changes what you see
   for (let i = 1; i <= 24; i++) {
     const a = (i / 24) * (Math.PI / 2);
     profile.push([WALL_Z + R - Math.sin(a) * R, R - Math.cos(a) * R - 0.0005]);
@@ -101,8 +101,6 @@ export function buildStripTunnel(group: THREE.Group, lights: Light[]): void {
   profile.push([WALL_Z, H]);
   const cyc = new THREE.Mesh(sweep(profile, HALF_W), std(0x3c3d42, 0.8, 0, { side: THREE.DoubleSide }));
   cyc.name = 'Cyc Wall';
-  cyc.userData.mirrorFloor = true;            // its swept surface also forms the floor, which is polished concrete
-  cyc.userData.mirrorRoughness = 0.22;
   group.add(cyc);
 
   // side walls: dark panelled steel, with vertical panel seams
