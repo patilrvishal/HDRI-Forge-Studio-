@@ -26,6 +26,7 @@ import { useViewportModeStore } from '../../store/viewportModeStore';
 import { CameraSwitcher } from './CameraSwitcher';
 import { useRigSetStore } from '../../store/rigSetStore';
 import { buildRigSet, disposeRigSet, RIG_SET_NAME } from '../../three/rigSet';
+import { applySetReflections } from '../../three/setReflections';
 import { ViewportPropertiesPanel } from './ViewportPropertiesPanel';
 import { CameraPanel } from './CameraPanel';
 import { GizmoManager, type GizmoMode } from '../../three/GizmoManager';
@@ -1161,7 +1162,11 @@ export const Viewport: React.FC<ViewportProps> = ({ sceneManagerRef, onScreensho
     const scene = sm.scene;
     const old = scene.getObjectByName(RIG_SET_NAME);
     if (old) { scene.remove(old); disposeRigSet(old); }
-    if (rigSetKind) scene.add(buildRigSet(rigSetKind, lights.filter((l) => rigLightIds.includes(l.id))));
+    if (rigSetKind) {
+      const set = buildRigSet(rigSetKind, lights.filter((l) => rigLightIds.includes(l.id)));
+      scene.add(set);
+      applySetReflections(sm.renderer, scene, set);       // glossy surfaces reflect the room (strips streak across the floor)
+    }
     sm.setStudioSetActive(!!rigSetKind);
   }, [rigSetKind, rigLightIds, lights, sceneManagerRef]);
 

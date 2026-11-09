@@ -3,6 +3,7 @@ import type { RigSetKind } from '../data/rigSets';
 import type { Light } from '../types/Light';
 import { buildCycStudio } from './cycStudio';
 import { buildStripTunnel } from './tunnelStudio';
+import { disposeSetReflections } from './setReflections';
 
 export const RIG_SET_NAME = 'StudioRigSet';
 
@@ -125,6 +126,7 @@ export function buildRigSet(kind: RigSetKind, lights: Light[]): THREE.Group {
 }
 
 export function disposeRigSet(group: THREE.Object3D): void {
+  disposeSetReflections(group);
   group.traverse((o) => {
     const m = o as THREE.Mesh;
     if (m.isMesh) {

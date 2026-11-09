@@ -15,6 +15,19 @@ const WALL_Z = -4.0;
 const FRONT_Z = 4.0;
 const R = 1.0;
 
+/**
+ * Materials of the Strip Tunnel, matched to the reference render (colour / roughness / metalness):
+ *   floor        polished concrete, mid grey, glossy with soft streaks   0x4a4c50   rough 0.22  metal 0.00
+ *   apron        the same concrete outside the tunnel                    0x2a2b2e   rough 0.30  metal 0.00
+ *   side walls   dark brushed-steel panels                              0x1d1e21   rough 0.50  metal 0.45
+ *   panel seams  black shadow gaps                                       0x0a0a0b   rough 0.70  metal 0.50
+ *   cyc wall     matte painted charcoal, lit gradient                    0x34353a   rough 0.80  metal 0.00
+ *   ceiling      near-black painted steel                                0x0e0e10   rough 0.85  metal 0.30
+ *   beams        black steel                                             0x15161a   rough 0.40  metal 0.85
+ *   strip body   black anodised aluminium                                0x18191d   rough 0.35  metal 0.90
+ *   strip lip    brushed aluminium edge                                  0x2a2c32   rough 0.25  metal 0.95
+ *   diffuser     opal, emissive                                          0xffffff   rough 0.60  metal 0.00
+ */
 const std = (color: number, roughness: number, metalness = 0, extra: Partial<THREE.MeshStandardMaterialParameters> = {}) =>
   new THREE.MeshStandardMaterial({ color, roughness, metalness, ...extra });
 
@@ -38,15 +51,15 @@ function sweep(profile: [number, number][], halfWidth: number): THREE.BufferGeom
 
 function stripFixture(len: number, wid: number, color: THREE.Color): THREE.Group {
   const g = new THREE.Group();
-  const housing = new THREE.Mesh(new THREE.BoxGeometry(wid + 0.05, 0.06, len + 0.06), std(0x16171b, 0.4, 0.8));
+  const housing = new THREE.Mesh(new THREE.BoxGeometry(wid + 0.05, 0.06, len + 0.06), std(0x18191d, 0.35, 0.9));
   housing.position.y = 0.03;
   g.add(housing);
-  const lip = new THREE.Mesh(new THREE.BoxGeometry(wid + 0.07, 0.012, len + 0.08), std(0x2a2c32, 0.3, 0.9));
+  const lip = new THREE.Mesh(new THREE.BoxGeometry(wid + 0.07, 0.012, len + 0.08), std(0x2a2c32, 0.25, 0.95));
   lip.position.y = -0.002;
   g.add(lip);
   const face = new THREE.Mesh(
     new THREE.PlaneGeometry(wid, len),
-    std(0xffffff, 0.8, 0, { emissive: color.clone().lerp(new THREE.Color(1, 1, 1), 0.7), emissiveIntensity: 9.0, side: THREE.DoubleSide }),
+    std(0xffffff, 0.6, 0, { emissive: color.clone().lerp(new THREE.Color(1, 1, 1), 0.7), emissiveIntensity: 9.0, side: THREE.DoubleSide }),
   );
   face.rotation.x = Math.PI / 2;                              // glows downward
   face.position.y = -0.012;
@@ -60,13 +73,17 @@ function stripFixture(len: number, wid: number, color: THREE.Color): THREE.Group
 }
 
 export function buildStripTunnel(group: THREE.Group, lights: Light[]): void {
+  group.userData.reflBox = [-HALF_W, 0, WALL_Z, HALF_W, H, FRONT_Z + 6];   // the room, for box-projected reflections
   // floor: polished concrete (dark, glossy)
-  const floor = new THREE.Mesh(new THREE.PlaneGeometry(HALF_W * 2 + 0.01, FRONT_Z - WALL_Z), std(0x5b5d63, 0.3, 0.0));
+  const floor = new THREE.Mesh(new THREE.PlaneGeometry(HALF_W * 2 + 0.01, FRONT_Z - WALL_Z), std(0x4a4c50, 0.22, 0.0));
+  floor.userData.reflective = true;
+  floor.userData.reflectIntensity = 1.6;
   floor.rotation.x = -Math.PI / 2;
   floor.position.set(0, 0.002, (FRONT_Z + WALL_Z) / 2);
   group.add(floor);
   // beyond the opening, so the model never floats in a void
-  const apron = new THREE.Mesh(new THREE.PlaneGeometry(40, 30), std(0x1c1d20, 0.5, 0));
+  const apron = new THREE.Mesh(new THREE.PlaneGeometry(40, 30), std(0x2a2b2e, 0.3, 0));
+  apron.userData.reflective = true;
   apron.rotation.x = -Math.PI / 2;
   apron.position.set(0, 0, FRONT_Z + 15);
   group.add(apron);
@@ -78,29 +95,31 @@ export function buildStripTunnel(group: THREE.Group, lights: Light[]): void {
     profile.push([WALL_Z + R - Math.sin(a) * R, R - Math.cos(a) * R + 0.004]);
   }
   profile.push([WALL_Z, H]);
-  const cyc = new THREE.Mesh(sweep(profile, HALF_W), std(0x44454a, 0.85, 0, { side: THREE.DoubleSide }));
+  const cyc = new THREE.Mesh(sweep(profile, HALF_W), std(0x34353a, 0.8, 0, { side: THREE.DoubleSide }));
   group.add(cyc);
 
   // side walls: dark panelled steel, with vertical panel seams
-  const wallMat = std(0x303136, 0.75, 0.2);
+  const wallMat = std(0x1d1e21, 0.5, 0.45);
   for (const sx of [-1, 1]) {
     const w = new THREE.Mesh(new THREE.PlaneGeometry(FRONT_Z - WALL_Z, H), wallMat);
+    w.userData.reflective = true;
+    w.userData.reflectIntensity = 0.8;
     w.position.set(sx * HALF_W, H / 2, (FRONT_Z + WALL_Z) / 2);
     w.rotation.y = -sx * Math.PI / 2;
     group.add(w);
     for (let z = WALL_Z + 1.5; z < FRONT_Z; z += 1.5) {
-      const seam = new THREE.Mesh(new THREE.BoxGeometry(0.02, H, 0.03), std(0x0b0b0d, 0.6, 0.5));
+      const seam = new THREE.Mesh(new THREE.BoxGeometry(0.02, H, 0.03), std(0x0a0a0b, 0.7, 0.5));
       seam.position.set(sx * (HALF_W - 0.01), H / 2, z);
       group.add(seam);
     }
   }
   // ceiling and two steel beams
-  const ceil = new THREE.Mesh(new THREE.PlaneGeometry(HALF_W * 2, FRONT_Z - WALL_Z), std(0x1a1b1f, 0.9, 0.2));
+  const ceil = new THREE.Mesh(new THREE.PlaneGeometry(HALF_W * 2, FRONT_Z - WALL_Z), std(0x0e0e10, 0.85, 0.3));
   ceil.rotation.x = Math.PI / 2;
   ceil.position.set(0, H, (FRONT_Z + WALL_Z) / 2);
   group.add(ceil);
   for (const z of [-2.6, 2.4]) {
-    const beam = new THREE.Mesh(new THREE.BoxGeometry(HALF_W * 2, 0.16, 0.12), std(0x111216, 0.45, 0.85));
+    const beam = new THREE.Mesh(new THREE.BoxGeometry(HALF_W * 2, 0.16, 0.12), std(0x15161a, 0.4, 0.85));
     beam.position.set(0, H - 0.08, z);
     group.add(beam);
   }
