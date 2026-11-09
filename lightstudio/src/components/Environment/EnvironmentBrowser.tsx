@@ -442,7 +442,7 @@ const EnvironmentBrowser: React.FC<EnvironmentBrowserProps> = ({ onClose, onPres
                       width: '100%',
                       aspectRatio: '16 / 9',
                       background: thumbs[preset.id]
-                        ? `center / cover no-repeat url(${thumbs[preset.id]})`
+                        ? `center / contain no-repeat url(${thumbs[preset.id]}), radial-gradient(circle at 50% 45%, ${preset.thumbnailGradient[1]}55 0%, #15171d 70%)`
                         : `linear-gradient(135deg, ${preset.thumbnailGradient[0]}, ${preset.thumbnailGradient[1]}, ${preset.thumbnailGradient[2]})`,
                       position: 'relative',
                     }}
