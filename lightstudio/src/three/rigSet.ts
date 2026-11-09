@@ -3,6 +3,7 @@ import type { RigSetKind } from '../data/rigSets';
 import type { Light } from '../types/Light';
 import { buildCycStudio } from './cycStudio';
 import { buildStripTunnel } from './tunnelStudio';
+import { buildHighKeyStudio } from './highKeyStudio';
 import { disposeSetReflections } from './setReflections';
 
 export const RIG_SET_NAME = 'StudioRigSet';
@@ -95,6 +96,11 @@ export function buildRigSet(kind: RigSetKind, lights: Light[]): THREE.Group {
   group.name = RIG_SET_NAME;
   group.userData.rigSet = kind;
 
+  if (kind === 'high_key') {
+    buildHighKeyStudio(group, lights);
+    group.traverse((o) => { (o as THREE.Mesh).raycast = () => {}; });
+    return group;
+  }
   if (kind === 'strip_tunnel') {
     buildStripTunnel(group, lights);
     group.traverse((o) => { (o as THREE.Mesh).raycast = () => {}; });

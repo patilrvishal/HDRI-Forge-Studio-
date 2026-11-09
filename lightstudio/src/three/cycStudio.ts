@@ -57,7 +57,7 @@ function taperedShell(w: number, h: number, bw: number, bh: number, depth: numbe
   return g;
 }
 
-function softbox(w: number, h: number): THREE.Group {
+export function softbox(w: number, h: number): THREE.Group {
   const g = new THREE.Group();
   const shellMat = std(0x0c0d0f, 0.62, 0.15, { side: THREE.DoubleSide });
   const depth = 0.85;
@@ -93,7 +93,7 @@ function softbox(w: number, h: number): THREE.Group {
   return g;
 }
 
-function tripod(x: number, z: number, topY: number, outFrom: THREE.Vector3): THREE.Group {
+export function tripod(x: number, z: number, topY: number, outFrom: THREE.Vector3): THREE.Group {
   const g = new THREE.Group();
   const metal = std(0x14151a, 0.38, 0.85);
   const col = new THREE.Mesh(new THREE.CylinderGeometry(0.022, 0.03, topY, 14), metal);

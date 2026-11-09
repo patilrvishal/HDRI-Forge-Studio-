@@ -2,12 +2,12 @@
  * The studio SET (the room the rig is photographed in) that goes with a built-in rig, read off its card:
  * most rigs sit in a dark studio with a glossy black floor that mirrors the panels; Cyc Wall White is a white infinity cove.
  */
-export type RigSetKind = 'dark_floor' | 'cyc_white' | 'strip_tunnel';
+export type RigSetKind = 'dark_floor' | 'cyc_white' | 'strip_tunnel' | 'high_key';
 
 export const RIG_SETS: Record<string, RigSetKind> = {
   '3-Point Classic': 'dark_floor',
   'Beauty Soft': 'dark_floor',
-  'High Key White': 'dark_floor',
+  'High Key White': 'high_key',
   'Low Key Dramatic': 'dark_floor',
   'Fashion Editorial': 'dark_floor',
   'Product Hero': 'dark_floor',

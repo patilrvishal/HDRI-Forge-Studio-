@@ -61,6 +61,13 @@ export function pl(
   };
 }
 
+/** Area light hung at the given spot, facing down (width along X, depth along Z). */
+function plDown(name: string, color: string, brightness: number, lng: number, height: number, radius: number, w: number, d: number): PresetLight {
+  const l = pl(name, 'area', color, brightness, 0, lng, height, radius, { areaLight: true, falloff: 'linear', areaWidth: w, areaHeight: d, edgeSoftness: 60 });
+  l.transform = { ...l.transform, rotation: { ...l.transform.rotation, x: -90, y: 0, z: 0, enabled: true } };
+  return l;
+}
+
 // ═══════════════════════════════════════════════════════════════════
 //  STUDIO PRESETS (6)
 // ═══════════════════════════════════════════════════════════════════
@@ -80,10 +87,11 @@ export const STUDIO_PRESETS: PresetLight[][] = [
   ],
   // 3. High Key White
   [
-    pl('Left Panel', 'area', '#ffffff', 280, 30, 210, 2.5, 5, { areaLight: true, falloff: 'linear' }),
-    pl('Right Panel', 'area', '#ffffff', 280, 30, 330, 2.5, 5, { areaLight: true, falloff: 'linear' }),
-    pl('Top Panel', 'area', '#ffffff', 200, 90, 0, 5.5, 3, { areaLight: true, falloff: 'linear' }),
-    pl('Front Fill', 'area', '#ffffff', 120, 20, 0, 1.5, 5, { areaLight: true, falloff: 'linear' }),
+    // built to the rig sheet: two rounded ceiling soft panels and two 1.2 m softboxes at 45 degrees
+    plDown('Ceiling Panel Large', '#ffffff', 120, 0, 2.85, 0.6, 2.4, 1.2),
+    plDown('Ceiling Panel Medium', '#ffffff', 120, 180, 2.85, 0.9, 1.8, 1.0),
+    pl('Softbox Left', 'area', '#ffffff', 140, 0, 249.1, 1.45, 2.25, { areaLight: true, falloff: 'linear', areaWidth: 1.2, areaHeight: 1.2, edgeSoftness: 35 }),
+    pl('Softbox Right', 'area', '#ffffff', 140, 0, 110.9, 1.45, 2.25, { areaLight: true, falloff: 'linear', areaWidth: 1.2, areaHeight: 1.2, edgeSoftness: 35 }),
   ],
   // 4. Low Key Dramatic
   [
