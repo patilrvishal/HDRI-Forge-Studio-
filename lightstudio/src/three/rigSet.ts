@@ -118,7 +118,7 @@ export function buildRigSet(kind: RigSetKind, lights: Light[]): THREE.Group {
     );
     floor.name = 'Floor';
     floor.rotation.x = -Math.PI / 2;
-    floor.position.y = 0.002;
+    floor.position.y = -0.0005;
     floor.receiveShadow = true;
     group.add(floor);
   }

@@ -117,7 +117,7 @@ export function buildHighKeyStudio(group: THREE.Group, lights: Light[]): void {
   const floor = new THREE.Mesh(new THREE.PlaneGeometry(HALF_W * 2, FRONT_Z - BACK_Z + 12), std(0xe6e7ea, 0.16, 0));
   floor.name = 'Floor';
   floor.rotation.x = -Math.PI / 2;
-  floor.position.set(0, 0.002, (FRONT_Z + BACK_Z) / 2 + 6);
+  floor.position.set(0, -0.0005, (FRONT_Z + BACK_Z) / 2 + 6);
   floor.userData.reflective = true;
   floor.userData.reflectIntensity = 1.8;
   group.add(floor);

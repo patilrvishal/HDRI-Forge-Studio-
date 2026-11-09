@@ -80,21 +80,21 @@ export function buildStripTunnel(group: THREE.Group, lights: Light[]): void {
   floor.userData.reflective = true;
   floor.userData.reflectIntensity = 3;
   floor.rotation.x = -Math.PI / 2;
-  floor.position.set(0, 0.002, (FRONT_Z + WALL_Z) / 2);
+  floor.position.set(0, -0.001, (FRONT_Z + WALL_Z) / 2);
   group.add(floor);
   // beyond the opening, so the model never floats in a void
   const apron = new THREE.Mesh(new THREE.PlaneGeometry(40, 30), std(0x2a2b2e, 0.3, 0));
   apron.name = 'Floor Apron';
   apron.userData.reflective = true;
   apron.rotation.x = -Math.PI / 2;
-  apron.position.set(0, 0, FRONT_Z + 15);
+  apron.position.set(0, -0.002, FRONT_Z + 15);
   group.add(apron);
 
   // far wall: charcoal cyc with a 1 m cove into the floor
-  const profile: [number, number][] = [[FRONT_Z - 0.0, 0.004], [WALL_Z + R, 0.004]];
+  const profile: [number, number][] = [[FRONT_Z - 0.0, -0.0005], [WALL_Z + R, -0.0005]];
   for (let i = 1; i <= 24; i++) {
     const a = (i / 24) * (Math.PI / 2);
-    profile.push([WALL_Z + R - Math.sin(a) * R, R - Math.cos(a) * R + 0.004]);
+    profile.push([WALL_Z + R - Math.sin(a) * R, R - Math.cos(a) * R - 0.0005]);
   }
   profile.push([WALL_Z, H]);
   const cyc = new THREE.Mesh(sweep(profile, HALF_W), std(0x3c3d42, 0.8, 0, { side: THREE.DoubleSide }));

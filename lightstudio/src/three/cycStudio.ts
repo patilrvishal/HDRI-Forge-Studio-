@@ -124,14 +124,14 @@ export function buildCycStudio(group: THREE.Group, lights: Light[]): void {
   const concrete = new THREE.Mesh(new THREE.PlaneGeometry(40, 40), std(0x74767b, 0.34, 0.0));
   concrete.name = 'Floor';
   concrete.rotation.x = -Math.PI / 2;
-  concrete.position.set(0, 0.0, -5);
+  concrete.position.set(0, -0.002, -5);
   group.add(concrete);
 
   // ── cyclorama: floor sweep + 1 m cove + wall, 6 m wide, matte white ─────────────────────────
-  const profile: [number, number][] = [[3.2, 0.004], [WALL_Z + CYC_R, 0.004]];
+  const profile: [number, number][] = [[3.2, -0.0005], [WALL_Z + CYC_R, -0.0005]];
   for (let i = 1; i <= 24; i++) {
     const a = (i / 24) * (Math.PI / 2);
-    profile.push([WALL_Z + CYC_R - Math.sin(a) * CYC_R, CYC_R - Math.cos(a) * CYC_R + 0.004]);
+    profile.push([WALL_Z + CYC_R - Math.sin(a) * CYC_R, CYC_R - Math.cos(a) * CYC_R - 0.0005]);
   }
   profile.push([WALL_Z, CYC_H]);
   const cyc = new THREE.Mesh(sweep(profile, CYC_HALF), std(0xeeeeee, 0.78, 0, { side: THREE.DoubleSide }));
