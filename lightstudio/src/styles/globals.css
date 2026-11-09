@@ -2634,3 +2634,10 @@ button:disabled, [aria-disabled="true"] { cursor: not-allowed; }
 .env-card:hover { filter: brightness(1.14); }
 .env-card.active::after { content: ''; position: absolute; inset: 0; border: 2px solid var(--accent); border-radius: 12px; box-shadow: 0 0 12px rgba(255, 138, 43, 0.45); pointer-events: none; }
 .env-check { position: absolute; top: 8px; right: 8px; width: 18px; height: 18px; border-radius: 50%; background: var(--accent); color: #fff; font-size: 11px; display: flex; align-items: center; justify-content: center; z-index: 1; }
+
+/* Designed Rig cards: the artwork is the tile; the previewed one gets the orange ring. */
+.preset-card.rig-card { border: none; background: transparent; overflow: visible; border-radius: 14px; }
+.preset-card.rig-card:hover { transform: none; box-shadow: none; filter: brightness(1.12); }
+.preset-card.rig-card.previewing { box-shadow: none; }
+.preset-card.rig-card.previewing::after { content: ''; position: absolute; inset: 0; border: 2px solid var(--accent); border-radius: 14px; box-shadow: 0 0 12px rgba(255, 138, 43, 0.45); pointer-events: none; }
+.hdrls-lib .preset-grid-wide:has(.rig-card) { grid-template-columns: repeat(2, 1fr); }

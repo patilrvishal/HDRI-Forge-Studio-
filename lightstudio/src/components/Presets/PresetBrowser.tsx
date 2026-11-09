@@ -1,3 +1,4 @@
+import { RIG_CARDS } from '../../data/rigCards';
 import React, { useEffect, useRef, useMemo, useCallback, useState } from 'react';
 import { usePresetsStore } from '../../store/presetsStore';
 import { useLightsStore } from '../../store/lightsStore';
@@ -640,7 +641,7 @@ export const PresetBrowser: React.FC<PresetBrowserProps> = ({ onGenerateThumbnai
             {filteredPresets.map((preset) => (
               <div
                 key={preset.id}
-                className={`preset-card ${previewingId === preset.id ? 'previewing' : ''} ${audition && previewingId === preset.id ? 'auditioning' : ''}`}
+                className={`preset-card ${RIG_CARDS[preset.name] && preset.isDefault ? 'rig-card' : ''} ${previewingId === preset.id ? 'previewing' : ''} ${audition && previewingId === preset.id ? 'auditioning' : ''}`}
                 onClick={(e) => handleCardClick(e, preset.id)}
                 onDoubleClick={(e) => {
                   if (clickTimer.current) { clearTimeout(clickTimer.current); clickTimer.current = null; }
@@ -656,6 +657,10 @@ export const PresetBrowser: React.FC<PresetBrowserProps> = ({ onGenerateThumbnai
                   <div className="preset-card-tooltip">{preset.description}</div>
                 )}
 
+                {RIG_CARDS[preset.name] && preset.isDefault ? (
+                  // designed card: the artwork is the whole tile (picture, name and light count)
+                  <img src={RIG_CARDS[preset.name]} alt={preset.name} draggable={false} style={{ width: '100%', display: 'block' }} />
+                ) : (<>
                 <div className="pc-inner pc-wide">
                   {renderingIds.has(preset.id) ? (
                     <div className="thumbnail-skeleton" />
@@ -692,6 +697,7 @@ export const PresetBrowser: React.FC<PresetBrowserProps> = ({ onGenerateThumbnai
                 <div style={{ fontSize: 8, color: 'var(--text-dim)', padding: '0 4px 3px', textAlign: 'center' }}>
                   {preset.lights.length} light{preset.lights.length !== 1 ? 's' : ''}
                 </div>
+                </>)}
               </div>
             ))}
           </div>
