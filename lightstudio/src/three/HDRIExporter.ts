@@ -86,7 +86,7 @@ interface ExtractedLight {
   /** Channels of the map this light writes to ('all' when unset). */
   blendChannel?: 'all' | 'red' | 'green' | 'blue';
   /** 'plane' = parallel projection of the rectangle, 'perspective' (default) = gnomonic as seen from the capture point. */
-  mapping?: 'perspective' | 'plane';
+  mapping?: 'perspective' | 'plane' | 'equirect';
 }
 
 /** Bilinear sample of a light appearance texture at (u,v) in 0..1, v=0 at the top. */
@@ -566,6 +566,21 @@ function evaluateLightRadiance(
     // increasing Edge Softness smoothly widens the feather inward from
     // that real edge - matching how an HDRI Shape's own Softness behaves.
     case 'area': {
+      // Mapping 'equirect' = a SKY: the appearance texture is an equirectangular panorama that covers the whole
+      // sphere, so it is sampled straight from the pixel's direction (no rectangle, no position).
+      if (light.mapping === 'equirect' && light.tex) {
+        const su = Math.atan2(dir.z, dir.x) / (2 * Math.PI) + 0.5;
+        const sv = Math.acos(Math.max(-1, Math.min(1, dir.y))) / Math.PI;
+        sampleLightTex(light.tex, su, sv, _texOut);
+        const cov = Math.max(0, Math.min(1, _texOut[3]));
+        if (cov <= 0) break;
+        const rad = light.intensity;                       // the sky texture is already radiance: intensity 1 = as painted
+        result.r = light.color.r * rad * _texOut[0];
+        result.g = light.color.g * rad * _texOut[1];
+        result.b = light.color.b * rad * _texOut[2];
+        result.coverage = cov;
+        break;
+      }
       const lightNormal = light.normal ?? new THREE.Vector3(0, 0, 1);
       const facingDir = new THREE.Vector3()
         .subVectors(capturePoint, light.position)

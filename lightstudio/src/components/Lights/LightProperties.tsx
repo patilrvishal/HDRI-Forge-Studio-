@@ -561,6 +561,7 @@ export const LightProperties: React.FC<{ lightId?: string }> = ({ lightId }) => 
             options={[
               { value: 'perspective', label: '3D (perspective)' },
               { value: 'plane', label: 'Infinite plane' },
+              { value: 'equirect', label: 'Full sphere (sky)' },
             ]}
             onChange={(v) => handleUpdate({ mapping: v as Light['mapping'] })}
           />

@@ -113,7 +113,7 @@ export interface Light {
 }
 
 export type BlendChannel = 'all' | 'red' | 'green' | 'blue';
-export type LightMapping = 'perspective' | 'plane';
+export type LightMapping = 'perspective' | 'plane' | 'equirect';
 
 /**
  * Area Light mode: instead of being painted into the HDRI, the light becomes a real

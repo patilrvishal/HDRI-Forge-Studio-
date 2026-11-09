@@ -70,7 +70,7 @@ interface Item {
 
 interface Props {
   /** Apply permanently (click). */
-  onApply: (a: LightAppearance, aspect: number) => void;
+  onApply: (a: LightAppearance, aspect: number, info?: { category: string; name: string }) => void;
   /** Temporary audition on hover; null = restore. */
   onAudition?: (a: LightAppearance | null) => void;
   /** Current appearance so "Save as preset" has something to store. */
@@ -165,7 +165,7 @@ export const PresetLibrary: React.FC<Props> = ({ onApply, onAudition, current, c
             }}
             onClick={() => {
               if (hoverTimer.current) window.clearTimeout(hoverTimer.current);
-              onApply(it.build(), it.aspect);
+              onApply(it.build(), it.aspect, { category: it.category, name: it.name });
             }}
             onContextMenu={async (e) => {
               e.preventDefault();

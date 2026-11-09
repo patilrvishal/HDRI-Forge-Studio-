@@ -117,23 +117,49 @@ export const HdrlsLeftColumn: React.FC<{
     window.addEventListener('pointerup', up);
   }, []);
 
-  const addFromPreset: ApplyFn = (a, asp) => {
+  /** Size (m^2) a new light of this preset gets, so a bulb is a small bulb, a scrim is a big scrim and so on. */
+  const areaFor = (info?: { category: string; name: string }): number => {
+    switch (info?.category) {
+      case 'Bulbs & Spots': return info.name === 'Sun Disc' ? 0.25 : info.name === 'Spot Tight' ? 0.5 : 1;
+      case 'Rings': return 3;
+      case 'Shapes': return 3;
+      case 'Gradients': return 6;
+      case 'Scrims': return 9;
+      case 'Blinds & Flags': return 5;
+      default: return 4;
+    }
+  };
+
+  const addFromPreset: ApplyFn = (a, asp, info) => {
     const st = useLightsStore.getState();
     st.addLight('area');
     const created = useLightsStore.getState().lights.slice(-1)[0];
     if (!created) return;
-    const area = 4;
-    const w = Math.min(20, Math.max(0.1, +Math.sqrt(area * asp).toFixed(2)));
-    st.updateLight(created.id, { name: a.name, appearance: a, areaWidth: w, areaHeight: Math.min(20, Math.max(0.1, +(area / w).toFixed(2))) });
+    if (info?.category === 'Sky') {
+      // A sky is the whole environment: its panorama wraps the full sphere, it is not a rectangle in front of the model.
+      st.updateLight(created.id, { name: a.name, appearance: a, areaWidth: 4, areaHeight: 2, mapping: 'equirect', brightness: 100 });
+    } else {
+      const area = areaFor(info);
+      const w = Math.min(20, Math.max(0.1, +Math.sqrt(area * asp).toFixed(2)));
+      st.updateLight(created.id, { name: a.name, appearance: a, areaWidth: w, areaHeight: Math.min(20, Math.max(0.1, +(area / w).toFixed(2))), mapping: 'perspective' });
+    }
     st.selectLight(created.id);
   };
 
-  const applyToSelected: ApplyFn = (a, asp) => {
+  const applyToSelected: ApplyFn = (a, asp, info) => {
     const st = useLightsStore.getState();
     const l = st.lights.find((x) => x.id === st.selectedLightId);
     if (!l) return;
+    if (info?.category === 'Sky') {
+      st.updateLight(l.id, { appearance: a, areaWidth: 4, areaHeight: 2, mapping: 'equirect', brightness: 100 });
+      return;
+    }
     const w = l.areaWidth ?? 2;
-    st.updateLight(l.id, { appearance: a, areaHeight: Math.min(20, Math.max(0.1, +(w / Math.max(0.05, asp)).toFixed(2))) });
+    st.updateLight(l.id, {
+      appearance: a,
+      areaHeight: Math.min(20, Math.max(0.1, +(w / Math.max(0.05, asp)).toFixed(2))),
+      ...(l.mapping === 'equirect' ? { mapping: 'perspective' as const } : {}),
+    });
   };
 
   const seg = (active: boolean): React.CSSProperties => ({
