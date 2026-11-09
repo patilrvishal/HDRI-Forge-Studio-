@@ -122,6 +122,7 @@ function tripod(x: number, z: number, topY: number, outFrom: THREE.Vector3): THR
 export function buildCycStudio(group: THREE.Group, lights: Light[]): void {
   // ── floor: polished concrete everywhere, white sweep in front of the cyc ────────────────────
   const concrete = new THREE.Mesh(new THREE.PlaneGeometry(40, 40), std(0x74767b, 0.34, 0.0));
+  concrete.name = 'Floor';
   concrete.rotation.x = -Math.PI / 2;
   concrete.position.set(0, 0.0, -5);
   group.add(concrete);
@@ -134,6 +135,7 @@ export function buildCycStudio(group: THREE.Group, lights: Light[]): void {
   }
   profile.push([WALL_Z, CYC_H]);
   const cyc = new THREE.Mesh(sweep(profile, CYC_HALF), std(0xeeeeee, 0.78, 0, { side: THREE.DoubleSide }));
+  cyc.name = 'Cyclorama';
   cyc.receiveShadow = true;
   group.add(cyc);
 
@@ -155,6 +157,7 @@ export function buildCycStudio(group: THREE.Group, lights: Light[]): void {
     group.add(ret);
   }
   const ceil = new THREE.Mesh(new THREE.PlaneGeometry(9, 16), std(0x101113, 0.95));
+  ceil.name = 'Ceiling';
   ceil.rotation.x = Math.PI / 2;
   ceil.position.set(0, CEIL_Y, -2);
   group.add(ceil);
@@ -187,6 +190,7 @@ export function buildCycStudio(group: THREE.Group, lights: Light[]): void {
   for (const l of boxes) {
     const p = l.transform.position;
     const sb = softbox(l.areaWidth ?? 1.2, l.areaHeight ?? 1.2);
+    sb.name = l.name;
     sb.position.set(p.x, p.y, p.z);
     sb.lookAt(0, Math.min(1.3, p.y), 0);
     group.add(sb);

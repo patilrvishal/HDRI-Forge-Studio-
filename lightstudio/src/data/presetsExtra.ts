@@ -42,7 +42,7 @@ function spot(
 function stripDown(name: string, x: number, z: number): PresetLight {
   const r = Math.hypot(x, z);
   const lng = (Math.atan2(x, z) * 180) / Math.PI;
-  const l = area(name, '#f4f8ff', 200, lng < 0 ? lng + 360 : lng, 2.9, r, 0.15, 2.0, 30);
+  const l = area(name, '#f4f8ff', 3000, lng < 0 ? lng + 360 : lng, 2.9, r, 0.15, 2.0, 30);
   l.transform = { ...l.transform, rotation: { ...l.transform.rotation, x: -90, y: 0, z: 0, enabled: true } };
   return l;
 }

@@ -272,7 +272,7 @@ export const PresetBrowser: React.FC<PresetBrowserProps> = ({ onGenerateThumbnai
       setLightsFromPreset(newLights);
       setPreviewPreset(null);
       if (newLights.length > 0) selectLight(newLights[0].id);
-      if (asRig) rs.setRig(RIG_SETS[preset.name], newLights.map((l) => l.id));
+      if (asRig) rs.setRig(RIG_SETS[preset.name], newLights.map((l) => l.id), preset.name);
       showToast(`Applied "${preset.name}"`);
     },
     [presets, setLightsFromPreset, setPreviewPreset, selectLight, showToast],
@@ -308,7 +308,7 @@ export const PresetBrowser: React.FC<PresetBrowserProps> = ({ onGenerateThumbnai
           if (asRig) rs.lightIds.forEach((lid) => useLightsStore.getState().removeLight(lid));
           setLightsFromPreset(newLights);                          // then apply it the normal way (history, selection)
           if (newLights.length > 0) selectLight(newLights[0].id);
-          if (asRig) rs.setRig(RIG_SETS[preset.name], newLights.map((l) => l.id));
+          if (asRig) rs.setRig(RIG_SETS[preset.name], newLights.map((l) => l.id), preset.name);
           showToast(`Applied "${preset.name}"`);
         }
       }

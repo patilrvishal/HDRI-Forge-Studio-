@@ -40,6 +40,7 @@ function buildFixture(l: Light, set: THREE.Group): void {
   const col = new THREE.Color(l.color || '#ffffff');
 
   const fx = new THREE.Group();
+  fx.name = `${l.name} Fixture`;
   fx.position.set(p.x, p.y, p.z);
   fx.lookAt(0, Math.min(1, Math.max(0, p.y * 0.2)), 0);           // +Z (the face) toward the model
 
@@ -109,6 +110,7 @@ export function buildRigSet(kind: RigSetKind, lights: Light[]): THREE.Group {
       new THREE.CircleGeometry(16, 96),
       new THREE.MeshStandardMaterial({ color: 0x0b0c10, roughness: 0.16, metalness: 0.05 }),
     );
+    floor.name = 'Floor';
     floor.rotation.x = -Math.PI / 2;
     floor.position.y = 0.002;
     floor.receiveShadow = true;

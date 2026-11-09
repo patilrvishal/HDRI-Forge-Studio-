@@ -1,4 +1,4 @@
-import React, { useRef, useEffect, useState, useCallback } from 'react';
+import React, { useRef, useEffect, useState, useCallback, useMemo } from 'react';
 import * as THREE from 'three';
 import { useSceneStore } from '../../store/sceneStore';
 import { useLightsStore } from '../../store/lightsStore';
@@ -25,7 +25,8 @@ import { useCameraStore } from '../../store/cameraStore';
 import { useViewportModeStore } from '../../store/viewportModeStore';
 import { CameraSwitcher } from './CameraSwitcher';
 import { useRigSetStore } from '../../store/rigSetStore';
-import { buildRigSet, disposeRigSet, RIG_SET_NAME } from '../../three/rigSet';
+import { buildRigSet } from '../../three/rigSet';
+import { findRigGroup, makeRigGroup, removeRigGroup, fillRigGroup, applyDefaultHdriInclude } from '../../three/rigGroup';
 import { applySetReflections } from '../../three/setReflections';
 import { ViewportPropertiesPanel } from './ViewportPropertiesPanel';
 import { CameraPanel } from './CameraPanel';
@@ -1156,19 +1157,53 @@ export const Viewport: React.FC<ViewportProps> = ({ sceneManagerRef, onScreensho
   // Studio set that goes with the applied rig (floor / cyc wall): replace it whenever the chosen set changes.
   const rigSetKind = useRigSetStore((s) => s.kind);
   const rigLightIds = useRigSetStore((s) => s.lightIds);
+  const rigName = useRigSetStore((s) => s.name);
+  // Only what the set is built from: it is rebuilt when a rig light moves or resizes, not on every unrelated light edit.
+  const rigSig = useMemo(
+    () => lights.filter((l) => rigLightIds.includes(l.id)).map((l) => [l.id, l.name, l.color, l.areaWidth, l.areaHeight, l.transform.position.x, l.transform.position.y, l.transform.position.z].join(',')).join('|'),
+    [lights, rigLightIds],
+  );
+  const lastRigName = useRef('');
   useEffect(() => {
     const sm = sceneManagerRef.current;
     if (!sm) return;
     const scene = sm.scene;
-    const old = scene.getObjectByName(RIG_SET_NAME);
-    if (old) { scene.remove(old); disposeRigSet(old); }
+    let group = findRigGroup(scene);
+    if (group && (!rigSetKind || group.name !== rigName)) {
+      removeRigGroup(scene, group);
+      group = null;
+    }
     if (rigSetKind) {
-      const set = buildRigSet(rigSetKind, lights.filter((l) => rigLightIds.includes(l.id)));
-      scene.add(set);
-      applySetReflections(sm.renderer, scene, set);       // glossy surfaces reflect the room (strips streak across the floor)
+      if (!group) { group = makeRigGroup(rigName || 'Studio Rig'); scene.add(group); }
+      const built = buildRigSet(rigSetKind, lights.filter((l) => rigLightIds.includes(l.id)));
+      fillRigGroup(group, built);
+      applySetReflections(sm.renderer, scene, group);     // glossy surfaces reflect the room (strips streak across the floor)
+      applyDefaultHdriInclude(group, lastRigName.current && lastRigName.current !== group.name ? lastRigName.current : undefined);
+      lastRigName.current = group.name;
+    } else {
+      lastRigName.current = '';
     }
     sm.setStudioSetActive(!!rigSetKind);
-  }, [rigSetKind, rigLightIds, lights, sceneManagerRef]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rigSetKind, rigName, rigSig, sceneManagerRef]);
+
+  // The rig's lights live inside its hierarchy group. The light objects are created by the sync effect below, so the move
+  // waits until that has run.
+  useEffect(() => {
+    if (!rigSetKind) return;
+    const t = window.setTimeout(() => {
+      const sm = sceneManagerRef.current;
+      const lm = lightManagerRef.current;
+      if (!sm || !lm) return;
+      const group = findRigGroup(sm.scene);
+      if (!group) return;
+      for (const id of rigLightIds) {
+        const obj = lm.getLightObject(id);
+        if (obj && obj.parent !== group) group.add(obj);
+      }
+    }, 0);
+    return () => window.clearTimeout(t);
+  }, [lights, rigLightIds, rigName, rigSetKind, sceneManagerRef]);
 
   // Sync lights to scene
   useEffect(() => {

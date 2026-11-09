@@ -405,13 +405,18 @@ export class LightManager {
     return null;
   }
 
+  /** The three.js object of a light (so it can be placed in a hierarchy group). */
+  getLightObject(id: string): THREE.Object3D | null {
+    return this.lights.get(id)?.light ?? null;
+  }
+
   private removeLightFromScene(id: string, scene: THREE.Scene): void {
     const entry = this.lights.get(id);
     if (!entry) return;
 
     const { light, helper, target } = entry;
 
-    scene.remove(light);
+    light.removeFromParent();                       // the light may sit inside a rig group, not directly under the scene
     if (helper) {
       scene.remove(helper);
       helper.geometry.dispose();

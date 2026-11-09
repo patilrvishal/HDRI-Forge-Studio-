@@ -12,7 +12,7 @@ import type { Light } from '../types/Light';
 const HALF_W = 3.0;
 const H = 3.0;
 const WALL_Z = -4.0;
-const FRONT_Z = 4.0;
+const FRONT_Z = 10.0;
 const R = 1.0;
 
 /**
@@ -75,14 +75,16 @@ function stripFixture(len: number, wid: number, color: THREE.Color): THREE.Group
 export function buildStripTunnel(group: THREE.Group, lights: Light[]): void {
   group.userData.reflBox = [-HALF_W, 0, WALL_Z, HALF_W, H, FRONT_Z + 6];   // the room, for box-projected reflections
   // floor: polished concrete (dark, glossy)
-  const floor = new THREE.Mesh(new THREE.PlaneGeometry(HALF_W * 2 + 0.01, FRONT_Z - WALL_Z), std(0x4a4c50, 0.22, 0.0));
+  const floor = new THREE.Mesh(new THREE.PlaneGeometry(HALF_W * 2 + 0.01, FRONT_Z - WALL_Z), std(0xa4a6ac, 0.2, 0.0));
+  floor.name = 'Floor';
   floor.userData.reflective = true;
-  floor.userData.reflectIntensity = 1.6;
+  floor.userData.reflectIntensity = 3;
   floor.rotation.x = -Math.PI / 2;
   floor.position.set(0, 0.002, (FRONT_Z + WALL_Z) / 2);
   group.add(floor);
   // beyond the opening, so the model never floats in a void
   const apron = new THREE.Mesh(new THREE.PlaneGeometry(40, 30), std(0x2a2b2e, 0.3, 0));
+  apron.name = 'Floor Apron';
   apron.userData.reflective = true;
   apron.rotation.x = -Math.PI / 2;
   apron.position.set(0, 0, FRONT_Z + 15);
@@ -95,13 +97,15 @@ export function buildStripTunnel(group: THREE.Group, lights: Light[]): void {
     profile.push([WALL_Z + R - Math.sin(a) * R, R - Math.cos(a) * R + 0.004]);
   }
   profile.push([WALL_Z, H]);
-  const cyc = new THREE.Mesh(sweep(profile, HALF_W), std(0x34353a, 0.8, 0, { side: THREE.DoubleSide }));
+  const cyc = new THREE.Mesh(sweep(profile, HALF_W), std(0x3c3d42, 0.8, 0, { side: THREE.DoubleSide }));
+  cyc.name = 'Cyc Wall';
   group.add(cyc);
 
   // side walls: dark panelled steel, with vertical panel seams
-  const wallMat = std(0x1d1e21, 0.5, 0.45);
+  const wallMat = std(0x606167, 0.5, 0.45);
   for (const sx of [-1, 1]) {
     const w = new THREE.Mesh(new THREE.PlaneGeometry(FRONT_Z - WALL_Z, H), wallMat);
+    w.name = sx < 0 ? 'Side Wall Left' : 'Side Wall Right';
     w.userData.reflective = true;
     w.userData.reflectIntensity = 0.8;
     w.position.set(sx * HALF_W, H / 2, (FRONT_Z + WALL_Z) / 2);
@@ -115,6 +119,7 @@ export function buildStripTunnel(group: THREE.Group, lights: Light[]): void {
   }
   // ceiling and two steel beams
   const ceil = new THREE.Mesh(new THREE.PlaneGeometry(HALF_W * 2, FRONT_Z - WALL_Z), std(0x0e0e10, 0.85, 0.3));
+  ceil.name = 'Ceiling';
   ceil.rotation.x = Math.PI / 2;
   ceil.position.set(0, H, (FRONT_Z + WALL_Z) / 2);
   group.add(ceil);
@@ -129,6 +134,7 @@ export function buildStripTunnel(group: THREE.Group, lights: Light[]): void {
     if (!/strip/i.test(l.name)) continue;
     const p = l.transform.position;
     const fx = stripFixture(l.areaHeight ?? 2.0, l.areaWidth ?? 0.15, new THREE.Color(l.color || '#ffffff'));
+    fx.name = `${l.name} Fixture`;
     fx.position.set(p.x, p.y, p.z);
     group.add(fx);
     for (const dz of [-0.7, 0.7]) {                             // two short hangers to the ceiling
