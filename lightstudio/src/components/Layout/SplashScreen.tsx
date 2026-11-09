@@ -1,103 +1,180 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { isTauri } from '@tauri-apps/api/core';
+import { setIntroEnabled } from '../../utils/introPref';
 
-/** Full-screen loading splash shown briefly on startup, with a shimmer
- *  sweep across the logo. Fades out once the minimum display time elapses. */
+/** The intro video, bundled from /public. */
+const INTRO_SRC = '/intro.mp4';
+/** If the video cannot play at all, fall back to the quick logo splash after this long. */
+const FALLBACK_AFTER_MS = 2500;
+
+/** Put the desktop window into real full screen for the intro, and report what it was before so it can be restored. */
+async function setWindowFullscreen(on: boolean): Promise<boolean | null> {
+  if (!isTauri()) return null;
+  try {
+    const { getCurrentWindow } = await import('@tauri-apps/api/window');
+    const win = getCurrentWindow();
+    const was = await win.isFullscreen();
+    await win.setFullscreen(on);
+    return was;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Startup intro: the video plays full screen while the workspace loads behind it, then fades away to the app.
+ * Click, Space, Enter, Escape or the Skip button end it early. If the video cannot be played the old logo splash shows.
+ */
 export function SplashScreen({ onDone }: { onDone: () => void }) {
   const [fading, setFading] = useState(false);
+  const [failed, setFailed] = useState(false);
+  const [muted, setMuted] = useState(false);
+  const [showSkip, setShowSkip] = useState(false);
+  const [never, setNever] = useState(false);          // "don't play the intro again"
+  const neverRef = useRef(false);
+  neverRef.current = never;
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+  const finished = useRef(false);
+  const wasFullscreen = useRef<boolean | null>(null);
 
-  useEffect(() => {
-    const fadeTimer = setTimeout(() => setFading(true), 1400);
-    const doneTimer = setTimeout(onDone, 1800);
-    return () => {
-      clearTimeout(fadeTimer);
-      clearTimeout(doneTimer);
-    };
+  const finish = useCallback(() => {
+    if (finished.current) return;
+    finished.current = true;
+    if (neverRef.current) setIntroEnabled(false);
+    setFading(true);
+    // leave full screen only if the intro was what put the window there
+    void (async () => {
+      if (wasFullscreen.current === false) await setWindowFullscreen(false);
+    })();
+    window.setTimeout(onDone, 450);
   }, [onDone]);
+
+  // full screen window for the duration of the video
+  useEffect(() => {
+    void setWindowFullscreen(true).then((was) => { wasFullscreen.current = was; });
+    const skipTimer = window.setTimeout(() => setShowSkip(true), 800);
+    return () => window.clearTimeout(skipTimer);
+  }, []);
+
+  // keys: any of these skips
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' || e.key === ' ' || e.key === 'Enter') { e.preventDefault(); finish(); }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [finish]);
+
+  // start with sound; if the webview refuses autoplay with audio, play muted instead
+  useEffect(() => {
+    const v = videoRef.current;
+    if (!v) return;
+    v.play().catch(() => {
+      v.muted = true;
+      setMuted(true);
+      v.play().catch(() => setFailed(true));
+    });
+  }, []);
+
+  // no video at all: the plain splash for a moment, then on to the app
+  useEffect(() => {
+    if (!failed) return;
+    const t = window.setTimeout(finish, FALLBACK_AFTER_MS - 700);
+    return () => window.clearTimeout(t);
+  }, [failed, finish]);
+  useEffect(() => {
+    const t = window.setTimeout(() => {
+      const v = videoRef.current;
+      if (v && v.readyState === 0) setFailed(true);       // never even started loading
+    }, FALLBACK_AFTER_MS);
+    return () => window.clearTimeout(t);
+  }, []);
+
+  const unmute = () => {
+    const v = videoRef.current;
+    if (v && muted) { v.muted = false; setMuted(false); }
+    else finish();
+  };
 
   return (
     <div
+      onClick={unmute}
       style={{
         position: 'fixed',
         inset: 0,
         zIndex: 99999,
-        display: 'flex',
-        flexDirection: 'column',
-        alignItems: 'center',
-        justifyContent: 'center',
-        gap: 20,
-        background: 'radial-gradient(circle at 50% 45%, #10161f 0%, #05070a 75%)',
+        background: '#000',
         opacity: fading ? 0 : 1,
-        transition: 'opacity 400ms ease',
+        transition: 'opacity 450ms ease',
         pointerEvents: fading ? 'none' : 'auto',
+        cursor: 'pointer',
       }}
     >
-      <div
-        style={{
-          position: 'relative',
-          width: 128,
-          height: 128,
-          borderRadius: 22,
-          overflow: 'hidden',
-          boxShadow: '0 0 60px rgba(90,170,255,0.25), 0 0 120px rgba(255,170,80,0.12)',
-        }}
-      >
-        <img
-          src="/logo-mark.png"
-          alt="HDRI Forge Studio"
-          width={128}
-          height={128}
-          style={{ display: 'block', width: 128, height: 128, objectFit: 'contain' }}
+      {!failed ? (
+        <video
+          ref={videoRef}
+          src={INTRO_SRC}
+          autoPlay
+          playsInline
+          preload="auto"
+          onEnded={finish}
+          onError={() => setFailed(true)}
+          style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'contain', background: '#000' }}
         />
-        {/* shimmer sweep */}
+      ) : (
         <div
           style={{
-            position: 'absolute',
-            inset: 0,
-            background:
-              'linear-gradient(115deg, transparent 35%, rgba(255,255,255,0.65) 50%, transparent 65%)',
-            backgroundSize: '300% 300%',
-            backgroundPosition: '-100% 0',
-            animation: 'hfsSplashShimmer 1.6s ease-in-out infinite',
-            mixBlendMode: 'overlay',
-          }}
-        />
-      </div>
-
-      <div style={{ textAlign: 'center' }}>
-        <div
-          style={{
-            fontFamily: 'var(--font-display, sans-serif)',
-            fontSize: 22,
-            fontWeight: 700,
-            letterSpacing: '-0.01em',
-            color: '#e8ecf2',
+            position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', alignItems: 'center',
+            justifyContent: 'center', gap: 20, background: 'radial-gradient(circle at 50% 45%, #10161f 0%, #05070a 75%)',
           }}
         >
-          HDRI{' '}
-          <span
-            style={{
-              background: 'linear-gradient(90deg, #5ab0ff, #ffb15a)',
-              WebkitBackgroundClip: 'text',
-              WebkitTextFillColor: 'transparent',
-              backgroundClip: 'text',
-            }}
-          >
-            Forge
-          </span>{' '}
-          Studio
+          <img src="/logo-mark.png" alt="HDRI Forge Studio" width={128} height={128} style={{ borderRadius: 22 }} />
+          <div style={{ fontFamily: 'var(--font-display, sans-serif)', fontSize: 22, fontWeight: 700, color: '#e8ecf2' }}>
+            HDRI Forge Studio
+          </div>
         </div>
-        <div style={{ fontSize: 11, color: '#7c8798', marginTop: 6, letterSpacing: '0.08em' }}>
-          LOADING WORKSPACE
-        </div>
-      </div>
+      )}
 
-      <style>{`
-        @keyframes hfsSplashShimmer {
-          0% { background-position: -120% 0; }
-          55% { background-position: 120% 0; }
-          100% { background-position: 120% 0; }
-        }
-      `}</style>
+      {showSkip && !failed && (
+        <label
+          onClick={(e) => e.stopPropagation()}
+          style={{
+            position: 'absolute', right: 28, bottom: 76, display: 'flex', alignItems: 'center', gap: 8,
+            padding: '7px 12px', borderRadius: 999, background: 'rgba(0,0,0,0.55)', color: '#e5e7eb',
+            font: '500 12px/1 system-ui, sans-serif', cursor: 'pointer', backdropFilter: 'blur(6px)',
+            animation: 'hfsIntroFade 400ms ease both',
+          }}
+        >
+          <input type="checkbox" checked={never} onChange={(e) => setNever(e.target.checked)} />
+          Don&apos;t play the intro next time
+        </label>
+      )}
+      {showSkip && !failed && (
+        <button
+          type="button"
+          onClick={(e) => { e.stopPropagation(); finish(); }}
+          aria-label="Skip the intro"
+          style={{
+            position: 'absolute', right: 28, bottom: 28, padding: '9px 18px', borderRadius: 999,
+            border: '1px solid rgba(255,255,255,0.28)', background: 'rgba(0,0,0,0.55)', color: '#fff',
+            font: '500 13px/1 system-ui, sans-serif', cursor: 'pointer', backdropFilter: 'blur(6px)',
+            animation: 'hfsIntroFade 400ms ease both',
+          }}
+        >
+          Skip
+        </button>
+      )}
+      {muted && !failed && (
+        <div
+          style={{
+            position: 'absolute', left: 28, bottom: 28, padding: '8px 14px', borderRadius: 999,
+            background: 'rgba(0,0,0,0.55)', color: '#e5e7eb', font: '500 12px/1 system-ui, sans-serif',
+          }}
+        >
+          Click for sound
+        </div>
+      )}
+      <style>{`@keyframes hfsIntroFade { from { opacity: 0; } to { opacity: 1; } }`}</style>
     </div>
   );
 }

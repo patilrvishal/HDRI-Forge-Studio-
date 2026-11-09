@@ -1,4 +1,5 @@
-﻿import React, { useEffect, useRef, useCallback, useState, useMemo } from 'react';
+﻿import { isIntroEnabled, setIntroEnabled } from '../../utils/introPref';
+import React, { useEffect, useRef, useCallback, useState, useMemo } from 'react';
 import { useUIStore } from '../../store/uiStore';
 import type { PanelKey, PanelVisibilityState } from '../../store/uiStore';
 import { useSceneStore } from '../../store/sceneStore';
@@ -357,6 +358,10 @@ const MENU_DEFINITIONS = (
     docs: { label: 'Documentation', shortcut: '?', action: () => useUIStore.getState().setManualModal(true) },
     shortcuts: { label: 'Keyboard Shortcuts', action: () => useUIStore.getState().setManualModal(true) },
     sep1: { label: '', separator: true },
+    intro: {
+      label: isIntroEnabled() ? 'Startup intro: On (click to turn off)' : 'Startup intro: Off (click to turn on)',
+      action: () => setIntroEnabled(!isIntroEnabled()),
+    },
     about: { label: 'About', action: () => useUIStore.getState().setAboutModal(true) },
   },
 });
