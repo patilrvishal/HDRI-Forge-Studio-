@@ -16,6 +16,18 @@ const DESIGNED_THUMBS: Record<string, string> = {
   'Octabox': '/presetthumbs/octabox.png',
   'Rounded Softbox': '/presetthumbs/rounded_softbox.png',
   'Umbrella': '/presetthumbs/umbrella.png',
+  'Bulb Soft': '/presetthumbs/bulb_soft.png',
+  'Bulb Hard': '/presetthumbs/bulb_hard.png',
+  'Bulb Warm': '/presetthumbs/bulb_warm.png',
+  'Bulb Cool': '/presetthumbs/bulb_cool.png',
+  'Spot Tight': '/presetthumbs/spot_tight.png',
+  'Sun Disc': '/presetthumbs/sun_disc.png',
+};
+
+/** Icon shown inside each category pill (white when idle, orange when active). */
+const PILL_ICONS: Record<string, string> = {
+  All: 'all', Softboxes: 'softboxes', Strips: 'strips', 'Bulbs & Spots': 'bulbs', Shapes: 'shapes', Rings: 'rings',
+  Gradients: 'gradients', Curves: 'curves', Scrims: 'scrims', 'Blinds & Flags': 'blinds', Sky: 'sky',
 };
 const LS_HIDDEN = 'lightforge.hiddenPresets.v1';
 const LS_SIZE = 'lightforge.presetThumbSize.v1';
@@ -120,8 +132,9 @@ export const PresetLibrary: React.FC<Props> = ({ onApply, onAudition, current, c
             key={c}
             className="btn-sm"
             onClick={() => setCat(c)}
-            style={{ opacity: cat === c ? 1 : 0.7, outline: cat === c ? '1px solid var(--accent)' : 'none', outlineOffset: 1, fontSize: 12, borderRadius: 999, padding: '5px 12px' }}
+            style={{ opacity: cat === c ? 1 : 0.8, outline: cat === c ? '1px solid var(--accent)' : 'none', outlineOffset: 1, fontSize: 12, borderRadius: 999, padding: '5px 12px 5px 9px', gap: 6, color: cat === c ? 'var(--accent-bright)' : undefined, fontWeight: cat === c ? 600 : 400 }}
           >
+            {PILL_ICONS[c] && <img src={`/pillicons/${PILL_ICONS[c]}${cat === c ? '_on' : ''}.png`} alt="" draggable={false} style={{ width: 16, height: 16 }} />}
             {c}
           </button>
         ))}
