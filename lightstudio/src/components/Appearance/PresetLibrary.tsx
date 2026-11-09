@@ -8,6 +8,15 @@ import type { LightAppearance } from '../../appearance/types';
 import { useUIStore } from '../../store/uiStore';
 
 const thumbCache = new Map<string, string>();
+/** Hand-designed icons for the built-in Softboxes (the apply result is unchanged; only the picture in the grid). */
+const DESIGNED_THUMBS: Record<string, string> = {
+  'Softbox Square': '/presetthumbs/softbox_square.png',
+  'Softbox Top-Heavy': '/presetthumbs/softbox_top_heavy.png',
+  'Softbox Hot Centre': '/presetthumbs/softbox_hot_centre.png',
+  'Octabox': '/presetthumbs/octabox.png',
+  'Rounded Softbox': '/presetthumbs/rounded_softbox.png',
+  'Umbrella': '/presetthumbs/umbrella.png',
+};
 const LS_HIDDEN = 'lightforge.hiddenPresets.v1';
 const LS_SIZE = 'lightforge.presetThumbSize.v1';
 const loadHidden = (): Set<string> => { try { return new Set(JSON.parse(localStorage.getItem(LS_HIDDEN) ?? '[]') as string[]); } catch { return new Set(); } };
@@ -147,7 +156,7 @@ export const PresetLibrary: React.FC<Props> = ({ onApply, onAudition, current, c
             style={{ cursor: 'pointer', textAlign: 'center' }}
           >
             <div style={{ aspectRatio: '1 / 1', background: '#151515', border: '1px solid var(--border, #333)', borderRadius: 6, display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
-              <img src={thumbFor(it.id, it.build, it.aspect)} alt={it.name} style={{ maxWidth: '100%', maxHeight: '100%', display: 'block' }} />
+              <img src={DESIGNED_THUMBS[it.name] && !it.user ? DESIGNED_THUMBS[it.name] : thumbFor(it.id, it.build, it.aspect)} alt={it.name} style={{ maxWidth: '100%', maxHeight: '100%', display: 'block' }} />
             </div>
             <div style={{ fontSize: 11, color: 'var(--text-sec)', marginTop: 3, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{it.name}</div>
           </div>
