@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import type { RigSetKind } from '../data/rigSets';
 import type { Light } from '../types/Light';
+import { buildCycStudio } from './cycStudio';
 
 export const RIG_SET_NAME = 'StudioRigSet';
 
@@ -92,20 +93,10 @@ export function buildRigSet(kind: RigSetKind, lights: Light[]): THREE.Group {
   group.userData.rigSet = kind;
 
   if (kind === 'cyc_white') {
-    // White infinity cove: floor curving up into the back wall (back = -Z, where the rig's Back Wall light sits).
-    const R = 2.6, floorFront = 9, wallZ = -8, wallTop = 11;
-    const profile: [number, number][] = [[floorFront, 0], [wallZ + R, 0]];
-    for (let i = 1; i <= 16; i++) {
-      const a = (i / 16) * (Math.PI / 2);
-      profile.push([wallZ + R - Math.sin(a) * R, R - Math.cos(a) * R]);
-    }
-    profile.push([wallZ, wallTop]);
-    const cyc = new THREE.Mesh(
-      sweepProfile(profile, 12),
-      new THREE.MeshStandardMaterial({ color: 0xf2f3f6, roughness: 0.55, metalness: 0, side: THREE.DoubleSide }),
-    );
-    cyc.receiveShadow = true;
-    group.add(cyc);
+    // The full Cyc Wall White studio from the rig sheet (cyclorama, truss ceiling with panel row, softboxes on tripods).
+    buildCycStudio(group, lights);
+    group.traverse((o) => { (o as THREE.Mesh).raycast = () => {}; });
+    return group;
   } else {
     const floor = new THREE.Mesh(
       new THREE.CircleGeometry(16, 96),
@@ -119,7 +110,6 @@ export function buildRigSet(kind: RigSetKind, lights: Light[]): THREE.Group {
 
   for (const l of lights) {
     if (!(l.type === 'area' || l.areaLight)) continue;
-    if (kind === 'cyc_white' && (l.areaWidth ?? 0) >= 8) continue;      // the cyc wall itself is that light
     buildFixture(l, group);
   }
 
