@@ -53,13 +53,71 @@ const EnvironmentBrowser: React.FC<EnvironmentBrowserProps> = ({ onClose, onPres
 
   const activePreset = useMemo(() => getHDRIPresetById(environment.presetId), [environment.presetId]);
 
-  const handlePresetClick = useCallback(
+  // ── Preview / apply ──────────────────────────────────────────────────────────────────────────────────────
+  // One click only PREVIEWS the environment in the scene (no undo entry, nothing saved). Double click or the Apply button
+  // makes it real. Closing the window with an unapplied preview puts the scene back exactly as it was.
+  type EnvPick = { presetId: string; hdri: string | null; showBackground: boolean };
+  const pickEnv = (): EnvPick => {
+    const e = useSceneStore.getState().environment;
+    return { presetId: e.presetId, hdri: e.hdri, showBackground: e.showBackground };
+  };
+  const originalRef = useRef<EnvPick>(pickEnv());       // the scene's real environment
+  const [pending, setPending] = useState<{ kind: 'preset'; id: string } | { kind: 'asset'; id: string } | null>(null);
+  const pendingRef = useRef(pending);
+  pendingRef.current = pending;
+
+  const setSilently = (pick: Partial<EnvPick>) =>
+    useSceneStore.setState((st) => ({ environment: { ...st.environment, ...pick } }));
+
+  const revertPreview = useCallback(() => {
+    if (pendingRef.current) setSilently(originalRef.current);
+  }, []);
+  useEffect(() => () => revertPreview(), [revertPreview]);   // any way of closing the window reverts an unapplied preview
+
+  const previewPreset = useCallback((preset: HDRIPreset) => {
+    setSilently({ presetId: preset.id, hdri: null, showBackground: true });   // show the backdrop so the preview is visible
+    setPending(preset.id === originalRef.current.presetId && !originalRef.current.hdri ? null : { kind: 'preset', id: preset.id });
+  }, []);
+
+  const applyPreset = useCallback(
     (preset: HDRIPreset) => {
+      setSilently(originalRef.current);                  // so undo returns to the real previous environment
       setEnvironmentPreset(preset.id);
+      originalRef.current = pickEnv();
+      setPending(null);
       onPresetSelect?.(preset.id);
     },
     [setEnvironmentPreset, onPresetSelect],
   );
+
+  const previewAsset = useCallback((asset: { id: string; blobUrl?: string | null }) => {
+    if (!asset.blobUrl) return;
+    setSilently({ hdri: asset.blobUrl, presetId: '__custom__', showBackground: true });
+    setPending({ kind: 'asset', id: asset.id });
+  }, []);
+
+  const applyAsset = useCallback(
+    (asset: { id: string; blobUrl?: string | null }) => {
+      if (!asset.blobUrl) return;
+      setSilently(originalRef.current);
+      useHDRIAssetStore.getState().selectAsset(asset.id);
+      setEnvironment({ hdri: asset.blobUrl, presetId: '__custom__', showBackground: true });
+      originalRef.current = pickEnv();
+      setPending(null);
+    },
+    [setEnvironment],
+  );
+
+  const applyPending = useCallback(() => {
+    if (!pending) return;
+    if (pending.kind === 'preset') {
+      const p = getHDRIPresetById(pending.id);
+      if (p) applyPreset(p);
+    } else {
+      const a = useHDRIAssetStore.getState().assets.find((x) => x.id === pending.id);
+      if (a) applyAsset(a);
+    }
+  }, [pending, applyPreset, applyAsset]);
 
   const handleRotationChange = useCallback(
     (v: number) => {
@@ -131,6 +189,8 @@ const EnvironmentBrowser: React.FC<EnvironmentBrowserProps> = ({ onClose, onPres
         // Create blob URL for 3D scene loading
         const url = URL.createObjectURL(file);
         setEnvironment({ hdri: url, presetId: '__custom__', showBackground: true });
+        originalRef.current = pickEnv();
+        setPending(null);
 
         // Also add to the HDRI asset store so it appears in the Environment panel
         try {
@@ -345,16 +405,12 @@ const EnvironmentBrowser: React.FC<EnvironmentBrowserProps> = ({ onClose, onPres
                 }}
               >
                 {hdriAssets.map((asset) => {
-                  const isActive = environment.presetId === '__custom__' && asset.active;
+                  const isActive = environment.presetId === '__custom__' && (pending?.kind === 'asset' ? pending.id === asset.id : asset.active);
                   return (
                     <div
                       key={asset.id}
-                      onClick={() => {
-                        useHDRIAssetStore.getState().selectAsset(asset.id);
-                        if (asset.blobUrl) {
-                          setEnvironment({ hdri: asset.blobUrl, presetId: '__custom__', showBackground: true });
-                        }
-                      }}
+                      onClick={() => previewAsset(asset)}
+                      onDoubleClick={() => applyAsset(asset)}
                       style={{
                         cursor: 'pointer',
                         borderRadius: 'var(--radius)',
@@ -419,7 +475,8 @@ const EnvironmentBrowser: React.FC<EnvironmentBrowserProps> = ({ onClose, onPres
               return (
                 <div
                   key={preset.id}
-                  onClick={() => handlePresetClick(preset)}
+                  onClick={() => previewPreset(preset)}
+                  onDoubleClick={() => applyPreset(preset)}
                   style={{
                     cursor: 'pointer',
                     borderRadius: 'var(--radius)',
@@ -517,9 +574,19 @@ const EnvironmentBrowser: React.FC<EnvironmentBrowserProps> = ({ onClose, onPres
             {HDRI_PRESETS.length} built-in presets
             {hdriAssets.length > 0 && ` + ${hdriAssets.length} custom HDRI(s)`}
           </div>
-          <button className="btn-primary" onClick={onClose}>
-            Done
-          </button>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            {pending && (
+              <span style={{ fontSize: 10, color: 'var(--text-dim)' }}>
+                Previewing - not applied yet (double-click or Apply)
+              </span>
+            )}
+            <button className="btn-sm" onClick={applyPending} disabled={!pending} style={{ fontSize: 11, padding: '6px 16px' }}>
+              Apply
+            </button>
+            <button className="btn-primary" onClick={onClose}>
+              Done
+            </button>
+          </div>
         </div>
       </div>
     </div>
