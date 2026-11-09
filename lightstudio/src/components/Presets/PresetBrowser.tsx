@@ -1,4 +1,6 @@
 import { RIG_CARDS } from '../../data/rigCards';
+import { RIG_SETS } from '../../data/rigSets';
+import { useRigSetStore } from '../../store/rigSetStore';
 import React, { useEffect, useRef, useMemo, useCallback, useState } from 'react';
 import { usePresetsStore } from '../../store/presetsStore';
 import { useLightsStore } from '../../store/lightsStore';
@@ -266,6 +268,9 @@ export const PresetBrowser: React.FC<PresetBrowserProps> = ({ onGenerateThumbnai
       setLightsFromPreset(newLights);
       setPreviewPreset(null);
       if (newLights.length > 0) selectLight(newLights[0].id);
+      // the rig's studio set (floor / cyc wall) goes in with it, so the viewport matches the card
+      const rs = useRigSetStore.getState();
+      if (rs.auto && preset.isDefault && RIG_SETS[preset.name]) rs.setKind(RIG_SETS[preset.name]);
       showToast(`Applied "${preset.name}"`);
     },
     [presets, setLightsFromPreset, setPreviewPreset, selectLight, showToast],
@@ -298,6 +303,8 @@ export const PresetBrowser: React.FC<PresetBrowserProps> = ({ onGenerateThumbnai
           const newLights = presetToLights(preset);
           setLightsFromPreset(newLights);                          // then apply it the normal way (history, selection)
           if (newLights.length > 0) selectLight(newLights[0].id);
+          const rs = useRigSetStore.getState();
+          if (rs.auto && preset.isDefault && RIG_SETS[preset.name]) rs.setKind(RIG_SETS[preset.name]);
           showToast(`Applied "${preset.name}"`);
         }
       }

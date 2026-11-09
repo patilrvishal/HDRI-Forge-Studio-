@@ -24,6 +24,8 @@ import { GizmoToolbar } from './GizmoToolbar';
 import { useCameraStore } from '../../store/cameraStore';
 import { useViewportModeStore } from '../../store/viewportModeStore';
 import { CameraSwitcher } from './CameraSwitcher';
+import { useRigSetStore } from '../../store/rigSetStore';
+import { buildRigSet, disposeRigSet, RIG_SET_NAME } from '../../three/rigSet';
 import { ViewportPropertiesPanel } from './ViewportPropertiesPanel';
 import { CameraPanel } from './CameraPanel';
 import { GizmoManager, type GizmoMode } from '../../three/GizmoManager';
@@ -1149,6 +1151,17 @@ export const Viewport: React.FC<ViewportProps> = ({ sceneManagerRef, onScreensho
       clearMeasureLine();
     }
   }, [activeTool, clearMeasureLine]);
+
+  // Studio set that goes with the applied rig (floor / cyc wall): replace it whenever the chosen set changes.
+  const rigSetKind = useRigSetStore((s) => s.kind);
+  useEffect(() => {
+    const sm = sceneManagerRef.current;
+    if (!sm) return;
+    const scene = sm.scene;
+    const old = scene.getObjectByName(RIG_SET_NAME);
+    if (old) { scene.remove(old); disposeRigSet(old); }
+    if (rigSetKind) scene.add(buildRigSet(rigSetKind));
+  }, [rigSetKind, sceneManagerRef]);
 
   // Sync lights to scene
   useEffect(() => {

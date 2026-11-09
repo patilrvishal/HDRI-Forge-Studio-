@@ -15,6 +15,7 @@ import { newAppearance } from '../../appearance/content';
 import { useSceneStore } from '../../store/sceneStore';
 import { HDRI_PRESETS } from '../../types/Environment';
 import { ENV_CARDS, ENV_PILL_ICONS } from '../../data/envCards';
+import { useRigSetStore } from '../../store/rigSetStore';
 import { renderPresetThumbnails } from '../../three/EnvPresetThumbnails';
 
 /**
@@ -91,6 +92,25 @@ const EnvLibrary: React.FC = () => {
         ))}
       </div>
     </>
+  );
+};
+
+/** Studio set options for the Rig tab: build the room that goes with a rig, or clear it. */
+const RigSetBar: React.FC = () => {
+  const auto = useRigSetStore((s) => s.auto);
+  const kind = useRigSetStore((s) => s.kind);
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '4px 10px 6px', fontSize: 12, color: 'var(--text-sec)' }}>
+      <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', flex: 1 }} title="Applying a rig also builds its studio set (the floor and wall shown on its card) in the scene">
+        <input type="checkbox" checked={auto} onChange={(e) => useRigSetStore.getState().setAuto(e.target.checked)} />
+        Add the studio set with a rig
+      </label>
+      {kind && (
+        <button className="btn-sm" style={{ fontSize: 12 }} onClick={() => useRigSetStore.getState().setKind(null)} title="Remove the studio set from the scene">
+          Clear set
+        </button>
+      )}
+    </div>
   );
 };
 
@@ -234,7 +254,12 @@ export const HdrlsLeftColumn: React.FC<{
           ))}
         </div>
         <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', overflowX: 'hidden' }}>
-          {tab === 'rig' && <PresetBrowser onGenerateThumbnail={onGenerateThumbnail} />}
+          {tab === 'rig' && (
+            <>
+              <RigSetBar />
+              <PresetBrowser onGenerateThumbnail={onGenerateThumbnail} />
+            </>
+          )}
           {tab === 'env' && (
             <>
               <div style={{ padding: '4px 8px' }}>
