@@ -462,6 +462,8 @@ export const AppLayout: React.FC = () => {
             className="panel panel-glow border-light-effect"
             style={{
               width: leftPanelWidth,
+              height: '100%',
+              minHeight: 0,
               flexShrink: 0,
               overflow: 'hidden',
               borderRight: 'none',
@@ -638,6 +640,8 @@ export const AppLayout: React.FC = () => {
             className="panel panel-glow border-light-effect properties-card-frame"
             style={{
               width: rightPanelWidth,
+              height: '100%',
+              minHeight: 0,
               flexShrink: 0,
               // clip (not hidden): same visual clipping, but the browser can't scroll this box sideways
               // to reveal a focused value box (the header tab bar is wider than the panel)
@@ -693,7 +697,7 @@ export const AppLayout: React.FC = () => {
             {/* Tab content */}
             <div className="panel-body" style={{ overflow: 'hidden', padding: 0, display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
               {rightTab === 'properties' && (
-                <div className="glossy-3d-trial" style={{ flex: 1, overflow: 'hidden' }}>
+                <div className="glossy-3d-trial" style={{ flex: 1, minHeight: 0, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
                   <ErrorBoundary>
                     <DynamicPropertiesPanel sceneRef={sceneRef} />
                   </ErrorBoundary>

@@ -1,4 +1,4 @@
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useUIStore, type ActiveTool } from '../../store/uiStore';
 import { useLightsStore } from '../../store/lightsStore';
 import { useSceneStore } from '../../store/sceneStore';
@@ -72,6 +72,25 @@ export const LeftToolbar: React.FC<LeftToolbarProps> = ({ sceneManagerRef }) => 
   const cameraBookmarks = useSceneStore((s) => s.cameraBookmarks);
   const [tip, setTip] = useState<Tip | null>(null);
 
+  // The strip fits whatever height it is given: buttons shrink (down to a usable size) so all of them show, and once they
+  // cannot shrink any more the strip scrolls.
+  const stripRef = useRef<HTMLDivElement | null>(null);
+  const [size, setSize] = useState(44);
+  useEffect(() => {
+    const el = stripRef.current;
+    if (!el) return;
+    const total = TOOLS.length + ADD_LIGHTS.length + ACTIONS.length + BOTTOM.length;
+    const measure = () => {
+      const fixed = 12 + 3 * 11 + 3 * (total + 2);             // padding + dividers + gaps
+      const fit = Math.floor((el.clientHeight - fixed) / total);
+      setSize(Math.max(30, Math.min(44, fit)));
+    };
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
   const selectedLight = lights.find((l) => l.id === selectedLightId) ?? null;
 
   const showTip = (e: React.MouseEvent<HTMLElement>, entry: Entry, note?: string) => {
@@ -119,15 +138,16 @@ export const LeftToolbar: React.FC<LeftToolbarProps> = ({ sceneManagerRef }) => 
       onMouseLeave={() => setTip(null)}
       onFocus={(e) => showTip(e as unknown as React.MouseEvent<HTMLElement>, entry, opts.note)}
       onBlur={() => setTip(null)}
-      style={{ width: 44, height: 44, borderRadius: 10, opacity: opts.disabled ? 0.4 : 1, flexShrink: 0, padding: 0 }}
+      style={{ width: size, height: size, borderRadius: Math.round(size * 0.23), opacity: opts.disabled ? 0.4 : 1, flexShrink: 0, padding: 0 }}
     >
-      <img src={`/toolicons/${entry.icon}.png`} alt="" draggable={false} style={{ width: 32, height: 32, pointerEvents: 'none' }} />
+      <img src={`/toolicons/${entry.icon}.png`} alt="" draggable={false} style={{ width: Math.round(size * 0.73), height: Math.round(size * 0.73), pointerEvents: 'none' }} />
     </button>
   );
 
   return (
     <div
       className="left-toolbar"
+      ref={stripRef}
       style={{
         width: 56,
         display: 'flex',

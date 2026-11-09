@@ -641,14 +641,14 @@ export const DynamicPropertiesPanel: React.FC<DynamicPropertiesPanelProps> = ({ 
     // A rig group (or one of its parts): lights, room and fixtures, organised and editable
     if (selectedObj.userData.isRigSet && selectedObj instanceof THREE.Group) {
       return (
-        <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+        <div style={{ flex: 1, minHeight: 0, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
           <RigGroupProperties group={selectedObj} />
         </div>
       );
     }
     if (selectedObj.userData.rigPart && selectedObj.parent?.userData.isRigSet) {
       return (
-        <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+        <div style={{ flex: 1, minHeight: 0, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
           <RigPartProperties part={selectedObj} group={selectedObj.parent as THREE.Group} />
         </div>
       );
@@ -656,7 +656,7 @@ export const DynamicPropertiesPanel: React.FC<DynamicPropertiesPanelProps> = ({ 
 
     if (nodeType === 'light') {
       return (
-        <div style={{ flex: 1, overflowY: 'auto' }}>
+        <div style={{ flex: 1, minHeight: 0, overflowY: 'auto' }}>
           <LightProperties />
         </div>
       );
@@ -664,7 +664,7 @@ export const DynamicPropertiesPanel: React.FC<DynamicPropertiesPanelProps> = ({ 
 
     if (nodeType === 'mesh') {
       return (
-        <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+        <div style={{ flex: 1, minHeight: 0, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
           <MeshProperties obj={selectedObj as THREE.Mesh} />
         </div>
       );
@@ -672,7 +672,7 @@ export const DynamicPropertiesPanel: React.FC<DynamicPropertiesPanelProps> = ({ 
 
     // Camera, Group, Helper, Other
     return (
-      <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+      <div style={{ flex: 1, minHeight: 0, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
         <GenericProperties obj={selectedObj} nodeType={nodeType} />
       </div>
     );
@@ -686,7 +686,7 @@ export const DynamicPropertiesPanel: React.FC<DynamicPropertiesPanelProps> = ({ 
   // Priority 2: No hierarchy selection, but a light is selected via Light List panel
   if (selectedLightId) {
     return (
-      <div style={{ flex: 1, overflowY: 'auto' }}>
+      <div style={{ flex: 1, minHeight: 0, overflowY: 'auto' }}>
         <LightProperties />
       </div>
     );
@@ -697,7 +697,7 @@ export const DynamicPropertiesPanel: React.FC<DynamicPropertiesPanelProps> = ({ 
   // so they never reach Priority 1's hierarchy branch.
   if (selectedShapeId) {
     return (
-      <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+      <div style={{ flex: 1, minHeight: 0, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
         <HDRIShapeProperties />
       </div>
     );
@@ -707,7 +707,7 @@ export const DynamicPropertiesPanel: React.FC<DynamicPropertiesPanelProps> = ({ 
   // selected via the Light List panel.
   if (selectedHDRIAssetId) {
     return (
-      <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+      <div style={{ flex: 1, minHeight: 0, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
         <CustomHDRIProperties />
       </div>
     );

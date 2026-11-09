@@ -1978,7 +1978,7 @@ export const SceneHierarchy: React.FC<SceneHierarchyProps> = ({ sceneRef }) => {
           <SplitHandle onDrag={handleSplitDrag} containerRef={containerRef} />
 
           {/* Properties panel area */}
-          <div style={{ flex: 1 - splitRatio, overflow: 'hidden', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+          <div style={{ flex: 1 - splitRatio, overflowY: 'auto', overflowX: 'hidden', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
             <ObjectPropertiesPanel sceneRef={sceneRef} refresh={refresh} tick={tick} />
           </div>
         </>

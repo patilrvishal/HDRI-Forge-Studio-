@@ -2641,3 +2641,29 @@ button:disabled, [aria-disabled="true"] { cursor: not-allowed; }
 .preset-card.rig-card.previewing { box-shadow: none; }
 .preset-card.rig-card.previewing::after { content: ''; position: absolute; inset: 0; border: 2px solid var(--accent); border-radius: 14px; box-shadow: 0 0 12px rgba(255, 138, 43, 0.45); pointer-events: none; }
 .hdrls-lib .preset-grid-wide:has(.rig-card) { grid-template-columns: repeat(2, 1fr); }
+
+/* Left tool strip: the scrollbar stays visible when the buttons cannot all fit */
+.left-toolbar { scrollbar-width: thin; scrollbar-color: var(--border-light) transparent; }
+.left-toolbar::-webkit-scrollbar { width: 6px; }
+
+/* Preset Library: any row that is wider than the panel scrolls sideways instead of being cut off */
+.hdrls-lib .preset-tabs, .hdrls-lib .lib-pills { flex-wrap: nowrap; overflow-x: auto; overflow-y: hidden; scrollbar-width: thin; scrollbar-color: var(--border-light) transparent; padding-bottom: 8px; }
+.hdrls-lib .preset-tabs > *, .hdrls-lib .lib-pills > * { flex-shrink: 0; white-space: nowrap; }
+.hdrls-lib ::-webkit-scrollbar { width: 8px; height: 8px; }
+.hdrls-lib ::-webkit-scrollbar-thumb { background: var(--border-light); border-radius: 10px; }
+
+/* ...and the pills, tabs and icons shrink with the panel */
+.hdrls-lib { container-type: inline-size; }
+@container (max-width: 300px) {
+  .hdrls-lib .tab-item, .hdrls-lib .preset-tab, .hdrls-lib .lib-pill, .hdrls-lib .btn-sm { font-size: 11px; padding: 4px 8px; }
+  .hdrls-lib .tab-item img, .hdrls-lib .lib-pill img, .hdrls-lib .btn-sm img { width: 13px !important; height: 13px !important; }
+}
+@container (max-width: 240px) {
+  .hdrls-lib .tab-item, .hdrls-lib .preset-tab, .hdrls-lib .lib-pill, .hdrls-lib .btn-sm { font-size: 10px; padding: 3px 6px; }
+  .hdrls-lib .tab-item img, .hdrls-lib .lib-pill img, .hdrls-lib .btn-sm img { width: 11px !important; height: 11px !important; }
+}
+
+/* Scrolling everywhere a panel can be taller than its box: a flex child may shrink below its content, and the scroll sits on the child that holds the long list */
+.panel, .panel-body, .glossy-3d-trial { min-height: 0; }
+.panel-body { overflow-y: auto; }
+.glossy-3d-trial > * { flex: 1 1 auto; min-height: 0; }
