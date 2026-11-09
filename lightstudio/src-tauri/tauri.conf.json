@@ -1,7 +1,7 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "HDRI Forge Studio",
-  "version": "0.1.23",
+  "version": "0.1.25",
   "identifier": "com.lightforge.studio",
   "build": {
     "frontendDist": "../dist",
@@ -19,7 +19,23 @@
         "minHeight": 640,
         "resizable": true,
         "maximized": true,
-        "fullscreen": false
+        "fullscreen": false,
+        "label": "main",
+        "visible": false
+      },
+      {
+        "label": "splash",
+        "title": "HDRI Forge Studio",
+        "url": "index.html?splash=1",
+        "width": 960,
+        "height": 540,
+        "center": true,
+        "decorations": false,
+        "resizable": false,
+        "alwaysOnTop": true,
+        "skipTaskbar": true,
+        "maximizable": false,
+        "minimizable": false
       }
     ],
     "security": {
@@ -28,7 +44,9 @@
   },
   "bundle": {
     "active": true,
-    "targets": ["nsis"],
+    "targets": [
+      "nsis"
+    ],
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",

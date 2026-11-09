@@ -17,7 +17,7 @@ const SPLASH_WIDTH = 'min(960px, 72vw)';
  * away to the app. The window itself is left exactly as it is.
  * Click, Space, Enter, Escape or the Skip button end it early. If the video cannot be played the old logo splash shows.
  */
-export function SplashScreen({ onDone }: { onDone: () => void }) {
+export function SplashScreen({ onDone, standalone = false }: { onDone: () => void; standalone?: boolean }) {
   const [fading, setFading] = useState(false);
   const [failed, setFailed] = useState(false);
   const [muted, setMuted] = useState(false);
@@ -110,7 +110,9 @@ export function SplashScreen({ onDone }: { onDone: () => void }) {
             else if (v.currentTime > INTRO_SECONDS - AUDIO_FADE_SECONDS) v.volume = Math.max(0, (INTRO_SECONDS - v.currentTime) / AUDIO_FADE_SECONDS);
           }}
           onError={() => setFailed(true)}
-          style={{
+          style={standalone ? {
+            position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', background: '#000',
+          } : {
             position: 'absolute', left: '50%', top: '50%', transform: 'translate(-50%, -50%)',
             width: SPLASH_WIDTH, aspectRatio: '16 / 9', objectFit: 'cover', background: '#000',
             borderRadius: 14, boxShadow: '0 0 0 1px rgba(255,255,255,0.07), 0 24px 80px rgba(0,0,0,0.7)',
