@@ -108,6 +108,11 @@ export class GizmoManager {
     if (this.controls.object) (this.controls as unknown as { visible: boolean }).visible = true;
   }
 
+  /** Transform orientation: handles follow the world axes or the light's own axes. */
+  setSpace(space: 'world' | 'local'): void {
+    this.controls.setSpace(space);
+  }
+
   getMode(): GizmoMode {
     return this.mode;
   }

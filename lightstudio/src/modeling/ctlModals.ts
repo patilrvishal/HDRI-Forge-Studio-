@@ -9,6 +9,9 @@ import * as loop from './opsLoop';
 import { deleteSelection } from './opsCore';
 import { isVisible, pickEdge, pickFace, pickVertex, pointInPolygon, projectAll, projectWorld, segIntersect, toWorld, type PickCtx } from './Picking';
 import { useModelingStore } from '../store/modelingStore';
+import { useLightsStore } from '../store/lightsStore';
+import { useHistoryStore } from '../store/historyStore';
+import { cartesianToSpherical } from '../utils/math';
 
 export type TransformKind = 'translate' | 'rotate' | 'scale' | 'shear';
 
@@ -72,6 +75,9 @@ export class TransformModal implements Modal {
 
   private edit: { obj: EditableObject; verts: number[]; orig: V3[]; weights: number[]; sel: Set<number> } | null = null;
   private objs: { obj: EditableObject; pos0: THREE.Vector3; quat0: THREE.Quaternion; scl0: THREE.Vector3 }[] = [];
+  /** Lights being moved / rotated / scaled with G / R / S (when no mesh object is selected). */
+  private lights: { id: string; pos0: THREE.Vector3; quat0: THREE.Quaternion; w0: number; h0: number; area: boolean; tr0: string }[] = [];
+  private lightGroup = false;
   private editNormalWorld = new THREE.Vector3(0, 1, 0);
   private propRadius = 1;
   private snapPoint: THREE.Vector3 | null = null;
@@ -129,6 +135,19 @@ export class TransformModal implements Modal {
       const c = new THREE.Vector3();
       for (const o of this.objs) c.add(o.pos0);
       c.multiplyScalar(1 / Math.max(1, this.objs.length));
+      if (!this.objs.length) {
+        const ls = useLightsStore.getState();
+        const l = ls.lights.find((x) => x.id === ls.selectedLightId);
+        if (l) {
+          let q = new THREE.Quaternion();
+          ctl.sm.scene.traverse((o) => { if (o.userData?.lightId === l.id && (o as THREE.Light).isLight) q = o.getWorldQuaternion(new THREE.Quaternion()); });
+          const p0 = new THREE.Vector3(l.transform.position.x, l.transform.position.y, l.transform.position.z);
+          this.lights.push({ id: l.id, pos0: p0, quat0: q, w0: l.areaWidth ?? 2, h0: l.areaHeight ?? 2, area: l.type === 'area' || l.type === 'overhead', tr0: JSON.stringify(l.transform) });
+          c.copy(p0);
+          useHistoryStore.getState().beginGroup('Transform Light');
+          this.lightGroup = true;
+        }
+      }
       this.pivot = st.pivot === 'cursor' ? ctl.cursor.clone() : c;
       if (this.objs[0]) this.editNormalWorld = new THREE.Vector3(0, 1, 0).applyQuaternion(this.objs[0].quat0);
     }
@@ -209,7 +228,7 @@ export class TransformModal implements Modal {
         return [right, up, fwd.clone().negate()];
       }
       case 'local': {
-        const q = this.edit ? this.edit.obj.object.getWorldQuaternion(new THREE.Quaternion()) : this.objs[0]?.quat0 ?? new THREE.Quaternion();
+        const q = this.edit ? this.edit.obj.object.getWorldQuaternion(new THREE.Quaternion()) : this.objs[0]?.quat0 ?? this.lights[0]?.quat0 ?? new THREE.Quaternion();
         return [new THREE.Vector3(1, 0, 0).applyQuaternion(q), new THREE.Vector3(0, 1, 0).applyQuaternion(q), new THREE.Vector3(0, 0, 1).applyQuaternion(q)];
       }
       case 'normal': {
@@ -475,9 +494,35 @@ export class TransformModal implements Modal {
         }
         o.updateMatrixWorld(true);
       }
+      for (const t of this.lights) this.applyToLight(t, delta, angle, scale, rotAxis, axis);
       ctl.syncStore();
     }
     ctl.changed();
+  }
+
+  /** Writes one light's new position / rotation / size to the store (the same fields the gizmo and the properties panel use). */
+  private applyToLight(t: { id: string; pos0: THREE.Vector3; quat0: THREE.Quaternion; w0: number; h0: number; area: boolean }, delta: THREE.Vector3, angle: number, scale: number, rotAxis: THREE.Vector3, axis: THREE.Vector3 | null): void {
+    const st = useLightsStore.getState();
+    const l = st.lights.find((x) => x.id === t.id);
+    if (!l) return;
+    const pos = t.pos0.clone();
+    let rot: { x: number; y: number; z: number } | null = null;
+    if (this.kind === 'translate') pos.add(delta);
+    else if (this.kind === 'rotate') {
+      const q = new THREE.Quaternion().setFromAxisAngle(rotAxis, angle).multiply(t.quat0);
+      const e = new THREE.Euler().setFromQuaternion(q, 'XYZ');
+      rot = { x: (e.x * 180) / Math.PI, y: (e.y * 180) / Math.PI, z: (e.z * 180) / Math.PI };
+    } else if (this.kind === 'scale' && t.area) {
+      // the rectangle's own X / Y: an X lock stretches the width, a Y lock the height, no lock scales both
+      const sx = this.axis === 'y' ? 1 : scale, sy = this.axis === 'x' ? 1 : scale;
+      st.updateLight(t.id, { areaWidth: Math.max(0.05, t.w0 * sx), areaHeight: Math.max(0.05, t.h0 * sy) });
+    }
+    const sph = cartesianToSpherical(pos.x, pos.y, pos.z);
+    st.updateLightTransform(t.id, {
+      position: { x: pos.x, y: pos.y, z: pos.z },
+      spherical: { lat: sph.lat, lng: sph.lng, radius: sph.radius, height: sph.height },
+      ...(rot ? { rotation: { ...l.transform.rotation, ...rot, enabled: true } } : {}),
+    });
   }
 
   private updateText(delta = new THREE.Vector3(), angle = 0, scale = 1, shear = 0): void {
@@ -580,7 +625,16 @@ export class TransformModal implements Modal {
         t.obj.object.quaternion.copy(t.quat0);
         t.obj.object.scale.copy(t.scl0);
       }
+      const ls = useLightsStore.getState();
+      for (const t of this.lights) {
+        ls.updateLightTransform(t.id, JSON.parse(t.tr0));
+        if (t.area) ls.updateLight(t.id, { areaWidth: t.w0, areaHeight: t.h0 });
+      }
     }
+  }
+
+  private endLightGroup(): void {
+    if (this.lightGroup) { this.lightGroup = false; useHistoryStore.getState().endGroup(); }
   }
 
   confirm(): void {
@@ -588,12 +642,14 @@ export class TransformModal implements Modal {
     if (this.edit) {
       this.edit.obj.mesh.touch();
     }
+    this.endLightGroup();
     ctl.endModal();
     ctl.changed();
   }
 
   cancel(): void {
     this.reset();
+    this.endLightGroup();
     const ctl = this.ctl;
     if (!this.opts.onCancelUndo) ctl.discardUndo(this.snap);
     ctl.endModal();

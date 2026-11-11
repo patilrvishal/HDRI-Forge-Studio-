@@ -44,6 +44,7 @@ import { ImportCameras } from './ImportCameras';
 import { ModelingOverlay } from '../Modeling/ModelingOverlay';
 import { ModelingController } from '../../modeling/ModelingController';
 import { setModelingController } from '../../modeling/bridge';
+import { useModelingStore } from '../../store/modelingStore';
 import { useObjectHdriStore } from '../../store/objectHdriStore';
 import type { AnimatedProperty } from '../../types/Animation';
 import { MaterialManager } from '../../three/MaterialManager';
@@ -1034,6 +1035,11 @@ export const Viewport: React.FC<ViewportProps> = ({ sceneManagerRef, onScreensho
       gizmoRef.current = null;
     };
   }, [sceneManagerRef]);
+
+  const orientation = useModelingStore((s) => s.orientation);
+  useEffect(() => {
+    gizmoRef.current?.setSpace(orientation === 'local' ? 'local' : 'world');
+  }, [orientation, selectedLightId]);
 
   useEffect(() => {
     gizmoRef.current?.setMode(gizmoMode);

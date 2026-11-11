@@ -153,14 +153,14 @@ function Header() {
             <option value="cursor">3D Cursor</option>
             <option value="active">Active Element</option>
           </select>
-          <select className="mdl-select" title="Transform orientation" value={s.orientation} onChange={(e) => s.set({ orientation: e.target.value as 'global' | 'local' | 'normal' | 'view' })}>
-            <option value="global">Global</option>
-            <option value="local">Local</option>
-            <option value="normal">Normal</option>
-            <option value="view">View</option>
-          </select>
         </>
       )}
+      <select className="mdl-select" title="Transform orientation: whether move / rotate / scale axes (the gizmo and the X Y Z lock keys) follow the world, the object itself or the view" value={!edit && s.orientation === 'normal' ? 'global' : s.orientation} onChange={(e) => s.set({ orientation: e.target.value as 'global' | 'local' | 'normal' | 'view' })}>
+        <option value="global">Global</option>
+        <option value="local">Local</option>
+        {edit && <option value="normal">Normal</option>}
+        <option value="view">View</option>
+      </select>
       <button className={'mdl-btn' + (s.npanel ? ' active' : '')} title="Item / Material panel (N)" onClick={() => s.set({ npanel: !s.npanel })}>N</button>
     </div>
   );

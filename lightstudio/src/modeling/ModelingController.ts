@@ -75,6 +75,7 @@ export class ModelingController {
   private unsubStore: (() => void) | null = null;
   private unsubLights: (() => void) | null = null;
   private unsubTool: (() => void) | null = null;
+  private unsubOrient: (() => void) | null = null;
   /** Move / rotate / scale handles on the selected object (Object Mode). */
   private tc: TransformControls | null = null;
   private tcRoot: THREE.Object3D | null = null;
@@ -96,6 +97,7 @@ export class ModelingController {
       }
     });
     this.unsubTool = useUIStore.subscribe((s, prev) => { if (s.activeTool !== prev.activeTool) this.updateGizmo(); });
+    this.unsubOrient = useModelingStore.subscribe((s, prev) => { if (s.orientation !== prev.orientation) this.updateGizmo(); });
     this.unsubLights = useLightsStore.subscribe((s, prev) => {
       if (s.selectedLightId !== prev.selectedLightId && s.selectedLightId && this.selectedIds.size && this.mode === 'object') {
         this.selectObject(null, false, true);
@@ -130,6 +132,7 @@ export class ModelingController {
     this.unsubStore?.();
     this.unsubLights?.();
     this.unsubTool?.();
+    this.unsubOrient?.();
     if (this.tc) { this.tc.detach(); this.tc.dispose(); if (this.tcRoot) this.sm.scene.remove(this.tcRoot); this.tc = null; this.tcRoot = null; }
     this.exitEdit(false);
     for (const o of this.objects.values()) {
@@ -216,6 +219,7 @@ export class ModelingController {
     }
     const tool = useUIStore.getState().activeTool;
     this.tc.setMode(tool === 'rotate' ? 'rotate' : tool === 'scale' ? 'scale' : 'translate');
+    this.tc.setSpace(useModelingStore.getState().orientation === 'local' ? 'local' : 'world');
     if (this.tc.object !== o!.object) this.tc.attach(o!.object);
     if (this.tcRoot) this.tcRoot.visible = true;
   }
@@ -670,7 +674,7 @@ export class ModelingController {
       this.toast('Nothing selected');
       return;
     }
-    if (this.mode === 'object' && this.selectedIds.size === 0) return;
+    if (this.mode === 'object' && this.selectedIds.size === 0 && !useLightsStore.getState().selectedLightId) return;
     const snap = opts.onCancelUndo ?? this.pushUndo(kindLabel(kind));
     this.startModal(new TransformModal(this, kind, snap, opts));
   }
@@ -1594,6 +1598,12 @@ export class ModelingController {
     if (ev.ctrlKey && k === 'a' && has) {
       this.applyTransform();
       return true;
+    }
+    // Blender keys on a selected light: G move, R rotate, S scale (then X / Y / Z to lock an axis, type a number, Enter)
+    if (!has && !ev.ctrlKey && !ev.metaKey && !ev.altKey && !ev.shiftKey && useLightsStore.getState().selectedLightId) {
+      if (k === 'g') { this.startTransform('translate'); return true; }
+      if (k === 'r') { this.startTransform('rotate'); return true; }
+      if (k === 's') { this.startTransform('scale'); return true; }
     }
     if (!has) return false;
     if (ev.ctrlKey || ev.metaKey) return false;
