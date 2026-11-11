@@ -1647,9 +1647,13 @@ export const Viewport: React.FC<ViewportProps> = ({ sceneManagerRef, onScreensho
 
     const meshes: THREE.Mesh[] = [];
     sm.scene.traverse((obj) => {
-      if (obj instanceof THREE.Mesh && !(obj as any).userData?.isHelper && !(obj as any).userData?.isProxy && obj.name !== '__floor__') {
-        meshes.push(obj);
+      if (!(obj instanceof THREE.Mesh) || obj.name === '__floor__') return;
+      // Skip editor dressing: the transform gizmo's handles (children of a proxy root), helpers and anything hidden.
+      // Otherwise the gizmo of an already-selected object swallows every click aimed at it.
+      for (let o: THREE.Object3D | null = obj; o; o = o.parent) {
+        if (!o.visible || o.userData?.isHelper || o.userData?.isProxy) return;
       }
+      meshes.push(obj);
     });
 
     const hits = raycaster.intersectObjects(meshes, false);

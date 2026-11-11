@@ -179,6 +179,12 @@ export const AppLayout: React.FC = () => {
   const [rightTab, setRightTab] = useState<'properties' | 'preview' | 'material' | 'matEdit'>('properties');
   const storeRightTab = useUIStore((s) => s.rightPanelTab);
 
+  /** A tab picked by hand is mirrored into the store, so a later viewport click that asks for the same tab still switches to it. */
+  const pickRightTab = (t: 'properties' | 'preview' | 'material' | 'matEdit') => {
+    setRightTab(t);
+    useUIStore.getState().setRightPanelTab(t);
+  };
+
   // Sync right tab from store (e.g. viewport click sets it to 'matEdit')
   useEffect(() => {
     if (storeRightTab && storeRightTab !== rightTab) {
@@ -671,20 +677,20 @@ export const AppLayout: React.FC = () => {
               <div className="tab-bar tab-bar-purple" style={{ flex: 1, background: 'none', boxShadow: 'none' }}>
                 <div
                   className={`tab-item ${rightTab === 'properties' ? 'active' : ''}`}
-                  onClick={() => setRightTab('properties')}
+                  onClick={() => pickRightTab('properties')}
                 >
                   <CubeIcon />
                   Light Properties
                 </div>
                 <div
                   className={`tab-item ${rightTab === 'material' ? 'active' : ''}`}
-                  onClick={() => setRightTab('material')}
+                  onClick={() => pickRightTab('material')}
                 >
                   Material
                 </div>
                 <div
                   className={`tab-item ${rightTab === 'matEdit' ? 'active' : ''}`}
-                  onClick={() => setRightTab('matEdit')}
+                  onClick={() => pickRightTab('matEdit')}
                 >
                   Mat Edit
                 </div>
