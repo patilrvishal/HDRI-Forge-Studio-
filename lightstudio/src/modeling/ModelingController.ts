@@ -5,6 +5,9 @@ import { useSceneHierarchyStore } from '../store/sceneHierarchyStore';
 import { useLightsStore } from '../store/lightsStore';
 import { useUIStore } from '../store/uiStore';
 import { TransformControls } from 'three/addons/controls/TransformControls.js';
+import { pickLight, pickSurface } from '../three/pickLight';
+import { runLightCommand, runPartCommand, rigGroupOf } from './contextActions';
+import { catmullClark } from './opsSubsurf';
 import {
   EditMesh,
   Selection,
@@ -79,6 +82,9 @@ export class ModelingController {
   /** Move / rotate / scale handles on the selected object (Object Mode). */
   private tc: TransformControls | null = null;
   private tcRoot: THREE.Object3D | null = null;
+  /** What the right-click menu was opened on (for the `part:*` commands). */
+  contextTarget: THREE.Object3D | null = null;
+  contextIsRig = false;
   private lastOpRun: { snapshot: WorldSnapshot; run: (v: Record<string, number | boolean | string>) => void; fields: OpField[]; name: string } | null = null;
 
   constructor(sm: SceneManager, hooks: ModelingHooks = {}) {
@@ -776,11 +782,34 @@ export class ModelingController {
       e.stopImmediatePropagation();
       const r = this.dom.getBoundingClientRect();
       this.set({ menu: { kind: 'context', x: e.clientX - r.left, y: e.clientY - r.top } });
-    } else if (this.selectedIds.size > 0 && this.hitObject(e.clientX, e.clientY)) {
-      e.preventDefault();
-      e.stopImmediatePropagation();
+    } else if (this.dom.parentElement?.style.cursor !== 'crosshair') {
+      // Object mode, not painting: the menu depends on what is under the cursor (a light, a mesh object, any other part)
       const r = this.dom.getBoundingClientRect();
-      this.set({ menu: { kind: 'object', x: e.clientX - r.left, y: e.clientY - r.top } });
+      const rc = new THREE.Raycaster();
+      rc.setFromCamera(new THREE.Vector2(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1), this.sm.camera);
+      const surface = pickSurface(this.sm.scene, rc);
+      const at = { x: e.clientX - r.left, y: e.clientY - r.top };
+      const lightId = pickLight(this.sm.scene, rc.ray, surface ? surface.distance : null);
+      const hit = this.hitObject(e.clientX, e.clientY);
+      if (lightId) {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        useLightsStore.getState().selectLight(lightId);
+        this.set({ menu: { kind: 'light', ...at } });
+      } else if (hit) {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        if (!this.selectedIds.has(hit.id)) this.selectObject(hit.id, false);
+        this.contextTarget = hit.object;
+        this.contextIsRig = false;
+        this.set({ menu: { kind: 'object', title: hit.name, ...at } });
+      } else if (surface) {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        this.contextTarget = surface.object;
+        this.contextIsRig = !!rigGroupOf(surface.object);
+        this.set({ menu: { kind: 'part', title: surface.object.name, ...at } });
+      }
     }
   };
 
@@ -1152,6 +1181,26 @@ export class ModelingController {
         { key: 'offset', label: 'Offset', type: 'number', value: 0, min: -100, max: 100, step: 1 },
       ], (m, s, v) => core.gridFill(m, s, Number(v.span) || undefined, Number(v.offset)));
     } else this.editOp('Make Edge/Face', (m, s) => core.makeEdgeFace(m, s), 'Select 2+ vertices or a closed edge loop');
+  }
+
+  /** Subdivision Surface on the selected mesh objects (Object Mode): every face becomes quads and the shape rounds off. */
+  subdivideObjects(levels: number): void {
+    const targets = Array.from(this.selectedIds).map((id) => this.objects.get(id)).filter((o): o is EditableObject => !!o);
+    if (!targets.length) return this.toast('Select a mesh first');
+    this.pushUndo('Subdivision Surface');
+    let done = 0;
+    for (const o of targets) {
+      if (o.mesh.faces.length * 4 ** levels > 600000) { this.toast(o.name + ': too dense for level ' + levels); continue; }
+      if (catmullClark(o.mesh, levels)) {
+        o.mesh.smooth = true;
+        o.mesh.touch();
+        o.rebuild();
+        done++;
+      }
+    }
+    this.syncStore();
+    this.changed();
+    if (done) this.toast('Subdivision Surface level ' + levels + (done > 1 ? ' on ' + done + ' objects' : ''));
   }
 
   subdivide(): void {
@@ -1914,6 +1963,12 @@ export class ModelingController {
     const has = (c: string) => cmd === c;
     if (cmd.startsWith('add:')) {
       this.addPrimitive(cmd.slice(4) as PrimitiveKind);
+      return;
+    }
+    if (runLightCommand(cmd)) return;
+    if (cmd.startsWith('object:subsurf:')) return this.subdivideObjects(Number(cmd.slice(15)));
+    if (cmd.startsWith('part:')) {
+      runPartCommand(this, cmd, this.contextTarget ?? this.active?.object ?? null);
       return;
     }
     if (has('mode:toggle')) return this.toggleMode();

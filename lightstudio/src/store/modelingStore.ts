@@ -25,6 +25,8 @@ export type MenuKind =
   | 'snap'
   | 'proportional'
   | 'shear'
+  | 'light'
+  | 'part'
   | null;
 
 export interface OpField {
@@ -77,7 +79,7 @@ interface ModelingState {
   /** Text shown in the status strip while a modal operator runs. */
   modal: { title: string; text: string } | null;
   hint: string;
-  menu: { kind: MenuKind; x: number; y: number } | null;
+  menu: { kind: MenuKind; x: number; y: number; title?: string } | null;
   lastOp: LastOp | null;
   npanel: boolean;
   toast: { text: string; id: number } | null;

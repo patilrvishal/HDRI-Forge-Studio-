@@ -3,6 +3,7 @@ import './modeling.css';
 import { useModelingStore, type Falloff, type MenuKind, type OpField, type PivotMode, type SnapTarget } from '../../store/modelingStore';
 import { getModelingController } from '../../modeling/bridge';
 import { MENUS, contextMenuFor, type MenuItem } from '../../modeling/menus';
+import { lightMenu, objectMenu, partMenu } from '../../modeling/contextMenus';
 import { objectKey } from '../../three/objectBinding';
 import { useObjectHdriStore } from '../../store/objectHdriStore';
 import { useLightsStore } from '../../store/lightsStore';
@@ -80,7 +81,13 @@ function MenuPopup() {
     });
   }, [menu]);
   if (!menu || !menu.kind) return null;
-  const items: MenuItem[] = menu.kind === 'context' ? contextMenuFor(selectMode) : MENUS[menu.kind as Exclude<MenuKind, null>] ?? [];
+  const target = ctl()?.contextTarget ?? null;
+  const items: MenuItem[] =
+    menu.kind === 'context' ? contextMenuFor(selectMode)
+    : menu.kind === 'light' ? lightMenu()
+    : menu.kind === 'part' ? partMenu(target, menu.title ?? '', !!ctl()?.contextIsRig)
+    : menu.kind === 'object' && menu.title !== undefined ? objectMenu(target, menu.title)
+    : MENUS[menu.kind as Exclude<MenuKind, null>] ?? [];
   const flip = pos.left > 500;
   return (
     <div ref={ref} className="mdl-glass mdl-menu" style={{ left: pos.left, top: pos.top }} onPointerDown={(e) => e.stopPropagation()} onContextMenu={(e) => e.preventDefault()}>

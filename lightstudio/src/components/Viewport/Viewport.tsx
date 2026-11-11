@@ -44,6 +44,7 @@ import { ImportCameras } from './ImportCameras';
 import { ModelingOverlay } from '../Modeling/ModelingOverlay';
 import { ModelingController } from '../../modeling/ModelingController';
 import { setModelingController } from '../../modeling/bridge';
+import { pickLight } from '../../three/pickLight';
 import { useModelingStore } from '../../store/modelingStore';
 import { useObjectHdriStore } from '../../store/objectHdriStore';
 import type { AnimatedProperty } from '../../types/Animation';
@@ -1666,45 +1667,11 @@ export const Viewport: React.FC<ViewportProps> = ({ sceneManagerRef, onScreensho
 
     const hits = raycaster.intersectObjects(meshes, false);
 
-    // A light under the cursor wins when it is nearer than the first surface: area lights are picked on their rectangle,
-    // other lights by how close the ray passes to them.
+    // A light under the cursor wins when it is nearer than the first surface
     {
-      const lightObjs = new Map<string, THREE.Object3D>();
-      sm.scene.traverse((o) => { const id = o.userData?.lightId as string | undefined; if (id && (o as THREE.Light).isLight) lightObjs.set(id, o); });
-      const ray = raycaster.ray;
-      const tri = new THREE.Vector3(), a = new THREE.Vector3(), b = new THREE.Vector3(), c = new THREE.Vector3(), d = new THREE.Vector3(), p = new THREE.Vector3();
-      let bestId: string | null = null, bestDist = Infinity;
-      for (const l of useLightsStore.getState().lights) {
-        const o = lightObjs.get(l.id);
-        if (!o || !l.visible) continue;
-        o.updateWorldMatrix(true, false);
-        let dist = Infinity;
-        if (l.type === 'area' || l.type === 'overhead') {
-          const hw = Math.max(0.05, (l.areaWidth ?? 2)) / 2, hh = Math.max(0.05, (l.areaHeight ?? 2)) / 2;
-          a.set(-hw, -hh, 0).applyMatrix4(o.matrixWorld); b.set(hw, -hh, 0).applyMatrix4(o.matrixWorld);
-          c.set(hw, hh, 0).applyMatrix4(o.matrixWorld); d.set(-hw, hh, 0).applyMatrix4(o.matrixWorld);
-          const h1 = ray.intersectTriangle(a, b, c, false, tri), h2 = h1 ? null : ray.intersectTriangle(a, c, d, false, tri);
-          const hp = h1 ?? h2;
-          if (hp) {
-            // With a surface behind the rectangle (the model, the floor) only its border or its centre counts, so a big
-            // softbox in front of the model never blocks clicks on the model; over empty space its whole face is the target.
-            const loc = o.worldToLocal(hp.clone());
-            const edge = Math.min(hw - Math.abs(loc.x), hh - Math.abs(loc.y));
-            const nearEdge = edge < Math.max(0.1, 0.07 * Math.min(hw, hh) * 2);
-            const nearCentre = Math.hypot(loc.x, loc.y) < Math.max(0.15, 0.12 * Math.min(hw, hh) * 2);
-            if (hits.length === 0 || nearEdge || nearCentre) dist = hp.distanceTo(ray.origin);
-          }
-        }
-        if (!isFinite(dist)) {
-          o.getWorldPosition(p);
-          const along = p.clone().sub(ray.origin).dot(ray.direction);
-          if (along > 0 && ray.distanceToPoint(p) < Math.max(0.2, along * 0.03)) dist = along;
-        }
-        if (dist < bestDist) { bestDist = dist; bestId = l.id; }
-      }
-      if (bestId && (hits.length === 0 || bestDist < hits[0].distance + 0.01)) {
-        const st = useLightsStore.getState();
-        st.selectLight(bestId);
+      const bestId = pickLight(sm.scene, raycaster.ray, hits.length ? hits[0].distance : null);
+      if (bestId) {
+        useLightsStore.getState().selectLight(bestId);
         if (tool0 === 'select') useUIStore.getState().setActiveTool('move');       // a picked light gets its move handles
         return;
       }

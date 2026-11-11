@@ -189,6 +189,8 @@ export const MENUS: Record<Exclude<MenuKind, null>, MenuItem[]> = {
   snap: [],
   proportional: [],
   shear: [],
+  light: [],
+  part: [],
 };
 
 // The Add menu is a flat list of primitives (cleaner than a nested single entry).
