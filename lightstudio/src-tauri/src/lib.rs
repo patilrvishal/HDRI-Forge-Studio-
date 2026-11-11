@@ -97,6 +97,10 @@ struct ErikLiveState {
   ash: String,
   /// Camera list Erik posts for Forge's "Import cameras" (raw JSON text).
   cameras: String,
+  /// The HDRI Erik has selected, sent up on request (Forge's "Import from Erik").
+  erik_hdr: Vec<u8>,
+  erik_hdr_name: String,
+  erik_hdr_version: u64,
   meta: serde_json::Map<String, serde_json::Value>,
   clients: Vec<Box<dyn Write + Send>>,
   /// Forge page listening for messages Erik sends back ("match reference photo" gains).
@@ -240,7 +244,7 @@ fn start_erik_live_server() {
             obj.insert("mode".into(), "desktop".into());
             // protocol / capabilities: lets a client tell "Forge is too old for me" from "I am too old for Forge".
             obj.insert("protocol".into(), 1.into());
-            obj.insert("capabilities".into(), serde_json::json!(["hdr", "ash", "events", "up", "cameras"]));
+            obj.insert("capabilities".into(), serde_json::json!(["hdr", "ash", "events", "up", "cameras", "erik-hdri"]));
             obj.insert("version".into(), g.version.into());
             obj.insert("clients".into(), g.clients.len().into());
             obj.insert("forge".into(), g.up_clients.len().into());
@@ -292,6 +296,67 @@ fn start_erik_live_server() {
             None => {
               let _ = request.respond(erik_cors(tiny_http::Response::from_string("bad message").with_status_code(400)));
             }
+          }
+        }
+        // Forge asks Erik (over the /events stream it already holds) to send the HDRI it has selected ...
+        (tiny_http::Method::Post, "/request-erik-hdri") => {
+          let msg = "data: {\"type\":\"sendHdri\"}\n\n";
+          let listeners = {
+            let mut g = state.lock().unwrap();
+            g.clients.retain_mut(|c| c.write_all(msg.as_bytes()).and_then(|_| c.flush()).is_ok());
+            g.clients.len()
+          };
+          let _ = request.respond(erik_json(tiny_http::Response::from_string(format!(
+            "{{\"ok\":true,\"listeners\":{listeners}}}"
+          ))));
+        }
+        // ... Erik answers by POSTing the original .hdr bytes here, and Forge reads them back.
+        (tiny_http::Method::Post, "/erik-hdri") => {
+          let mut name = String::from("erik.hdr");
+          for h in request.headers() {
+            if h.field.equiv("X-Name") {
+              name = erik_percent_decode(h.value.as_str());
+            }
+          }
+          let mut body = Vec::new();
+          if std::io::Read::read_to_end(request.as_reader(), &mut body).is_err() {
+            let _ = request.respond(erik_cors(tiny_http::Response::from_string("bad upload").with_status_code(400)));
+            continue;
+          }
+          let (version, bytes) = {
+            let mut g = state.lock().unwrap();
+            let n = body.len();
+            g.erik_hdr = body;
+            g.erik_hdr_name = name;
+            g.erik_hdr_version += 1;
+            (g.erik_hdr_version, n)
+          };
+          let _ = request.respond(erik_json(tiny_http::Response::from_string(format!(
+            "{{\"ok\":true,\"version\":{version},\"bytes\":{bytes}}}"
+          ))));
+        }
+        (tiny_http::Method::Get, "/erik-hdri/info") => {
+          let body = {
+            let g = state.lock().unwrap();
+            serde_json::json!({ "version": g.erik_hdr_version, "name": g.erik_hdr_name, "bytes": g.erik_hdr.len() }).to_string()
+          };
+          let _ = request.respond(erik_json(tiny_http::Response::from_string(body)));
+        }
+        (tiny_http::Method::Get, "/erik-hdri") => {
+          let (data, name, version) = {
+            let g = state.lock().unwrap();
+            (g.erik_hdr.clone(), g.erik_hdr_name.clone(), g.erik_hdr_version)
+          };
+          if data.is_empty() {
+            let _ = request.respond(erik_cors(tiny_http::Response::from_string("no Erik HDRI yet").with_status_code(404)));
+          } else {
+            let enc: String = name.bytes().map(|b| if b.is_ascii_alphanumeric() || b"-_.~".contains(&b) { (b as char).to_string() } else { format!("%{:02X}", b) }).collect();
+            let _ = request.respond(erik_cors(
+              tiny_http::Response::from_data(data)
+                .with_header(erik_header("Content-Type", "application/octet-stream"))
+                .with_header(erik_header("X-Name", &enc))
+                .with_header(erik_header("X-Version", &version.to_string())),
+            ));
           }
         }
         (tiny_http::Method::Get, "/hdr") => {

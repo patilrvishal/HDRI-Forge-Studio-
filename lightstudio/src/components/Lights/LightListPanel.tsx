@@ -9,6 +9,7 @@ import { useSceneStore } from '../../store/sceneStore';
 import type { LightType } from '../../types/Light';
 import type { HDRIShapeType } from '../../types/HDRIShape';
 import { promptForCustomHDRI } from '../../utils/loadCustomHDRI';
+import { importFromErik } from '../../erikLive/erikImport';
 import { addProceduralSky } from '../../hdriedit/addSky';
 import { toggleAreaLight } from '../../three/areaLightApi';
 
@@ -775,6 +776,9 @@ export const LightListPanel: React.FC = () => {
                 </div>
                 <div className="context-menu-item" onClick={() => { setAddMenuOpen(false); addProceduralSky(); }}>
                   {HDRI_ICON}<span style={{ marginLeft: 6 }}>Procedural Sky</span>
+                </div>
+                <div className="context-menu-item" title="Brings in the HDRI selected in Erik Adjuster. Edit it here and the result streams back to that HDRI in Erik." onClick={() => { setAddMenuOpen(false); void importFromErik(); }}>
+                  {HDRI_ICON}<span style={{ marginLeft: 6 }}>Import from Erik (selected HDRI)</span>
                 </div>
               </>
             )}

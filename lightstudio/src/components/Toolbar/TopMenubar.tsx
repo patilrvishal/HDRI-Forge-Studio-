@@ -14,6 +14,7 @@ import { useAppearanceStore } from '../../appearance/appearanceStore';
 import { exportSceneAsHDR, exportSceneAsEXR } from '../../three/HDRIExporter';
 import type { SceneManager } from '../../three/engine';
 import { promptForCustomHDRI } from '../../utils/loadCustomHDRI';
+import { importFromErik } from '../../erikLive/erikImport';
 import { addProceduralSky } from '../../hdriedit/addSky';
 import { useSceneFileStore, dirName } from '../../store/sceneFileStore';
 import type { RecentScene } from '../../store/sceneFileStore';
@@ -265,6 +266,10 @@ const MENU_DEFINITIONS = (
     proceduralSky: {
       label: 'Procedural Sky',
       action: () => addProceduralSky(),
+    },
+    importFromErik: {
+      label: 'Import from Erik (selected HDRI)',
+      action: () => { void importFromErik(); },
     },
     camera: {
       label: 'Camera',

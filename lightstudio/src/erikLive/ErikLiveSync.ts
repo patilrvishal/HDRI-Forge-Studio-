@@ -42,6 +42,8 @@ async function getBase(): Promise<string> {
   useErikLiveStore.getState()._set({ port });
   return baseCache;
 }
+/** The bridge base URL (dev server or the desktop app's loopback port). */
+export const getErikBridgeBase = getBase;
 /** Cheap passes always run first so dragging stays smooth; the selected resolution is the last pass. */
 const CHEAP_WIDTHS = [256, 512, 1024];
 /** Erik's engine freezes for ~0.4s (2K) to ~7s (8K) while ingesting a map, so big passes wait for the edit to settle. */

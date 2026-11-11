@@ -28,6 +28,10 @@ export function erikLivePlugin(): Plugin {
   const upClients = new Set<ServerResponse>();
   // Camera list Erik posts for Forge's "Import cameras" (kept as raw JSON text).
   let camerasJson = '{"cameras":[]}';
+  // The HDRI Erik currently has selected, sent up by Erik on request (Forge's "Import from Erik").
+  let erikHdr: Buffer | null = null;
+  let erikHdrName = '';
+  let erikHdrVersion = 0;
 
   const cors = (res: ServerResponse) => {
     res.setHeader('Access-Control-Allow-Origin', '*');
@@ -57,7 +61,7 @@ export function erikLivePlugin(): Plugin {
           for (const [name, seen] of viewers) if (now - seen > VIEWER_TTL_MS) viewers.delete(name);
           res.writeHead(200, { 'Content-Type': 'application/json' });
           // protocol / capabilities let a client (Erik, the Blender and Maya addons) tell "Forge is too old for me" from "I am too old for Forge".
-          res.end(JSON.stringify({ ok: true, app: 'HDRI Forge Studio', mode: 'dev', protocol: 1, capabilities: ['hdr', 'ash', 'events', 'up', 'cameras'], version, clients: clients.size, forge: upClients.size, hasMap: !!hdr, viewers: [...viewers].map(([name, seen]) => ({ name, ageMs: now - seen })), ...meta }));
+          res.end(JSON.stringify({ ok: true, app: 'HDRI Forge Studio', mode: 'dev', protocol: 1, capabilities: ['hdr', 'ash', 'events', 'up', 'cameras', 'erik-hdri'], version, clients: clients.size, forge: upClients.size, hasMap: !!hdr, viewers: [...viewers].map(([name, seen]) => ({ name, ageMs: now - seen })), ...meta }));
           return;
         }
 
@@ -94,6 +98,43 @@ export function erikLivePlugin(): Plugin {
               res.writeHead(400).end('bad message');
             }
           });
+          return;
+        }
+
+        // Forge asks Erik (over the /events stream it already holds) to send the HDRI it has selected ...
+        if (req.method === 'POST' && url === '/request-erik-hdri') {
+          const msg = `data: ${JSON.stringify({ type: 'sendHdri' })}\n\n`;
+          for (const c of clients) c.write(msg);
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ ok: true, listeners: clients.size }));
+          return;
+        }
+
+        // ... Erik answers by POSTing the original .hdr bytes here, and Forge reads them back.
+        if (req.method === 'POST' && url === '/erik-hdri') {
+          const chunks: Buffer[] = [];
+          req.on('data', (c: Buffer) => chunks.push(c));
+          req.on('end', () => {
+            erikHdr = Buffer.concat(chunks);
+            const xn = req.headers['x-name'];
+            erikHdrName = typeof xn === 'string' ? decodeURIComponent(xn) : 'erik.hdr';
+            erikHdrVersion++;
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ ok: true, version: erikHdrVersion, bytes: erikHdr.length }));
+          });
+          return;
+        }
+
+        if (req.method === 'GET' && url === '/erik-hdri/info') {
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ version: erikHdrVersion, name: erikHdrName, bytes: erikHdr ? erikHdr.length : 0 }));
+          return;
+        }
+
+        if (req.method === 'GET' && url === '/erik-hdri') {
+          if (!erikHdr) { res.writeHead(404).end('no Erik HDRI yet'); return; }
+          res.writeHead(200, { 'Content-Type': 'application/octet-stream', 'Content-Length': erikHdr.length, 'X-Name': encodeURIComponent(erikHdrName), 'X-Version': String(erikHdrVersion) });
+          res.end(erikHdr);
           return;
         }
 

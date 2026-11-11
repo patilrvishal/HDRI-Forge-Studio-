@@ -2,6 +2,15 @@ import { useHDRIAssetStore } from '../store/hdriAssetStore';
 import { useSceneStore } from '../store/sceneStore';
 import { setRawHDRIData } from '../store/hdriDataStore';
 
+/** Registers HDRI bytes as an asset and makes it the scene's environment (what picking a file does). */
+export function addCustomHDRIFromBytes(arrayBuffer: ArrayBuffer, fileName: string): void {
+  const file = new File([arrayBuffer], fileName, { type: 'application/octet-stream' });
+  useHDRIAssetStore.getState().addAsset(file, arrayBuffer);
+  const url = URL.createObjectURL(new Blob([arrayBuffer], { type: 'application/octet-stream' }));
+  useSceneStore.getState().setEnvironment({ hdri: url, presetId: '__custom__', showBackground: true });
+  setRawHDRIData(arrayBuffer, fileName);
+}
+
 /**
  * Opens a native file picker for a .hdr/.hdri/.exr file, then registers it
  * as an HDRI asset and activates it as the scene's environment - the same
