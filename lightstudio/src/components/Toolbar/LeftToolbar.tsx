@@ -20,10 +20,10 @@ interface Entry {
 }
 
 const TOOLS: (Entry & { id: ActiveTool })[] = [
-  { id: 'select', icon: 'select', title: 'Select', desc: 'Pick lights and objects. Click to select, drag to marquee-select.', shortcut: 'S' },
+  { id: 'select', icon: 'select', title: 'Select', desc: 'Pick lights and objects. Click to select, drag to marquee-select.', shortcut: 'Esc' },
   { id: 'move', icon: 'move', title: 'Move', desc: 'Move the selected light or object with the move handles.', shortcut: 'G' },
   { id: 'rotate', icon: 'rotate', title: 'Rotate', desc: 'Rotate the selected light or object around its centre.', shortcut: 'R' },
-  { id: 'scale', icon: 'scale', title: 'Scale', desc: 'Make the selected light bigger or smaller.' },
+  { id: 'scale', icon: 'scale', title: 'Scale', desc: 'Make the selected light or object bigger or smaller.', shortcut: 'S' },
 ];
 
 const ADD_LIGHTS: (Entry & { type: AddType })[] = [

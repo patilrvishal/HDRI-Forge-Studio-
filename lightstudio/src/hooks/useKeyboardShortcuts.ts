@@ -138,7 +138,7 @@ export function useKeyboardShortcuts(callbacks: KeyboardShortcutCallbacks): void
           callbacks.setActiveTool?.('rotate');
           break;
         case 's':
-          callbacks.setActiveTool?.('select');
+          callbacks.setActiveTool?.('scale');
           break;
         case 'f':
           callbacks.onFrameAll?.();

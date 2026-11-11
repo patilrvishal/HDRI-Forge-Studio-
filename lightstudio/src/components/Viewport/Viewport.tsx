@@ -1059,9 +1059,11 @@ export const Viewport: React.FC<ViewportProps> = ({ sceneManagerRef, onScreensho
       if (el?.tagName === 'INPUT' || el?.tagName === 'TEXTAREA' || el?.isContentEditable) return;
       if (e.ctrlKey || e.metaKey || e.altKey) return;
 
-      if (e.key === 'w' || e.key === 'W') { setGizmoMode('translate'); useUIStore.getState().setActiveTool('move'); }
-      if (e.key === 'e' || e.key === 'E') { setGizmoMode('rotate'); useUIStore.getState().setActiveTool('rotate'); }
-      if ((e.key === 'r' || e.key === 'R') && scaleAllowed) { setGizmoMode('scale'); useUIStore.getState().setActiveTool('scale'); }
+      // G / W = Move, R / E = Rotate, S = Scale (the same keys the modelling controller handles over the viewport)
+      if (e.shiftKey) return;
+      if (e.key === 'g' || e.key === 'G' || e.key === 'w' || e.key === 'W') { setGizmoMode('translate'); useUIStore.getState().setActiveTool('move'); }
+      if (e.key === 'r' || e.key === 'R' || e.key === 'e' || e.key === 'E') { setGizmoMode('rotate'); useUIStore.getState().setActiveTool('rotate'); }
+      if ((e.key === 's' || e.key === 'S') && scaleAllowed) { setGizmoMode('scale'); useUIStore.getState().setActiveTool('scale'); }
       if (e.key === 'Escape') { setGizmoMode(null); useUIStore.getState().setActiveTool('select'); }
     };
     window.addEventListener('keydown', onKey);
