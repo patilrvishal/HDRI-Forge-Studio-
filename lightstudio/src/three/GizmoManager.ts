@@ -49,6 +49,7 @@ export class GizmoManager {
     // Orbit and gizmo both want the mouse - hand it to the gizmo mid-drag.
     this.controls.addEventListener('dragging-changed', (e) => {
       const dragging = (e as unknown as { value: boolean }).value;
+      (this.orbit as unknown as { __gizmoDragging?: boolean }).__gizmoDragging = dragging;      // the engine re-enables orbit every frame for scripted cameras: it must honour this
       this.orbit.enabled = !dragging;
       const obj = this.controls.object;
       if (obj) {

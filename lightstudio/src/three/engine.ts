@@ -630,6 +630,10 @@ export class SceneManager {
    * constructor) naturally never fires while locked - no separate gating
    * needed there.
    */
+  private _gizmoDragging(): boolean {
+    return !!(this.controls as unknown as { __gizmoDragging?: boolean }).__gizmoDragging;
+  }
+
   setViewportLocked(locked: boolean): void {
     this._viewportLocked = locked;
   }
@@ -659,7 +663,7 @@ export class SceneManager {
 
     if (!cam) {
       // Angle Hunt with no camera picked: freeze on the last frame instead of leaving the 360 orbit control on.
-      const wantEnabled = !this._viewportLocked;
+      const wantEnabled = !this._viewportLocked && !this._gizmoDragging();
       if (this.controls.enabled !== wantEnabled) this.controls.enabled = wantEnabled;
       return false;
     }
@@ -697,7 +701,7 @@ export class SceneManager {
     // camera's own position - setting target to the camera position every
     // frame made the pivot degenerate and cancelled out drag input, which is
     // why the viewport never visibly moved even though the stored value did.
-    this.controls.enabled = true;
+    this.controls.enabled = !this._gizmoDragging();      // not while a gizmo handle (move / rotate / scale) is being dragged
 
     if (this._cameraDragging) {
       // Mid-drag: OrbitControls already owns camera.position this frame.
