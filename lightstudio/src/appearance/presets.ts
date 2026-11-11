@@ -84,9 +84,8 @@ add('Softboxes', 'Octabox', 1, ['octa', 'studio'], () =>
 add('Softboxes', 'Rounded Softbox', 1, ['soft', 'rounded'], () =>
   build('Rounded Softbox', layer('polygon', { sides: 4, radius: 0.5, softness: 0.06 })));
 add('Softboxes', 'Umbrella', 1, ['round', 'soft'], () =>
-  build('Umbrella', layer('polygon', { sides: 8, softness: 0.08, intensity: 0.9 }), {
-    vb: [layer('bulb', { shape: 'round', outside: true, alphaRamp: stops([0, 0.7], [1, 1]) }, { name: 'Rim Lift', blend: 'multiply' })],
-  }));
+  // like the icon: a big eight-sided canopy (a corner points up), white in the middle, a little dimmer toward the rim, with eight thin ribs
+  build('Umbrella', layer('polygon', { sides: 8, softness: 0.03, intensity: 1, ribs: 0.5, rimFalloff: 0.4 })));
 
 // ── Strips ──────────────────────────────────────────────────────────────────
 add('Strips', 'Strip Light', 4, ['strip', 'rim'], () =>

@@ -76,7 +76,7 @@ export class TexturedEmitters {
       transparent: true,
       roughness: 1,
       metalness: 0,
-      side: THREE.FrontSide,
+      side: THREE.DoubleSide,          // visible from behind too, so the viewport always shows the light's shape
       depthWrite: false,
     });
     const mesh = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), mat);
@@ -117,7 +117,7 @@ export class TexturedEmitters {
     e.group.quaternion.copy(u.quaternion);
     e.mesh.scale.set(Math.max(0.01, u.width), Math.max(0.01, u.height), 1);
     e.mat.emissive.copy(u.tint);
-    e.mat.emissiveIntensity = u.intensity;
+    e.mat.emissiveIntensity = Math.min(u.intensity, 1.2);      // keeps the picture readable in the viewport instead of burning out to flat white
   }
 
   has(id: string): boolean {

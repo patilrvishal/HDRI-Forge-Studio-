@@ -173,6 +173,10 @@ export interface PolygonParams {
   softness: number;
   /** 0-1 corner radius; 1 = a perfect circle. */
   radius: number;
+  /** 0-1 darkness of the umbrella-style ribs running from the centre to each corner (default 0). */
+  ribs?: number;
+  /** 0-1 how much darker the rim is than the centre (default 0). */
+  rimFalloff?: number;
 }
 
 export interface ImageParams {

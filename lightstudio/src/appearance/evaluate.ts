@@ -235,10 +235,22 @@ function polygonSampler(p: PolygonParams, aspect: number): Sampler {
   const apothem = size * Math.cos(an);
   const rr = clamp(p.radius) * apothem;
   const rc = Math.max(1e-4, (apothem - rr) / Math.cos(an));
+  const ribs = clamp(p.ribs ?? 0), rim = clamp(p.rimFalloff ?? 0);
   return (x, y, o) => {
     const px = (x * aspect) / m, py = y / m;
     const d = sdRegularPolygon(px, py, rc, n) - rr;
-    o[0] = c[0] * p.intensity; o[1] = c[1] * p.intensity; o[2] = c[2] * p.intensity;
+    let k = p.intensity;
+    if (ribs > 0 || rim > 0) {
+      const len = Math.hypot(px, py);
+      if (rim > 0) k *= 1 - rim * Math.min(1, len / (rc || 1)) ** 2;
+      if (ribs > 0 && len > 0.02) {
+        // distance (in light units) to the nearest rib: a ray from the centre through each corner (one corner points up)
+        const a = ((Math.atan2(px, py) % (2 * an)) + 2 * an) % (2 * an);
+        const dist = Math.sin(Math.min(a, 2 * an - a)) * len;
+        k *= 1 - ribs * (1 - clamp(dist / 0.014));
+      }
+    }
+    o[0] = c[0] * k; o[1] = c[1] * k; o[2] = c[2] * k;
     const t = clamp((soft * 0.5 * size - d) / (soft * size + 1e-4));
     o[3] = t * t * (3 - 2 * t);
   };
