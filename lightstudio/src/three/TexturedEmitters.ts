@@ -43,6 +43,8 @@ function makeTexture(data: Float32Array, w: number, h: number, alphaOnly: boolea
 
 export interface EmitterUpdate {
   show: boolean;
+  /** True when the emitter is the real light (Area Light mode); false = a viewport-only picture of the light. */
+  pathTraced: boolean;
   camVisible: boolean;
   position: THREE.Vector3;
   quaternion: THREE.Quaternion;
@@ -113,6 +115,8 @@ export class TexturedEmitters {
       e.signature = u.texture.signature;
     }
     e.group.visible = u.show && u.camVisible;
+    e.group.userData.keepInPathTracer = u.pathTraced;
+    e.mesh.userData.keepInPathTracer = u.pathTraced;
     e.group.position.copy(u.position);
     e.group.quaternion.copy(u.quaternion);
     e.mesh.scale.set(Math.max(0.01, u.width), Math.max(0.01, u.height), 1);

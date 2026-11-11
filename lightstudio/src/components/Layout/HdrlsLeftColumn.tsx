@@ -12,7 +12,6 @@ import { useLightsStore } from '../../store/lightsStore';
 import { useHDRIShapesStore } from '../../store/hdriShapesStore';
 import { useUIStore } from '../../store/uiStore';
 import { newAppearance } from '../../appearance/content';
-import { createDefaultTexturedArea } from '../../types/Light';
 import { useSceneStore } from '../../store/sceneStore';
 import { HDRI_PRESETS } from '../../types/Environment';
 import { ENV_CARDS, ENV_PILL_ICONS } from '../../data/envCards';
@@ -171,8 +170,7 @@ export const HdrlsLeftColumn: React.FC<{
     } else {
       const area = areaFor(info);
       const w = Math.min(20, Math.max(0.1, +Math.sqrt(area * asp).toFixed(2)));
-      st.updateLight(created.id, { name: a.name, appearance: a, areaWidth: w, areaHeight: Math.min(20, Math.max(0.1, +(area / w).toFixed(2))), mapping: 'perspective',
-        areaTex: { ...createDefaultTexturedArea(), enabled: true } });      // show the picture's shape on the light in the viewport, like its icon
+      st.updateLight(created.id, { name: a.name, appearance: a, areaWidth: w, areaHeight: Math.min(20, Math.max(0.1, +(area / w).toFixed(2))), mapping: 'perspective' });
     }
     st.selectLight(created.id);
   };

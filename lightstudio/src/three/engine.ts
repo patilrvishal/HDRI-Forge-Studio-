@@ -2047,11 +2047,15 @@ export class LightManager {
       light.color.g *= tex.mean.g;
       light.color.b *= tex.mean.b;
     }
-    if (tex && at?.enabled) {
+    if (tex) {
+      // Any light with an appearance shows its picture in the viewport. Only in Area Light mode is the emitter the REAL
+      // light (path tracer, textures); otherwise it is just the viewport picture and the light still goes into the HDRI.
+      const real = !!at?.enabled;
       const intensity = (ld.brightness / 1000) * 10 * (ld.opacity / 100);
       this._texEmitters.update(ld.id, {
         show,
-        camVisible: at.camVisibility !== false,
+        pathTraced: real,
+        camVisible: at?.camVisibility !== false,
         position: light.position,
         quaternion: light.quaternion,
         width: w,
@@ -2061,7 +2065,7 @@ export class LightManager {
         texture: tex,
       });
       // The path tracer lights from the textured emitter itself; the analytic light would double it.
-      light.userData.hideInPathTracer = this._texEmitters.isVisible(ld.id);
+      light.userData.hideInPathTracer = real && this._texEmitters.isVisible(ld.id);
     } else {
       this._texEmitters.remove(ld.id);
       light.userData.hideInPathTracer = false;
