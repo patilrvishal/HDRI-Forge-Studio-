@@ -5,6 +5,14 @@ import { useSceneHierarchyStore, HierarchyFilterType } from '../../store/sceneHi
 import { useMaterialEditorStore } from '../../store/materialEditorStore';
 import { useUIStore } from '../../store/uiStore';
 
+/** True for the grid, the transform gizmo and other editor dressing (the node itself or anything inside one): show / hide / isolate must leave these alone, or the gizmo's invisible pick handles get switched on. */
+function isEditorDressing(o: THREE.Object3D): boolean {
+  for (let n: THREE.Object3D | null = o; n; n = n.parent) {
+    if (n.userData?.isGrid || n.userData?.isProxy || n.userData?.isHelper) return true;
+  }
+  return false;
+}
+
 /* ═══════════════════════════════════════════════════════════════════
    Types & Interfaces
    ═══════════════════════════════════════════════════════════════════ */
@@ -309,13 +317,13 @@ const ContextMenu: React.FC<{
     if (s.isolatedId === obj.uuid) {
       s.showAll();
       scene.traverse((child) => {
-        if (child.userData.isGrid || child.userData.isProxy) return;
+        if (isEditorDressing(child)) return;
         child.visible = true;
       });
     } else {
       s.isolate(obj.uuid);
       scene.traverse((child) => {
-        if (child.userData.isGrid || child.userData.isProxy) return;
+        if (isEditorDressing(child)) return;
         if (child.uuid === obj.uuid) {
           child.visible = true;
         } else {
@@ -1250,13 +1258,13 @@ const ObjectPropertiesPanel: React.FC<{
     if (s.isolatedId === selectedObj.uuid) {
       s.showAll();
       scene.traverse((child) => {
-        if (child.userData.isGrid || child.userData.isProxy) return;
+        if (isEditorDressing(child)) return;
         child.visible = true;
       });
     } else {
       s.isolate(selectedObj.uuid);
       scene.traverse((child) => {
-        if (child.userData.isGrid || child.userData.isProxy) return;
+        if (isEditorDressing(child)) return;
         if (child.uuid === selectedObj.uuid) {
           child.visible = true;
         } else {
@@ -1738,7 +1746,7 @@ export const SceneHierarchy: React.FC<SceneHierarchyProps> = ({ sceneRef }) => {
     if (!scene) return;
     useSceneHierarchyStore.getState().showAll();
     scene.traverse((child) => {
-      if (child.userData.isGrid || child.userData.isProxy) return;
+      if (isEditorDressing(child)) return;
       child.visible = true;
     });
     refresh();
