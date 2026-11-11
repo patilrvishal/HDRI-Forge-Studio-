@@ -177,6 +177,8 @@ export interface PolygonParams {
   ribs?: number;
   /** 0-1 how much darker the rim is than the centre (default 0). */
   rimFalloff?: number;
+  /** Degrees the polygon is turned (default 0 = a corner points up). */
+  rotation?: number;
 }
 
 export interface ImageParams {

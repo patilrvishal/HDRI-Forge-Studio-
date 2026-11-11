@@ -78,11 +78,11 @@ add('Softboxes', 'Softbox Hot Centre', 1, ['soft', 'centre'], () =>
   build('Softbox Hot Centre', layer('bulb', { shape: 'rect', outside: true, alphaRamp: cosStops([0, 1], [0.5, 0.55], [1, 0.2]) }),
     { am: [boxMask(0.05, 0.05, 0.05, 0.05, 0.1)] }));
 add('Softboxes', 'Octabox', 1, ['octa', 'studio'], () =>
-  build('Octabox', layer('polygon', { sides: 8, softness: 0.05 }), {
+  build('Octabox', layer('polygon', { sides: 8, softness: 0.05, rotation: 22.5, rimFalloff: 0.15 }), {
     vb: [layer('bulb', { shape: 'round', outside: true, alphaRamp: stops([0, 1], [1, 0.55]) }, { name: 'Centre Lift', blend: 'multiply', amount: 100 })],
   }));
 add('Softboxes', 'Rounded Softbox', 1, ['soft', 'rounded'], () =>
-  build('Rounded Softbox', layer('polygon', { sides: 4, radius: 0.5, softness: 0.06 })));
+  build('Rounded Softbox', layer('polygon', { sides: 4, radius: 0.5, softness: 0.06, rimFalloff: 0.15 })));
 add('Softboxes', 'Umbrella', 1, ['round', 'soft'], () =>
   // like the icon: a big eight-sided canopy (a corner points up), white in the middle, a little dimmer toward the rim, with eight thin ribs
   build('Umbrella', layer('polygon', { sides: 8, softness: 0.03, intensity: 1, ribs: 0.5, rimFalloff: 0.4 })));
@@ -126,12 +126,12 @@ add('Bulbs & Spots', 'Sun Disc', 1, ['sun', 'hard'], () =>
   }));
 
 // ── Shapes ──────────────────────────────────────────────────────────────────
-add('Shapes', 'Disc', 1, ['circle'], () => build('Disc', layer('polygon', { sides: 12, radius: 1, softness: 0.05 })));
-add('Shapes', 'Hexagon', 1, ['polygon'], () => build('Hexagon', layer('polygon', { sides: 6 })));
-add('Shapes', 'Triangle', 1, ['polygon'], () => build('Triangle', layer('polygon', { sides: 3 })));
-add('Shapes', 'Pentagon', 1, ['polygon'], () => build('Pentagon', layer('polygon', { sides: 5 })));
-add('Shapes', 'Diamond', 1, ['polygon'], () => build('Diamond', layer('polygon', { sides: 4 })));
-add('Shapes', 'Round Hexagon', 1, ['polygon', 'rounded'], () => build('Round Hexagon', layer('polygon', { sides: 6, radius: 0.55, softness: 0.08 })));
+add('Shapes', 'Disc', 1, ['circle'], () => build('Disc', layer('polygon', { sides: 12, radius: 1, softness: 0.05, rimFalloff: 0.18 })));
+add('Shapes', 'Hexagon', 1, ['polygon'], () => build('Hexagon', layer('polygon', { sides: 6, rimFalloff: 0.18 })));
+add('Shapes', 'Triangle', 1, ['polygon'], () => build('Triangle', layer('polygon', { sides: 3, rimFalloff: 0.18 })));
+add('Shapes', 'Pentagon', 1, ['polygon'], () => build('Pentagon', layer('polygon', { sides: 5, rimFalloff: 0.18 })));
+add('Shapes', 'Diamond', 1, ['polygon'], () => build('Diamond', layer('polygon', { sides: 4, rimFalloff: 0.18 })));
+add('Shapes', 'Round Hexagon', 1, ['polygon', 'rounded'], () => build('Round Hexagon', layer('polygon', { sides: 6, radius: 0.55, softness: 0.08, rimFalloff: 0.15 })));
 
 // ── Rings ───────────────────────────────────────────────────────────────────
 const ringMask = (inner: number) =>

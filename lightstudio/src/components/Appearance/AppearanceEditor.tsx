@@ -173,6 +173,7 @@ const ContentControls: React.FC<{
         <>
           <ColorPicker label="Colour" color={p.color} onChange={(v) => set({ color: v })} />
           <Slider label="Sides" value={p.sides} min={3} max={12} step={1} onChange={(v) => set({ sides: Math.round(v) })} />
+          <Slider label="Rotation" value={p.rotation ?? 0} min={-90} max={90} step={0.5} onChange={(v) => set({ rotation: v })} />
           <Slider label="Ribs" value={p.ribs ?? 0} min={0} max={1} step={0.01} onChange={(v) => set({ ribs: v })} />
           <Slider label="Rim falloff" value={p.rimFalloff ?? 0} min={0} max={1} step={0.01} onChange={(v) => set({ rimFalloff: v })} />
           <Slider label="Softness" value={p.softness} min={0} max={1} step={0.005} onChange={(v) => set({ softness: v })} />

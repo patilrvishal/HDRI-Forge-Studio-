@@ -236,8 +236,10 @@ function polygonSampler(p: PolygonParams, aspect: number): Sampler {
   const rr = clamp(p.radius) * apothem;
   const rc = Math.max(1e-4, (apothem - rr) / Math.cos(an));
   const ribs = clamp(p.ribs ?? 0), rim = clamp(p.rimFalloff ?? 0);
+  const rot = ((p.rotation ?? 0) * Math.PI) / 180, cr = Math.cos(rot), sr = Math.sin(rot);
   return (x, y, o) => {
-    const px = (x * aspect) / m, py = y / m;
+    const ux = (x * aspect) / m, uy = y / m;
+    const px = ux * cr + uy * sr, py = -ux * sr + uy * cr;       // turn the shape by `rotation`
     const d = sdRegularPolygon(px, py, rc, n) - rr;
     let k = p.intensity;
     if (ribs > 0 || rim > 0) {
