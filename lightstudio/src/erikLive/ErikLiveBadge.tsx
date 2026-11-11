@@ -1,6 +1,7 @@
 import React from 'react';
 import { useErikLiveStore, startAutoLink } from './ErikLiveSync';
 import { useMatchGainStore, isMatchActive } from './matchGain';
+import { useSceneStore } from '../store/sceneStore';
 
 const COLORS: Record<string, string> = {
   off: '#6b7280', idle: '#22c55e', rendering: '#f59e0b', sent: '#22c55e', error: '#ef4444',
@@ -14,6 +15,10 @@ export const ErikLiveBadge: React.FC = () => {
   const gain = useMatchGainStore((s) => s.gain);
   const resetMatch = useMatchGainStore((s) => s.reset);
   const matched = isMatchActive(gain);
+  // Forge starts with a grey radial "Gradient background" switched ON, and it is baked into the HDRI sent to Erik, so an
+  // empty Forge scene still lights the car. Show it here (it used to be hidden in the Viewport panel) with a one-click switch.
+  const gradient = useSceneStore((s) => s.environment.gradientBackground);
+  const setEnvironment = useSceneStore((s) => s.setEnvironment);
   // Erik is the SSE client(s); Blender / Maya are named, polling clients. Say who is actually linked.
   const linked = [...(clients > 0 ? ['Erik'] : []), ...apps];
   const label =
@@ -34,6 +39,16 @@ export const ErikLiveBadge: React.FC = () => {
   };
   return (
     <div style={{ position: 'fixed', right: 14, bottom: 14, zIndex: 99999, display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 6 }}>
+      {status !== 'off' && gradient?.enabled && (
+        <button
+          onClick={() => setEnvironment({ gradientBackground: { ...gradient, enabled: false } })}
+          title="The default grey Gradient background is part of the HDRI Forge sends, so it lights the scene even when nothing else is added. Click to turn it off (turn it back on in the Viewport panel, top-left of the viewport)."
+          style={{ ...pill, padding: '6px 10px' }}
+        >
+          <span style={{ width: 9, height: 9, borderRadius: 3, background: 'linear-gradient(135deg,#b3b3b3,#333)' }} />
+          Default gradient light: ON — click to turn off
+        </button>
+      )}
       {matched && (
         <button
           onClick={resetMatch}
