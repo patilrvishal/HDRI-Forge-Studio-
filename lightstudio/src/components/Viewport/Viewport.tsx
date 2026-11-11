@@ -43,7 +43,7 @@ import { CameraBookmarks } from './CameraBookmarks';
 import { ImportCameras } from './ImportCameras';
 import { ModelingOverlay } from '../Modeling/ModelingOverlay';
 import { ModelingController } from '../../modeling/ModelingController';
-import { setModelingController } from '../../modeling/bridge';
+import { setModelingController, getModelingController } from '../../modeling/bridge';
 import { pickLight } from '../../three/pickLight';
 import { useModelingStore } from '../../store/modelingStore';
 import { useObjectHdriStore } from '../../store/objectHdriStore';
@@ -1332,6 +1332,11 @@ export const Viewport: React.FC<ViewportProps> = ({ sceneManagerRef, onScreensho
   const paintRafRef = useRef<number | null>(null);
   const paintPosRef = useRef<{ x: number; y: number } | null>(null);
   const paintingRef = useRef(false);
+  const ctrlDownRef = useRef(false);
+  // Read inside the pointer handlers, which stay attached all the time so Ctrl + click / drag can paint without the mode
+  const paintActiveRef = useRef(false);
+  paintActiveRef.current = paintActive;
+  const pickerReadyRef = useRef(false);
 
   // What the cursor is over: only meshes that are really drawn, found through a BVH so the pick costs well under a
   // millisecond even on a multi-million-triangle car (see three/PaintPicker.ts).
@@ -1518,12 +1523,15 @@ export const Viewport: React.FC<ViewportProps> = ({ sceneManagerRef, onScreensho
   useEffect(() => {
     const container = containerRef.current;
     const sm = sceneManagerRef.current;
-    if (!container || !sm || !paintActive) return;
+    if (!container || !sm) return;
 
-    // Make sure the model can be picked instantly: collect its meshes and build their BVHs a few at a time now,
-    // instead of stalling the first click on a big car.
-    if (!pickerRef.current) pickerRef.current = new PaintPicker();
-    void pickerRef.current.prepare(sm.scene);
+    // Make sure the model can be picked instantly: collect its meshes and build their BVHs a few at a time up front
+    // (when the mode turns on, or the first time Ctrl is pressed), instead of stalling the first click on a big car.
+    const ensurePicker = () => {
+      if (!pickerRef.current) pickerRef.current = new PaintPicker();
+      if (!pickerReadyRef.current) { pickerReadyRef.current = true; void pickerRef.current.prepare(sm.scene); }
+    };
+    if (paintActive) ensurePicker();
 
     const showRing = (x: number, y: number, over: boolean, painting: boolean) => {
       const ring = paintRingRef.current;
@@ -1558,7 +1566,10 @@ export const Viewport: React.FC<ViewportProps> = ({ sceneManagerRef, onScreensho
 
     const down = (e: PointerEvent) => {
       if (e.button !== 0) return;
+      // LightPaint runs in its mode (key T), and also on Ctrl + left click / drag anywhere without the mode
+      if (!paintActiveRef.current && !(e.ctrlKey || e.metaKey)) return;
       if ((e.target as HTMLElement | null)?.closest?.('[data-paint-ui]')) return; // clicks on the mode bar
+      ensurePicker();
       paintingRef.current = true;
       paintBoundsRef.current = null;
       sm.controls.enabled = false;
@@ -1575,6 +1586,7 @@ export const Viewport: React.FC<ViewportProps> = ({ sceneManagerRef, onScreensho
       showRing(e.clientX, e.clientY, true, true);
     };
     const context = (e: MouseEvent) => {
+      if (!paintActiveRef.current) return;       // outside the mode right-click is the normal context menu
       e.preventDefault();
       pickerRef.current?.refresh(sm.scene);
       pickReflectionAt(e.clientX, e.clientY);
@@ -1592,7 +1604,7 @@ export const Viewport: React.FC<ViewportProps> = ({ sceneManagerRef, onScreensho
         if (paintingRef.current) {
           paintAt(p.x, p.y);
           showRing(p.x, p.y, true, true);
-        } else if (container.contains(document.elementFromPoint(p.x, p.y))) {
+        } else if ((paintActiveRef.current || ctrlDownRef.current) && container.contains(document.elementFromPoint(p.x, p.y))) {
           const r = container.getBoundingClientRect();
           if (p.x < r.left || p.x > r.right || p.y < r.top || p.y > r.bottom) return hideRing();
           const over = !!pickAt(p.x, p.y)?.hit;
@@ -1609,6 +1621,13 @@ export const Viewport: React.FC<ViewportProps> = ({ sceneManagerRef, onScreensho
         e.stopPropagation();
         endStroke(true);
       }
+      if (e.key === 'Control' || e.key === 'Meta') { ctrlDownRef.current = true; ensurePicker(); }
+    };
+    const keyUp = (e: KeyboardEvent) => {
+      if (e.key === 'Control' || e.key === 'Meta') {
+        ctrlDownRef.current = false;
+        if (!paintActiveRef.current && !paintingRef.current) hideRing();
+      }
     };
     const leave = () => { if (!paintingRef.current) hideRing(); };
 
@@ -1617,9 +1636,9 @@ export const Viewport: React.FC<ViewportProps> = ({ sceneManagerRef, onScreensho
     window.addEventListener('pointerup', up);
     window.addEventListener('pointercancel', up);
     window.addEventListener('keydown', key, true);
+    window.addEventListener('keyup', keyUp, true);
     container.addEventListener('pointerleave', leave);
     container.addEventListener('contextmenu', context);
-    container.style.cursor = 'crosshair';
 
     return () => {
       endStroke(false);
@@ -1628,16 +1647,55 @@ export const Viewport: React.FC<ViewportProps> = ({ sceneManagerRef, onScreensho
       window.removeEventListener('pointerup', up);
       window.removeEventListener('pointercancel', up);
       window.removeEventListener('keydown', key, true);
+      window.removeEventListener('keyup', keyUp, true);
       container.removeEventListener('pointerleave', leave);
       container.removeEventListener('contextmenu', context);
-      container.style.cursor = '';
       hideRing();
       sm.controls.enabled = true;
     };
   }, [paintActive, paintAt, pickAt, pickReflectionAt, containerRef, sceneManagerRef]);
 
+  // In the LightPaint mode the viewport does not rotate (it can again once the mode is left); the cursor shows the mode.
+  useEffect(() => {
+    const container = containerRef.current;
+    const sm = sceneManagerRef.current;
+    if (!container || !sm) return;
+    sm.controls.enableRotate = !paintActive;
+    container.style.cursor = paintActive ? 'crosshair' : '';
+    getModelingController()?.setGizmoSuppressed(paintActive);
+    return () => {
+      sm.controls.enableRotate = true;
+      container.style.cursor = '';
+      getModelingController()?.setGizmoSuppressed(false);
+    };
+  }, [paintActive, containerRef, sceneManagerRef]);
+
+  // T turns the LightPaint mode on and off.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 't' && e.key !== 'T') return;
+      if (e.ctrlKey || e.metaKey || e.altKey || e.shiftKey || e.repeat) return;
+      const el = e.target as HTMLElement | null;
+      if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT' || el.isContentEditable)) return;
+      if (getModelingController()?.modal) return;
+      e.preventDefault();
+      setPaintActive((on) => {
+        const next = !on;
+        if (next) setGizmoMode(null);
+        else {
+          const t = useUIStore.getState().activeTool;
+          setGizmoMode(t === 'move' ? 'translate' : t === 'rotate' ? 'rotate' : t === 'scale' ? 'scale' : null);
+        }
+        return next;
+      });
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
+
   // Click-to-select material from viewport
   const handleViewportClick = useCallback((event: React.MouseEvent) => {
+    if (event.ctrlKey || event.metaKey) return;     // Ctrl + click is a LightPaint stroke, not a pick
     // Picking works with the select tool and the transform tools (move / rotate / scale), not while painting
     const tool0 = useUIStore.getState().activeTool;
     if (tool0 !== 'select' && tool0 !== 'move' && tool0 !== 'rotate' && tool0 !== 'scale') return;
@@ -1885,7 +1943,7 @@ export const Viewport: React.FC<ViewportProps> = ({ sceneManagerRef, onScreensho
           onDrop={handleDrop}
         >
           {paintActive && <PaintModeBar mode={paintMode} onMode={setPaintMode} />}
-          {paintActive && (
+          {(
             <div
               ref={paintRingRef}
               data-paint-ui

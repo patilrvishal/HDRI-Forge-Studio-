@@ -196,9 +196,16 @@ export class ModelingController {
   }
 
   /** Keeps the transform handles on the active object (Object Mode only); the left toolbar's tool picks move / rotate / scale. */
+  /** Hidden while the LightPaint mode is on, so a stroke never grabs a handle. */
+  setGizmoSuppressed(on: boolean): void {
+    this.gizmoSuppressed = on;
+    this.updateGizmo();
+  }
+  private gizmoSuppressed = false;
+
   private updateGizmo(): void {
     const o = this.active;
-    const want = !this.disposed && this.mode === 'object' && !!o && !this.modal;
+    const want = !this.disposed && this.mode === 'object' && !!o && !this.modal && !this.gizmoSuppressed;
     if (!want) {
       if (this.tc && this.tc.object) this.tc.detach();
       if (this.tcRoot) this.tcRoot.visible = false;
@@ -764,6 +771,7 @@ export class ModelingController {
     if (!d || d.button !== 0) return;
     if (Math.hypot(e.clientX - d.x, e.clientY - d.y) > CLICK_SLOP) return;
     if (e.target !== this.dom) return;
+    if (d.ctrl && this.mode === 'object') return;      // Ctrl + click / drag is a LightPaint stroke, not a selection
     this.handleClick(p.x, p.y, d);
   };
 
