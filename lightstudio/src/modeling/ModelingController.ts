@@ -3,6 +3,8 @@ import type { SceneManager } from '../three/engine';
 import { useModelingStore, type LastOp, type ModelSelectMode, type OpField, type MenuKind } from '../store/modelingStore';
 import { useSceneHierarchyStore } from '../store/sceneHierarchyStore';
 import { useLightsStore } from '../store/lightsStore';
+import { useUIStore } from '../store/uiStore';
+import { TransformControls } from 'three/addons/controls/TransformControls.js';
 import {
   EditMesh,
   Selection,
@@ -72,6 +74,10 @@ export class ModelingController {
   private disposed = false;
   private unsubStore: (() => void) | null = null;
   private unsubLights: (() => void) | null = null;
+  private unsubTool: (() => void) | null = null;
+  /** Move / rotate / scale handles on the selected object (Object Mode). */
+  private tc: TransformControls | null = null;
+  private tcRoot: THREE.Object3D | null = null;
   private lastOpRun: { snapshot: WorldSnapshot; run: (v: Record<string, number | boolean | string>) => void; fields: OpField[]; name: string } | null = null;
 
   constructor(sm: SceneManager, hooks: ModelingHooks = {}) {
@@ -89,6 +95,7 @@ export class ModelingController {
         else if (!mine && this.selectedIds.size && this.mode === 'object') this.selectObject(null, false, true);
       }
     });
+    this.unsubTool = useUIStore.subscribe((s, prev) => { if (s.activeTool !== prev.activeTool) this.updateGizmo(); });
     this.unsubLights = useLightsStore.subscribe((s, prev) => {
       if (s.selectedLightId !== prev.selectedLightId && s.selectedLightId && this.selectedIds.size && this.mode === 'object') {
         this.selectObject(null, false, true);
@@ -122,6 +129,8 @@ export class ModelingController {
     window.removeEventListener('keydown', this.onKeyDown, true);
     this.unsubStore?.();
     this.unsubLights?.();
+    this.unsubTool?.();
+    if (this.tc) { this.tc.detach(); this.tc.dispose(); if (this.tcRoot) this.sm.scene.remove(this.tcRoot); this.tc = null; this.tcRoot = null; }
     this.exitEdit(false);
     for (const o of this.objects.values()) {
       this.sm.scene.remove(o.object);
@@ -175,7 +184,44 @@ export class ModelingController {
     return this.activeId ? this.objects.get(this.activeId) ?? null : null;
   }
 
+  /** Keeps the transform handles on the active object (Object Mode only); the left toolbar's tool picks move / rotate / scale. */
+  private updateGizmo(): void {
+    const o = this.active;
+    const want = !this.disposed && this.mode === 'object' && !!o && !this.modal;
+    if (!want) {
+      if (this.tc && this.tc.object) this.tc.detach();
+      if (this.tcRoot) this.tcRoot.visible = false;
+      return;
+    }
+    if (!this.tc) {
+      const tc = new TransformControls(this.sm.camera, this.dom);
+      tc.setSize(0.8);
+      tc.addEventListener('dragging-changed', (e) => {
+        const dragging = (e as unknown as { value: boolean }).value;
+        const ctl = this.sm.controls as unknown as { enabled: boolean; __gizmoDragging?: boolean };
+        ctl.__gizmoDragging = dragging;          // the engine's camera loop honours this (see applyActiveCamera)
+        ctl.enabled = !dragging;
+        if (dragging) this.pushUndo('Transform');
+      });
+      tc.addEventListener('objectChange', () => {
+        this.refreshOutlines();
+        this.syncStore();
+        this.changed();
+      });
+      const root = (tc as unknown as { getHelper?: () => THREE.Object3D }).getHelper?.() ?? (tc as unknown as THREE.Object3D);
+      root.userData.isProxy = true;
+      this.sm.scene.add(root);
+      this.tc = tc;
+      this.tcRoot = root;
+    }
+    const tool = useUIStore.getState().activeTool;
+    this.tc.setMode(tool === 'rotate' ? 'rotate' : tool === 'scale' ? 'scale' : 'translate');
+    if (this.tc.object !== o!.object) this.tc.attach(o!.object);
+    if (this.tcRoot) this.tcRoot.visible = true;
+  }
+
   syncStore(): void {
+    this.updateGizmo();
     const objs = Array.from(this.objects.values()).map((o) => ({ id: o.id, name: o.name, visible: o.object.visible }));
     const e = this.editObj;
     let stats = { vertsSel: 0, vertsTotal: 0, edgesSel: 0, edgesTotal: 0, facesSel: 0, facesTotal: 0, tris: 0 };
@@ -777,8 +823,12 @@ export class ModelingController {
     }
     // Object mode: pick an editable object under the cursor.
     const r = this.dom.getBoundingClientRect();
+    if (this.tc && ((this.tc as unknown as { axis: string | null }).axis || this.tc.dragging)) return;      // that click was on a handle, not on the scene
     const hit = this.hitObject(x + r.left, y + r.top);
-    if (hit) this.selectObject(hit.id, d.shift);
+    if (hit) {
+      this.selectObject(hit.id, d.shift);
+      if (useUIStore.getState().activeTool === 'select') useUIStore.getState().setActiveTool('move');      // a picked object gets its move handles
+    }
     else if (this.selectedIds.size && !d.shift) this.selectObject(null, false);
   }
 
