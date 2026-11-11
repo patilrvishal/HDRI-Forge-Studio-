@@ -1755,14 +1755,11 @@ export class ModelingController {
   private objectKey(ev: KeyboardEvent): boolean {
     const k = ev.key.toLowerCase();
     const has = this.selectedIds.size > 0;
-    // G / R / S switch the tool (and with it the gizmo and the left toolbar): Move / Rotate / Scale.
-    // Shift+G / Shift+R / Shift+S start the Blender-style modal instead (X Y Z axis lock, typed values, Enter / click).
-    if ((k === 'g' || k === 'r' || k === 's') && !ev.ctrlKey && !ev.metaKey && !ev.altKey) {
-      if (ev.shiftKey) {
-        if (has || useLightsStore.getState().selectedLightId) this.startTransform(k === 'g' ? 'translate' : k === 'r' ? 'rotate' : 'scale');
-      } else {
-        useUIStore.getState().setActiveTool(k === 'g' ? 'move' : k === 'r' ? 'rotate' : 'scale');
-      }
+    // G / R / S: switch the tool (so the gizmo and the left toolbar follow) AND start the Blender-style modal on the selection:
+    // move the mouse, or type a value (S 1.5, G X 2, R Z 45), X / Y / Z lock an axis, Enter / click confirms, Esc cancels.
+    if ((k === 'g' || k === 'r' || k === 's') && !ev.ctrlKey && !ev.metaKey && !ev.altKey && !ev.shiftKey) {
+      useUIStore.getState().setActiveTool(k === 'g' ? 'move' : k === 'r' ? 'rotate' : 'scale');
+      if (has || useLightsStore.getState().selectedLightId) this.startTransform(k === 'g' ? 'translate' : k === 'r' ? 'rotate' : 'scale');
       return true;
     }
     if (ev.shiftKey && k === 'a' && !ev.ctrlKey) {
