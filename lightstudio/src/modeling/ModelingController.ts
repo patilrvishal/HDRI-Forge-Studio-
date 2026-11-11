@@ -8,6 +8,8 @@ import { TransformControls } from 'three/addons/controls/TransformControls.js';
 import { pickLight, pickSurface } from '../three/pickLight';
 import { runLightCommand, runPartCommand, rigGroupOf } from './contextActions';
 import { catmullClark } from './opsSubsurf';
+import { useHistoryStore } from '../store/historyStore';
+import { cartesianToSpherical } from '../utils/math';
 import {
   EditMesh,
   Selection,
@@ -1610,13 +1612,137 @@ export class ModelingController {
       this.redo();
       return;
     }
+    // Delete / Backspace removes the selected object wherever the pointer is (not while typing in a field)
+    if (this.mode === 'object' && (ev.key === 'Delete' || ev.key === 'Backspace') && !ev.ctrlKey && !ev.metaKey && !ev.altKey && !ev.shiftKey) {
+      if (this.deleteSelected()) {
+        ev.preventDefault();
+        ev.stopImmediatePropagation();
+      }
+      return;
+    }
     if (!this.pointerInside) return;
+    // Arrow keys nudge the selection with the active tool (Move / Rotate / Scale)
+    if (this.mode === 'object' && ev.key.startsWith('Arrow') && this.nudge(ev)) {
+      ev.preventDefault();
+      ev.stopImmediatePropagation();
+      return;
+    }
     const consumed = this.mode === 'edit' ? this.editKey(ev) : this.objectKey(ev);
     if (consumed) {
       ev.preventDefault();
       ev.stopImmediatePropagation();
     }
   };
+
+  /**
+   * Delete / Backspace in Object Mode: the selected mesh objects go; with none selected, the part picked in the scene
+   * hierarchy (a loaded model's mesh, a prop) is removed. A selected light is left to the global shortcut, and a rig's
+   * studio set is only cleared from the Rig panel.
+   */
+  private deleteSelected(): boolean {
+    if (this.selectedIds.size) {
+      this.deleteObjects();
+      return true;
+    }
+    if (useLightsStore.getState().selectedLightId) return false;
+    const h = useSceneHierarchyStore.getState();
+    if (!h.selectedId) return false;
+    const obj = this.sm.scene.getObjectByProperty('uuid', h.selectedId);
+    if (!obj || obj === this.sm.scene || obj.userData?.isProxy || obj.userData?.isGrid || obj.userData?.isHelper || (obj as THREE.Light).isLight) return false;
+    for (let o: THREE.Object3D | null = obj; o; o = o.parent) if (o.userData?.isRigSet) return false;
+    obj.traverse((c) => {
+      const m = c as THREE.Mesh;
+      if (m.isMesh) {
+        m.geometry?.dispose();
+        (Array.isArray(m.material) ? m.material : [m.material]).forEach((x) => x?.dispose());
+      }
+    });
+    obj.parent?.remove(obj);
+    useSceneHierarchyStore.setState({ hiddenIds: h.hiddenIds.filter((id) => id !== obj.uuid), selectedId: null, isolatedId: null });
+    this.changed();
+    this.toast('Deleted ' + (obj.name || 'object'));
+    return true;
+  }
+
+  /**
+   * Arrow keys with the active tool, one step per press. Move and Rotate use all four arrows (Left / Right and Up / Down;
+   * hold Shift for the third axis), Scale only Up (bigger) and Down (smaller). Alt = fine steps, Ctrl = coarse steps.
+   */
+  private nudge(ev: KeyboardEvent): boolean {
+    const objs = Array.from(this.selectedIds).map((id) => this.objects.get(id)).filter((o): o is EditableObject => !!o);
+    const lightId = objs.length ? null : useLightsStore.getState().selectedLightId;
+    if (!objs.length && !lightId) return false;
+    const key = ev.key;
+    if (key !== 'ArrowLeft' && key !== 'ArrowRight' && key !== 'ArrowUp' && key !== 'ArrowDown') return false;
+    const tool = useUIStore.getState().activeTool;
+    const kind: 'translate' | 'rotate' | 'scale' = tool === 'rotate' ? 'rotate' : tool === 'scale' ? 'scale' : 'translate';
+    if (kind === 'scale' && (key === 'ArrowLeft' || key === 'ArrowRight')) return false;
+    const sign = key === 'ArrowRight' || key === 'ArrowUp' ? 1 : -1;
+    const horizontal = key === 'ArrowLeft' || key === 'ArrowRight';
+    const mult = ev.altKey ? 0.1 : ev.ctrlKey ? 5 : 1;
+
+    // axes: world (Global), the object's own (Local) or the camera's (View)
+    const orient = useModelingStore.getState().orientation;
+    const cam = this.sm.camera;
+    let lightObj: THREE.Object3D | null = null;
+    if (lightId) this.sm.scene.traverse((o) => { if (!lightObj && o.userData?.lightId === lightId && (o as THREE.Light).isLight) lightObj = o; });
+    const refQuat = objs[0] ? objs[0].object.quaternion.clone() : lightObj ? (lightObj as THREE.Object3D).getWorldQuaternion(new THREE.Quaternion()) : new THREE.Quaternion();
+    let ax = new THREE.Vector3(1, 0, 0), ay = new THREE.Vector3(0, 1, 0), az = new THREE.Vector3(0, 0, 1);
+    if (orient === 'local') { ax.applyQuaternion(refQuat); ay.applyQuaternion(refQuat); az.applyQuaternion(refQuat); }
+    else if (orient === 'view') {
+      ax = new THREE.Vector3().setFromMatrixColumn(cam.matrixWorld, 0).normalize();
+      ay = new THREE.Vector3().setFromMatrixColumn(cam.matrixWorld, 1).normalize();
+      az = new THREE.Vector3().setFromMatrixColumn(cam.matrixWorld, 2).normalize();
+    }
+    // Move: Left/Right = X, Up/Down = Y (Shift: Up/Down = Z, away from the viewer when Up). Rotate: Left/Right = turn
+    // around Y (yaw), Up/Down = tip around X (Shift: Left/Right = roll around Z).
+    let axis: THREE.Vector3;
+    let amount = sign;
+    if (kind === 'translate') {
+      if (horizontal) axis = ax;
+      else if (ev.shiftKey) { axis = az; amount = -sign; } else axis = ay;
+    } else if (kind === 'rotate') {
+      if (horizontal) axis = ev.shiftKey ? az : ay;
+      else axis = ax;
+      amount = horizontal ? -sign : sign;
+    } else axis = ax;
+    const step = kind === 'translate' ? 0.1 * mult : kind === 'rotate' ? THREE.MathUtils.degToRad(5 * mult) : 0;
+    const factor = kind === 'scale' ? (sign > 0 ? 1 + 0.05 * mult : 1 / (1 + 0.05 * mult)) : 1;
+
+    if (objs.length) {
+      this.pushUndo(kind === 'translate' ? 'Move' : kind === 'rotate' ? 'Rotate' : 'Scale');
+      const q = new THREE.Quaternion().setFromAxisAngle(axis, step * amount);
+      for (const o of objs) {
+        if (kind === 'translate') o.object.position.addScaledVector(axis, step * amount);
+        else if (kind === 'rotate') o.object.quaternion.premultiply(q);
+        else o.object.scale.multiplyScalar(factor);
+        o.object.updateMatrixWorld(true);
+      }
+      this.refreshOutlines();
+      this.syncStore();
+      this.changed();
+      return true;
+    }
+
+    const st = useLightsStore.getState();
+    const l = st.lights.find((x) => x.id === lightId);
+    if (!l) return false;
+    if (kind === 'scale' && !(l.type === 'area' || l.type === 'overhead')) return true;
+    useHistoryStore.getState().beginGroup(kind === 'translate' ? 'Move Light' : kind === 'rotate' ? 'Rotate Light' : 'Scale Light');
+    if (kind === 'translate') {
+      const pos = new THREE.Vector3(l.transform.position.x, l.transform.position.y, l.transform.position.z).addScaledVector(axis, step * amount);
+      const sph = cartesianToSpherical(pos.x, pos.y, pos.z);
+      st.updateLightTransform(l.id, { position: { x: pos.x, y: pos.y, z: pos.z }, spherical: { lat: sph.lat, lng: sph.lng, radius: sph.radius, height: sph.height } });
+    } else if (kind === 'rotate') {
+      const q = new THREE.Quaternion().setFromAxisAngle(axis, step * amount).multiply(refQuat);
+      const e = new THREE.Euler().setFromQuaternion(q, 'XYZ');
+      st.updateLightTransform(l.id, { rotation: { ...l.transform.rotation, x: THREE.MathUtils.radToDeg(e.x), y: THREE.MathUtils.radToDeg(e.y), z: THREE.MathUtils.radToDeg(e.z), enabled: true } });
+    } else {
+      st.updateLight(l.id, { areaWidth: Math.max(0.05, (l.areaWidth ?? 2) * factor), areaHeight: Math.max(0.05, (l.areaHeight ?? 2) * factor) });
+    }
+    useHistoryStore.getState().endGroup();
+    return true;
+  }
 
   setMouse(x: number, y: number): void {
     this.lastMouse = { x, y };
