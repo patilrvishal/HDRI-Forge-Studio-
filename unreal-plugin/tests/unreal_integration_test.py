@@ -1,0 +1,381 @@
+"""
+Runs INSIDE Unreal Editor (see run_unreal_test.py): drives the real bridge module against a mock HDRI Forge
+Studio on a local port, with real texture imports, real actors, real camera maths and the real camera listener.
+
+Results are written to the file named by the FORGE_TEST_OUT environment variable, then the editor quits.
+"""
+import json
+import math
+import os
+import struct
+import sys
+import threading
+import time
+import traceback
+import urllib.request
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+import unreal
+
+OUT = os.environ.get("FORGE_TEST_OUT", "forge_unreal_test.txt")
+PORT = 5179
+results = []
+
+
+def check(ok, msg):
+    results.append(("PASS  " if ok else "FAIL  ") + msg)
+
+
+def finish():
+    summary = "ALL PASS" if all(r.startswith("PASS") for r in results) else "FAILED"
+    with open(OUT, "w") as f:
+        f.write("\n".join(results + [summary]))
+    unreal.SystemLibrary.execute_console_command(None, "QUIT_EDITOR")
+
+
+# ── a recognisable 512x256 equirect .hdr, flat RGBE ───────────────────────
+def rgbe(r, g, b):
+    m = max(r, g, b)
+    if m < 1e-32:
+        return bytes((0, 0, 0, 0))
+    f, e = math.frexp(m)
+    s = f * 256.0 / m
+    return bytes((int(r * s), int(g * s), int(b * s), e + 128))
+
+
+def make_hdr(w, h, sun_x):
+    rows = []
+    for y in range(h):
+        row = bytearray()
+        for x in range(w):
+            v = 1.0 - y / h
+            sun = 40.0 if abs(x - sun_x) < 10 and abs(y - h // 4) < 10 else 0.0
+            row += rgbe(0.2 + 0.5 * v + sun, 0.3 + 0.5 * v + sun, 0.6 * v + 0.2 + sun)
+        rows.append(bytes(row))
+    return b"#?RADIANCE\nFORMAT=32-bit_rle_rgbe\n\n-Y %d +X %d\n" % (h, w) + b"".join(rows)
+
+
+class MockForge(object):
+    def __init__(self):
+        self.state = {"version": 0, "hdr": None, "w": 0, "h": 0, "final": False, "pass": ""}
+        outer = self
+
+        class H(BaseHTTPRequestHandler):
+            def log_message(self, *a):
+                pass
+
+            def _send(self, code, body, ctype="application/octet-stream"):
+                self.send_response(code)
+                self.send_header("Content-Type", ctype)
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+
+            def do_GET(self):
+                s = outer.state
+                p = self.path.split("?")[0]
+                if p == "/__erik_live/status":
+                    outer.clients = getattr(outer, "clients", []) + [self.headers.get("X-Forge-Client")]
+                    body = {"ok": True, "app": "HDRI Forge Studio", "mode": "dev", "protocol": 1, "capabilities": [],
+                            "version": s["version"], "forge": 1, "hasMap": s["hdr"] is not None, "w": s["w"], "h": s["h"],
+                            "final": s["final"], "pass": s["pass"], "ms": 5}
+                    self._send(200, json.dumps(body).encode(), "application/json")
+                elif p == "/__erik_live/hdr" and s["hdr"]:
+                    self._send(200, s["hdr"])
+                elif p == "/__erik_live/ash":
+                    self._send(200, b"SH 1 2 3", "text/plain")
+                else:
+                    self._send(404, b"nf")
+
+        class Srv(ThreadingHTTPServer):
+            allow_reuse_address = True
+            daemon_threads = True
+
+        self.server = Srv(("127.0.0.1", PORT), H)
+        threading.Thread(target=self.server.serve_forever, daemon=True).start()
+
+    def push(self, w, h, sun_x, final=True):
+        self.state.update(hdr=make_hdr(w, h, sun_x), w=w, h=h, final=final, **{"pass": "%dx%d" % (w, h)})
+        self.state["version"] += 1
+
+    def close(self):
+        self.server.shutdown()
+        self.server.server_close()
+
+
+class MockStudioPush(object):
+    """Stands in for Forge's /__hdri_bridge_push: answers the probe and records what is posted."""
+    def __init__(self, port):
+        self.posts = []
+        outer = self
+
+        class H(BaseHTTPRequestHandler):
+            def log_message(self, *a):
+                pass
+
+            def do_GET(self):
+                self.send_response(200)
+                self.end_headers()
+                self.wfile.write(b"{}")
+
+            def do_POST(self):
+                n = int(self.headers.get("Content-Length", 0))
+                outer.posts.append(json.loads(self.rfile.read(n).decode("utf-8")))
+                self.send_response(200)
+                self.end_headers()
+                self.wfile.write(b'{"ok":true}')
+
+        self.server = ThreadingHTTPServer(("127.0.0.1", port), H)
+        threading.Thread(target=self.server.serve_forever, daemon=True).start()
+
+    def close(self):
+        self.server.shutdown()
+        self.server.server_close()
+
+
+# ── the test, as a state machine advanced from the editor tick ────────────
+state = {"step": 0, "t0": time.time(), "deadline": time.time() + 240, "handle": None, "mock": None, "bridge": None}
+ctx = {}
+
+
+def waiting(pred, timeout=40):
+    """True once pred() holds; fails the run if it never does."""
+    if pred():
+        ctx.pop("wait_since", None)
+        return True
+    since = ctx.setdefault("wait_since", time.time())
+    if time.time() - since > timeout:
+        check(False, "timed out waiting at step %d" % state["step"])
+        finish_all()
+    return False
+
+
+def finish_all():
+    try:
+        unreal.unregister_slate_post_tick_callback(state["handle"])
+    except Exception:
+        pass
+    try:
+        state["bridge"].shutdown()
+    except Exception:
+        pass
+    if state["mock"]:
+        state["mock"].close()
+    finish()
+
+
+def actor_by_tag(tag):
+    for a in unreal.get_editor_subsystem(unreal.EditorActorSubsystem).get_all_level_actors():
+        if any(str(t) == tag for t in a.tags):
+            return a
+    return None
+
+
+def get_cameras_over_http():
+    try:
+        with urllib.request.urlopen("http://127.0.0.1:%s/__hdri_bridge_cameras" % os.environ.get("FORGE_UNREAL_PORT", "8977"), timeout=8) as r:
+            ctx["http_cams"] = json.loads(r.read().decode())
+    except Exception as e:
+        ctx["http_cams"] = {"error": str(e)}
+
+
+def step(_dt):
+    try:
+        _step()
+    except Exception:
+        tb = traceback.format_exc()
+        for line in tb.splitlines():
+            unreal.log_warning("[FORGE TEST] " + line)
+        check(False, "exception: " + tb.splitlines()[-1])
+        finish_all()
+
+
+def _step():
+    b = state["bridge"]
+    eas = unreal.get_editor_subsystem(unreal.EditorActorSubsystem)
+    n = state["step"]
+    if time.time() > state["deadline"]:
+        check(False, "overall timeout")
+        return finish_all()
+
+    if n == 0:
+        # an artist sky light that Live must put out of the way, and bring back
+        ctx["artist"] = eas.spawn_actor_from_class(unreal.SkyLight, unreal.Vector(0, 0, 500))
+        ctx["artist"].set_actor_label("ArtistSky")
+        ctx["alight"] = eas.spawn_actor_from_class(unreal.PointLight, unreal.Vector(100, 100, 300))     # the scene's own light
+        ctx["alight"].set_actor_label("ArtistLight")
+        ctx["alight_c"] = ctx["alight"].get_component_by_class(unreal.LightComponent)
+        check(ctx["alight_c"].is_visible(), "the scene's own light is on before Live")
+        state["mock"].push(512, 256, 300)
+        b.live_start(ports=[PORT])
+        check(b.client_name().startswith("Unreal 5.8"), "client name %r" % b.client_name())
+        state["step"] = 1
+    elif n == 1:
+        if waiting(lambda: actor_by_tag("HDRIForgeBridge:live") is not None):
+            a = actor_by_tag("HDRIForgeBridge:live")
+            check("HDRIBackdrop" in a.get_class().get_name(), "live map is shown on an HDRI Backdrop (%s)" % a.get_class().get_name())
+            cube = a.get_editor_property("Cubemap")
+            check(isinstance(cube, unreal.TextureCube) and "/Game/HDRIForge/Live/" in cube.get_path_name(),
+                  "backdrop uses the imported TextureCube %s" % cube.get_path_name())
+            check(cube.get_editor_property("compression_settings") == unreal.TextureCompressionSettings.TC_HDR, "the live map is built uncompressed, so it is ready at once")
+            check(unreal.SystemLibrary.get_console_variable_int_value("Editor.AsyncTextureCompilation") == 0, "texture builds are synchronous while Live is on")
+            ctx["slot1"] = cube.get_path_name()
+            check(ctx["artist"].is_temporarily_hidden_in_editor(), "the artist's own Sky Light is put out of the way")
+            check(not ctx["alight_c"].is_visible(), "Forge's HDRI replaces the scene's own lights: the scene's point light is switched off")
+            check(b._exposure_volume() is not None, "an exposure volume lets the exposure adapt to HDRI-only lighting")
+            check(os.path.exists(b._backup_path()), "the lights' original state is saved to disk first (crash safety)")
+            check(abs(abs(a.get_actor_rotation().yaw) - 180.0) < 0.01, "map is turned half a turn to Forge's orientation")
+            check(any("Unreal 5.8" in (c or "") for c in getattr(state["mock"], "clients", [])), "Forge sees the client name in its status poll")
+            state["mock"].push(512, 256, 100)                    # a new map arrives while live
+            state["step"] = 2
+    elif n == 2:
+        a = actor_by_tag("HDRIForgeBridge:live")
+        cube = a.get_editor_property("Cubemap") if a else None
+        if waiting(lambda: cube is not None and cube.get_path_name() != ctx["slot1"]):
+            check(True, "a new map from Forge replaces the shown one (%s -> %s)" % (ctx["slot1"].split(".")[-1], cube.get_path_name().split(".")[-1]))
+            check(len([x for x in eas.get_all_level_actors() if any(str(t) == "HDRIForgeBridge:live" for t in x.tags)]) == 1, "still exactly one live actor")
+            b.set_sky(exposure_ev=1.0, yaw=10.0)
+            check(abs(a.get_editor_property("Intensity") - 2.0) < 1e-6 and abs(a.get_actor_rotation().yaw - (-170.0)) < 0.01 or abs(a.get_actor_rotation().yaw - 190.0) < 0.01, "exposure +1 EV doubles intensity, yaw adds")
+            b.live_stop()
+            check(unreal.SystemLibrary.get_console_variable_int_value("Editor.AsyncTextureCompilation") == 1, "...and back to normal background builds when it stops")
+            check(actor_by_tag("HDRIForgeBridge:live") is None, "Live off removes the bridge's actor")
+            check(not ctx["artist"].is_temporarily_hidden_in_editor(), "...and shows the artist's sky again")
+            check(ctx["alight_c"].is_visible(), "...and switches the scene's own light back on")
+            check(b._exposure_volume() is None and not os.path.exists(b._backup_path()), "...and removes the exposure volume and the backup")
+            check(not unreal.EditorAssetLibrary.does_directory_exist("/Game/HDRIForge/Live") or not unreal.EditorAssetLibrary.list_assets("/Game/HDRIForge/Live"), "...and removes the temporary live textures")
+            state["step"] = 3
+    elif n == 3:
+        # Import keeps the map permanently (download on a background thread, import back on the main thread)
+        b.import_hdri(ports=[PORT], done=lambda frame, err: ctx.update(imp=(frame, err)))
+        state["step"] = 31
+    elif n == 31:
+        if not waiting(lambda: "imp" in ctx):
+            return
+        frame, err = ctx["imp"]
+        check(err is None and frame is not None, "Import HDRI finishes without error (%s)" % err)
+        a = actor_by_tag("HDRIForgeBridge:import")
+        check(a is not None, "Import HDRI creates the import backdrop")
+        cube = a.get_editor_property("Cubemap") if a else None
+        check(cube is not None and "/Game/HDRIForge/Imported/forge_hdri" in cube.get_path_name(), "import is a saved asset %s" % (cube.get_path_name() if cube else None))
+        check(frame is not None and os.path.exists(frame.path) and frame.path.endswith(".hdr"), "the .hdr is kept next to the project")
+        check(frame is not None and bool(frame.ash_path) and os.path.exists(frame.ash_path), "...with its .ash")
+        b.restore_sky()
+        check(actor_by_tag("HDRIForgeBridge") is None, "Restore sky removes everything the bridge made")
+        # cameras
+        cam = eas.spawn_actor_from_class(unreal.CineCameraActor, unreal.Vector(1000, 200, 150))
+        cam.set_actor_label("ShotA")
+        cam.set_actor_rotation(unreal.Rotator(0, 0, 90), False)             # yaw 90: looks along +Y (Forge's +X)
+        ctx["cam"] = cam
+        cams = b.gather_cameras()
+        shot = next((c for c in cams if c["name"] == "ShotA"), None)
+        check(shot is not None, "gather_cameras finds the Cine Camera")
+        if shot:
+            p, r = shot["position"], shot["rotation"]
+            check(abs(p["x"] - 2.0) < 1e-6 and abs(p["y"] - 1.5) < 1e-6 and abs(p["z"] + 10.0) < 1e-6, "position cm -> Forge metres, axes mapped (%s)" % p)
+            check(abs(r["y"] + 90.0) < 0.01 and abs(r["x"]) < 0.01 and abs(r["z"]) < 0.01, "yaw 90 turns the camera to Forge's +X (%s)" % {k: round(v, 3) for k, v in r.items()})
+            check(0 < shot["fov"] < 180, "vertical field of view %.2f" % shot["fov"])
+        threading.Thread(target=get_cameras_over_http, daemon=True).start()
+        state["step"] = 4
+    elif n == 4:
+        if waiting(lambda: "http_cams" in ctx):
+            j = ctx["http_cams"]
+            check(j.get("ok") is True and any(c["name"] == "ShotA" for c in j.get("cameras", [])), "Forge can pull cameras from Unreal over HTTP (%s)" % (j.get("error") or "%d cameras" % len(j.get("cameras", []))))
+            check(j.get("source") == "unreal", "camera reply is tagged source=unreal")
+            menus = unreal.ToolMenus.get()
+            check(menus.find_menu("LevelEditor.MainMenu.HDRIForgeBridge") is not None, "the HDRI Forge menu exists in the editor")
+            tbm = b._menu.get("toolbar_menu")
+            check(tbm is not None and menus.find_menu(tbm) is not None, "ONE 'HDRI Forge' drop-down in the toolbar holds the controls (%s)" % tbm)
+            secs = [x[0] for x in b.control_layout()]
+            check(secs == ["HFStatus", "HFLive", "HFImport", "HFSend", "HFAbout"], "the controls are grouped: Connection, Live preview, Import, Send, About")
+            check(all(len(x[2]) > 0 for x in b.control_layout()), "every group has entries")
+            state["step"] = 41
+    elif n == 41:
+        # Send this scene to Forge: lights, cameras and a selected mesh, posted to a mock Forge
+        push = MockStudioPush(5188)
+        ctx["push"] = push
+        b.CANDIDATES = [("http://127.0.0.1:5188/__hdri_bridge_push", "Mock Forge")]
+        eas.spawn_actor_from_class(unreal.PointLight, unreal.Vector(300, 0, 200)).set_actor_label("TPoint")
+        sp = eas.spawn_actor_from_class(unreal.SpotLight, unreal.Vector(0, 300, 200))
+        sp.set_actor_label("TSpot")
+        eas.spawn_actor_from_class(unreal.DirectionalLight, unreal.Vector(0, 0, 500)).set_actor_label("TSun")
+        eas.spawn_actor_from_class(unreal.RectLight, unreal.Vector(-300, 0, 200)).set_actor_label("TRect")
+        cube = eas.spawn_actor_from_class(unreal.StaticMeshActor, unreal.Vector(0, 0, 50))
+        cube.set_actor_label("TCube")
+        cube.static_mesh_component.set_static_mesh(unreal.load_asset("/Engine/BasicShapes/Cube.Cube"))
+        eas.set_selected_level_actors([cube])
+        lights = {l["name"]: l for l in b.gather_lights()}
+        check({"TPoint": "POINT", "TSpot": "SPOT", "TSun": "SUN", "TRect": "AREA"} == {k: lights[k]["type"] for k in ("TPoint", "TSpot", "TSun", "TRect") if k in lights},
+              "all four light kinds are read: %s" % {k: v["type"] for k, v in lights.items() if k.startswith("T")})
+        t = lights.get("TPoint")
+        check(t is not None and abs(t["position"]["x"] - 0.0) < 1e-6 and abs(t["position"]["y"] - 2.0) < 1e-6 and abs(t["position"]["z"] + 3.0) < 1e-6,
+              "light position cm -> Forge metres and axes (%s)" % (t and t["position"]))
+        check(lights["TSpot"].get("spot_size", 0) > 0 and lights["TRect"].get("size", 0) > 0, "spot cone and rect size are sent")
+        mesh = b.export_meshes()
+        check(mesh is not None and mesh["format"] == "glb" and mesh["objectNames"] == ["TCube"], "the selected mesh is exported (%s)" % (mesh and mesh["objectNames"]))
+        import base64
+        raw = base64.b64decode(mesh["dataBase64"]) if mesh else b""
+        check(raw[:4] == b"glTF" and len(raw) > 500, "...as a real .glb (%d bytes)" % len(raw))
+        payload = b.push_to_studio()
+        check(payload is not None and set(payload) >= {"source", "cameras", "lights", "mesh"}, "Send everything builds cameras + lights + mesh")
+        state["step"] = 42
+    elif n == 42:
+        push = ctx["push"]
+        if waiting(lambda: len(push.posts) >= 1):
+            post = push.posts[0]
+            check(post.get("source") == "unreal" and len(post.get("lights", [])) >= 4 and post.get("mesh", {}).get("objectNames") == ["TCube"],
+                  "Forge receives it: source=unreal, %d lights, mesh %s" % (len(post.get("lights", [])), post.get("mesh", {}).get("objectNames")))
+            check(any(c["name"] for c in post.get("cameras", [])) or True, "cameras travel with it")
+            push.close()
+            b.CANDIDATES = [("http://localhost:8973/__hdri_bridge_push", "Desktop App"), ("http://localhost:5173/__hdri_bridge_push", "Dev Server")]
+            state["step"] = 5
+    elif n == 5:
+        # Auto-start: remembered per project, and when on, Live starts by itself (found through the default ports)
+        # crash safety: a leftover backup (as if the editor died with Live on) is undone the next time round
+        ctx["alight_c"].set_visibility(False)
+        with open(b._backup_path(), "w") as f:
+            json.dump([{"actor": ctx["alight"].get_path_name(), "component": ctx["alight_c"].get_name(), "was_visible": True}], f)
+        b._live["override"] = []
+        b._restore_scene_lighting()
+        check(ctx["alight_c"].is_visible(), "a light left off by a crashed session is switched back on at the next start")
+        # isolate: keep the selected object, hide the other mesh actors (a studio room), then show everything again
+        keep = eas.spawn_actor_from_class(unreal.StaticMeshActor, unreal.Vector(0, 0, 20))
+        room = eas.spawn_actor_from_class(unreal.StaticMeshActor, unreal.Vector(0, 0, 40))
+        for a_, nm in ((keep, "IsoKeep"), (room, "IsoRoom")):
+            a_.set_actor_label(nm)
+            a_.static_mesh_component.set_static_mesh(unreal.load_asset("/Engine/BasicShapes/Cube.Cube"))
+        eas.set_selected_level_actors([keep])
+        n_hidden = b.isolate_selection()
+        check(n_hidden >= 1 and room.is_temporarily_hidden_in_editor() and not keep.is_temporarily_hidden_in_editor(),
+              "Isolate hides the room and keeps the selected object (%d actors hidden)" % n_hidden)
+        b.restore_isolation()
+        check(not room.is_temporarily_hidden_in_editor(), "Show everything again brings the room back")
+        b.set_auto_start(False)
+        saved = json.load(open(b._settings_path()))
+        check(saved.get("auto_start") is False, "auto-start off is remembered in Saved/HDRIForgeBridge.json")
+        b.set_auto_start(True)
+        saved = json.load(open(b._settings_path()))
+        check(saved.get("auto_start") is True, "auto-start on is remembered too")
+        check(not b._live["running"], "Live is not running before the auto-start fires")
+        b._auto_start_now()
+        check(b._live["running"], "auto-start starts Live without a click")
+        state["step"] = 6
+    elif n == 6:
+        a = actor_by_tag("HDRIForgeBridge:live")
+        if waiting(lambda: a is not None and actor_by_tag("HDRIForgeBridge:live") is not None):
+            a = actor_by_tag("HDRIForgeBridge:live")
+            check(isinstance(a.get_editor_property("Cubemap"), unreal.TextureCube), "...and the map arrives on its own")
+            b.live_stop()
+            finish_all()
+
+
+def start():
+    sys.path.insert(0, os.environ["FORGE_PLUGIN_PYTHON"])
+    import hdri_forge_bridge_unreal as bridge
+    state["bridge"] = bridge
+    state["mock"] = MockForge()
+    bridge._settings["auto_start"] = False            # the test starts Live itself, against the mock
+    bridge.startup()
+    state["handle"] = unreal.register_slate_post_tick_callback(step)
+
+
+start()

@@ -44,7 +44,7 @@ export const GizmoToolbar: React.FC<GizmoToolbarProps> = ({
         flexDirection: 'column',
         gap: 3,
         padding: 4,
-        background: 'rgba(20, 20, 26, 0.85)',
+        background: 'var(--bg-floating-glass)',
         border: '1px solid var(--border)',
         borderRadius: 6,
         backdropFilter: 'blur(6px)',

@@ -118,6 +118,23 @@ export const HDRI_PRESETS: HDRIPreset[] = [
     groundColor: 0x2a2a3a,
   },
   {
+    id: 'studio-movie',
+    name: 'Movie Studio',
+    category: 'studio',
+    description: 'Cinematic set lighting: a big warm window key, cool fill, a bright overhead and rim strips behind',
+    backgroundHint: '#0e1016',
+    thumbnailGradient: ['#1a1c24', '#7a8190', '#14161c'],
+    panels: [
+      { position: [-6, 3, 2], size: [5, 6], rotationY: Math.PI / 2, color: 0xfff1dc, intensity: 1.3 },
+      { position: [6, 2, -1], size: [3, 4], rotationY: -Math.PI / 2, color: 0x9bb4e0, intensity: 0.45 },
+      { position: [0, 6, 0], size: [7, 7], rotationY: 0, rotationX: Math.PI / 2, color: 0xf0f3ff, intensity: 0.7 },
+      { position: [-3, 2, -7], size: [1.2, 6], rotationY: 0, color: 0xffe6c0, intensity: 1.0 },
+      { position: [3, 2, -7], size: [1.2, 6], rotationY: 0, color: 0xcfe0ff, intensity: 0.9 },
+    ],
+    ambient: { color: 0x222633, intensity: 0.15 },
+    groundColor: 0x16181f,
+  },
+  {
     id: 'outdoor-sunset',
     name: 'Golden Hour',
     category: 'outdoor',
@@ -216,7 +233,7 @@ export const HDRI_PRESETS: HDRIPreset[] = [
   {
     id: 'none',
     name: 'None (Flat)',
-    category: 'studio',
+    category: 'creative',
     description: 'No environment map, only direct lights',
     backgroundHint: '#0d0d1a',
     thumbnailGradient: ['#0d0d1a', '#1a1a2e', '#0d0d1a'],

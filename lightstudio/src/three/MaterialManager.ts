@@ -51,9 +51,34 @@ export class MaterialManager {
     let matIndex = 0;
 
     for (const [, group] of materialGroups) {
-      const mat = group.material;
+      const state = this.buildMaterialState(matIndex, group.material, group.meshNames);
+      this.materialMap.set(state.id, [group.material]);
+      states.push(state);
+      matIndex++;
+    }
+
+    return states;
+  }
+
+  /**
+   * Register a single mesh's material with the store/manager without
+   * touching anything else already tracked - unlike extractMaterials(),
+   * which clears and rebuilds everything (meant for a fresh model load).
+   * Used for meshes created OUTSIDE the model-load path (the modelling
+   * system's primitives/duplicates/splits) so they get a real, editable
+   * entry in the main Material tab instead of silently having none.
+   */
+  registerAdHocMaterial(mesh: THREE.Mesh, index: number): PBRMaterialState | null {
+    const mat = mesh.material;
+    if (Array.isArray(mat) || !(mat instanceof THREE.MeshStandardMaterial)) return null;
+    const state = this.buildMaterialState(index, mat, [mesh.name]);
+    this.materialMap.set(state.id, [mat]);
+    return state;
+  }
+
+  private buildMaterialState(matIndex: number, mat: THREE.MeshStandardMaterial, meshNames: string[]): PBRMaterialState {
       const isPhys = mat instanceof THREE.MeshPhysicalMaterial;
-      const state = createPBRMaterialState(matIndex, mat.name, group.meshNames);
+      const state = createPBRMaterialState(matIndex, mat.name, meshNames);
 
       // Read standard material properties
       state.color = '#' + mat.color.getHexString();
@@ -83,7 +108,7 @@ export class MaterialManager {
         state.clearcoat = pm.clearcoat;
         state.clearcoatRoughness = pm.clearcoatRoughness;
         state.transmission = pm.transmission;
-        state.transmissionRoughness = pm.transmissionRoughness;
+        state.transmissionRoughness = (pm as unknown as { transmissionRoughness: number }).transmissionRoughness;
         state.thickness = pm.thickness;
         state.ior = pm.ior;
         state.sheen = pm.sheen;
@@ -133,14 +158,7 @@ export class MaterialManager {
         state.displacementMap = { enabled: true, dataUrl: null, fileName: '(embedded)', uvChannel: mat.displacementMap.channel };
       }
 
-      // Store mapping: state.id → [actual Three.js materials]
-      this.materialMap.set(state.id, [mat]);
-
-      states.push(state);
-      matIndex++;
-    }
-
-    return states;
+      return state;
   }
 
   /**
@@ -409,7 +427,7 @@ export class MaterialManager {
       mat.clearcoat = state.clearcoat;
       mat.clearcoatRoughness = state.clearcoatRoughness;
       mat.transmission = state.transmission;
-      mat.transmissionRoughness = state.transmissionRoughness;
+      (mat as unknown as { transmissionRoughness: number }).transmissionRoughness = state.transmissionRoughness;
       mat.thickness = state.thickness;
       mat.ior = state.ior;
       mat.sheen = state.sheen;
@@ -417,7 +435,7 @@ export class MaterialManager {
       mat.sheenColor.set(state.sheenColor);
       mat.iridescence = state.iridescence;
       mat.iridescenceIOR = state.iridescenceIOR;
-      mat.iridescenceThicknessRange = new THREE.Vector2(state.iridescenceThicknessRange[0], state.iridescenceThicknessRange[1]);
+      mat.iridescenceThicknessRange = [state.iridescenceThicknessRange[0], state.iridescenceThicknessRange[1]];
       mat.attenuationColor.set(state.attenuationColor);
       mat.attenuationDistance = state.attenuationDistance === Infinity ? Infinity : state.attenuationDistance;
       mat.specularIntensity = state.specularIntensity;

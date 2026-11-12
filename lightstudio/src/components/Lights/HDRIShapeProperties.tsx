@@ -82,11 +82,28 @@ const TYPE_LABELS: Record<string, string> = {
 export const HDRIShapeProperties: React.FC = () => {
   const selectedShapeId = useHDRIShapesStore((s) => s.selectedShapeId);
   const shapes = useHDRIShapesStore((s) => s.shapes);
+  const groups = useHDRIShapesStore((s) => s.groups);
   const updateShape = useHDRIShapesStore((s) => s.updateShape);
+  const moveShapeAndGroup = useHDRIShapesStore((s) => s.moveShapeAndGroup);
+  const createGroup = useHDRIShapesStore((s) => s.createGroup);
+  const setShapeGroup = useHDRIShapesStore((s) => s.setShapeGroup);
+  const renameGroup = useHDRIShapesStore((s) => s.renameGroup);
+  const deleteGroup = useHDRIShapesStore((s) => s.deleteGroup);
+  const toggleGroupVisible = useHDRIShapesStore((s) => s.toggleGroupVisible);
+  const toggleGroupLocked = useHDRIShapesStore((s) => s.toggleGroupLocked);
 
   const shape = useMemo(
     () => shapes.find((s) => s.id === selectedShapeId) ?? null,
     [shapes, selectedShapeId],
+  );
+
+  const group = useMemo(
+    () => (shape?.groupId ? groups.find((g) => g.id === shape.groupId) ?? null : null),
+    [shape, groups],
+  );
+  const groupMembers = useMemo(
+    () => (group ? shapes.filter((s) => s.groupId === group.id) : []),
+    [shapes, group],
   );
 
   if (!shape) return null;
@@ -190,7 +207,7 @@ export const HDRIShapeProperties: React.FC = () => {
               min={0}
               max={1}
               step={0.001}
-              onChange={(v) => updateShape(shape.id, { u: v })}
+              onChange={(v) => moveShapeAndGroup(shape.id, v, shape.v)}
             />
             <Slider
               label="Position Y (V)"
@@ -198,7 +215,7 @@ export const HDRIShapeProperties: React.FC = () => {
               min={0}
               max={1}
               step={0.001}
-              onChange={(v) => updateShape(shape.id, { v: v })}
+              onChange={(v) => moveShapeAndGroup(shape.id, shape.u, v)}
             />
           </div>
           <Slider
@@ -227,6 +244,72 @@ export const HDRIShapeProperties: React.FC = () => {
               unit="°"
               onChange={(v) => updateShape(shape.id, { rotation: v })}
             />
+          )}
+        </div>
+      </CollapsibleSection>
+
+      <CollapsibleSection title="Group" defaultOpen={!!group}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, padding: '4px 0' }}>
+          {!group ? (
+            <>
+              <div style={{ fontSize: 9, color: 'var(--text-dim)', lineHeight: 1.4 }}>
+                Group two or more shapes to move, hide, or lock them together -
+                HDR Light Studio's composite lights.
+              </div>
+              <Dropdown
+                value=""
+                options={[
+                  { value: '', label: groups.length ? 'Add to group…' : 'No groups yet' },
+                  ...groups.map((g) => ({ value: g.id, label: g.name })),
+                  { value: '__new__', label: '+ New Group' },
+                ]}
+                onChange={(v) => {
+                  if (!v) return;
+                  if (v === '__new__') createGroup(shape.id);
+                  else setShapeGroup(shape.id, v);
+                }}
+                width="100%"
+              />
+            </>
+          ) : (
+            <>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <input
+                  className="field-input"
+                  value={group.name}
+                  onChange={(e) => renameGroup(group.id, e.target.value)}
+                  style={{ width: 130, fontSize: 11 }}
+                />
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <button
+                    className="btn-icon"
+                    style={{ width: 18, height: 18, opacity: groupMembers.every((m) => m.locked) ? 1 : 0.4 }}
+                    onClick={() => toggleGroupLocked(group.id)}
+                    title="Lock/unlock every shape in this group"
+                  >
+                    <svg width="11" height="11" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.2">
+                      <rect x="2.5" y="5.5" width="7" height="5" rx="1" />
+                      <path d="M4 5.5V3.5a2 2 0 014 0v2" />
+                    </svg>
+                  </button>
+                  <Toggle
+                    checked={groupMembers.some((m) => m.visible)}
+                    onChange={() => toggleGroupVisible(group.id)}
+                  />
+                </div>
+              </div>
+              <div style={{ fontSize: 9, color: 'var(--text-dim)' }}>
+                {groupMembers.length} member{groupMembers.length !== 1 ? 's' : ''}: {groupMembers.map((m) => m.name).join(', ')}
+              </div>
+              <div style={{ display: 'flex', gap: 6 }}>
+                <button className="btn-sm" style={{ flex: 1 }} onClick={() => setShapeGroup(shape.id, null)}>
+                  Remove from group
+                </button>
+                <button className="btn-sm" style={{ flex: 1, color: 'var(--danger)' }} onClick={() => deleteGroup(group.id)}>
+                  Delete group
+                </button>
+              </div>
+            </>
           )}
         </div>
       </CollapsibleSection>

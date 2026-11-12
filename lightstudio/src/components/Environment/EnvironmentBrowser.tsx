@@ -1,4 +1,4 @@
-import React, { useCallback, useRef, useState, useMemo } from 'react';
+import React, { useCallback, useEffect, useRef, useState, useMemo } from 'react';
 import { useSceneStore } from '../../store/sceneStore';
 import { setRawHDRIData } from '../../store/hdriDataStore';
 import { useHDRIAssetStore } from '../../store/hdriAssetStore';
@@ -6,6 +6,8 @@ import { Slider } from '../UI/Slider';
 import { Toggle } from '../UI/Toggle';
 import { HDRI_PRESETS, getHDRIPresetById } from '../../types/Environment';
 import type { HDRIPreset } from '../../types/Environment';
+import { renderPresetThumbnails } from '../../three/EnvPresetThumbnails';
+import { ENV_CARDS } from '../../data/envCards';
 
 interface EnvironmentBrowserProps {
   onClose: () => void;
@@ -34,6 +36,10 @@ const EnvironmentBrowser: React.FC<EnvironmentBrowserProps> = ({ onClose, onPres
   const backplateInputRef = useRef<HTMLInputElement>(null);
   const [customLoading, setCustomLoading] = useState(false);
 
+  // real renders of every preset (the same scene the viewport lights with), filled in as they finish
+  const [thumbs, setThumbs] = useState<Record<string, string>>({});
+  useEffect(() => renderPresetThumbnails(HDRI_PRESETS, (id, url) => setThumbs((t) => ({ ...t, [id]: url }))), []);
+
   // Filter presets
   const filteredPresets = useMemo(() => {
     let list = activeCategory === 'all' ? HDRI_PRESETS : HDRI_PRESETS.filter((p) => p.category === activeCategory);
@@ -48,13 +54,71 @@ const EnvironmentBrowser: React.FC<EnvironmentBrowserProps> = ({ onClose, onPres
 
   const activePreset = useMemo(() => getHDRIPresetById(environment.presetId), [environment.presetId]);
 
-  const handlePresetClick = useCallback(
+  // ── Preview / apply ──────────────────────────────────────────────────────────────────────────────────────
+  // One click only PREVIEWS the environment in the scene (no undo entry, nothing saved). Double click or the Apply button
+  // makes it real. Closing the window with an unapplied preview puts the scene back exactly as it was.
+  type EnvPick = { presetId: string; hdri: string | null; showBackground: boolean };
+  const pickEnv = (): EnvPick => {
+    const e = useSceneStore.getState().environment;
+    return { presetId: e.presetId, hdri: e.hdri, showBackground: e.showBackground };
+  };
+  const originalRef = useRef<EnvPick>(pickEnv());       // the scene's real environment
+  const [pending, setPending] = useState<{ kind: 'preset'; id: string } | { kind: 'asset'; id: string } | null>(null);
+  const pendingRef = useRef(pending);
+  pendingRef.current = pending;
+
+  const setSilently = (pick: Partial<EnvPick>) =>
+    useSceneStore.setState((st) => ({ environment: { ...st.environment, ...pick } }));
+
+  const revertPreview = useCallback(() => {
+    if (pendingRef.current) setSilently(originalRef.current);
+  }, []);
+  useEffect(() => () => revertPreview(), [revertPreview]);   // any way of closing the window reverts an unapplied preview
+
+  const previewPreset = useCallback((preset: HDRIPreset) => {
+    setSilently({ presetId: preset.id, hdri: null, showBackground: true });   // show the backdrop so the preview is visible
+    setPending(preset.id === originalRef.current.presetId && !originalRef.current.hdri ? null : { kind: 'preset', id: preset.id });
+  }, []);
+
+  const applyPreset = useCallback(
     (preset: HDRIPreset) => {
+      setSilently(originalRef.current);                  // so undo returns to the real previous environment
       setEnvironmentPreset(preset.id);
+      originalRef.current = pickEnv();
+      setPending(null);
       onPresetSelect?.(preset.id);
     },
     [setEnvironmentPreset, onPresetSelect],
   );
+
+  const previewAsset = useCallback((asset: { id: string; blobUrl?: string | null }) => {
+    if (!asset.blobUrl) return;
+    setSilently({ hdri: asset.blobUrl, presetId: '__custom__', showBackground: true });
+    setPending({ kind: 'asset', id: asset.id });
+  }, []);
+
+  const applyAsset = useCallback(
+    (asset: { id: string; blobUrl?: string | null }) => {
+      if (!asset.blobUrl) return;
+      setSilently(originalRef.current);
+      useHDRIAssetStore.getState().selectAsset(asset.id);
+      setEnvironment({ hdri: asset.blobUrl, presetId: '__custom__', showBackground: true });
+      originalRef.current = pickEnv();
+      setPending(null);
+    },
+    [setEnvironment],
+  );
+
+  const applyPending = useCallback(() => {
+    if (!pending) return;
+    if (pending.kind === 'preset') {
+      const p = getHDRIPresetById(pending.id);
+      if (p) applyPreset(p);
+    } else {
+      const a = useHDRIAssetStore.getState().assets.find((x) => x.id === pending.id);
+      if (a) applyAsset(a);
+    }
+  }, [pending, applyPreset, applyAsset]);
 
   const handleRotationChange = useCallback(
     (v: number) => {
@@ -99,6 +163,13 @@ const EnvironmentBrowser: React.FC<EnvironmentBrowserProps> = ({ onClose, onPres
     setEnvironment({ backplate: null, backplateOpacity: 1 });
   }, [setEnvironment]);
 
+  const handleBackplateOpacityChange = useCallback(
+    (v: number) => {
+      setEnvironment({ backplateOpacity: v });
+    },
+    [setEnvironment],
+  );
+
   const handleCustomUpload = useCallback(() => {
     fileInputRef.current?.click();
   }, []);
@@ -119,6 +190,8 @@ const EnvironmentBrowser: React.FC<EnvironmentBrowserProps> = ({ onClose, onPres
         // Create blob URL for 3D scene loading
         const url = URL.createObjectURL(file);
         setEnvironment({ hdri: url, presetId: '__custom__', showBackground: true });
+        originalRef.current = pickEnv();
+        setPending(null);
 
         // Also add to the HDRI asset store so it appears in the Environment panel
         try {
@@ -253,8 +326,19 @@ const EnvironmentBrowser: React.FC<EnvironmentBrowserProps> = ({ onClose, onPres
                   flexShrink: 0,
                 }}
               />
-              <div style={{ fontSize: 10, color: 'var(--text-sec)' }}>
-                Backplate active - shown as viewport background
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 2, flex: 1 }}>
+                <div style={{ fontSize: 10, color: 'var(--text-sec)' }}>
+                  Backplate active - shown as viewport background
+                </div>
+                <Slider
+                  label="Opacity"
+                  value={environment.backplateOpacity}
+                  min={0}
+                  max={1}
+                  step={0.01}
+                  onChange={handleBackplateOpacityChange}
+                  unit=""
+                />
               </div>
             </div>
           ) : null}
@@ -322,16 +406,12 @@ const EnvironmentBrowser: React.FC<EnvironmentBrowserProps> = ({ onClose, onPres
                 }}
               >
                 {hdriAssets.map((asset) => {
-                  const isActive = environment.presetId === '__custom__' && asset.active;
+                  const isActive = environment.presetId === '__custom__' && (pending?.kind === 'asset' ? pending.id === asset.id : asset.active);
                   return (
                     <div
                       key={asset.id}
-                      onClick={() => {
-                        useHDRIAssetStore.getState().selectAsset(asset.id);
-                        if (asset.blobUrl) {
-                          setEnvironment({ hdri: asset.blobUrl, presetId: '__custom__', showBackground: true });
-                        }
-                      }}
+                      onClick={() => previewAsset(asset)}
+                      onDoubleClick={() => applyAsset(asset)}
                       style={{
                         cursor: 'pointer',
                         borderRadius: 'var(--radius)',
@@ -383,7 +463,7 @@ const EnvironmentBrowser: React.FC<EnvironmentBrowserProps> = ({ onClose, onPres
           <div
             style={{
               display: 'grid',
-              gridTemplateColumns: 'repeat(auto-fill, minmax(110px, 1fr))',
+              gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))',
               gap: 8,
               overflowY: 'auto',
               flex: 1,
@@ -393,10 +473,26 @@ const EnvironmentBrowser: React.FC<EnvironmentBrowserProps> = ({ onClose, onPres
           >
             {filteredPresets.map((preset) => {
               const isActive = environment.presetId === preset.id;
+              if (ENV_CARDS[preset.id]) {
+                // designed card: the artwork is the whole tile (sphere render + name)
+                return (
+                  <div
+                    key={preset.id}
+                    className={`env-card ${isActive ? 'active' : ''}`}
+                    onClick={() => previewPreset(preset)}
+                    onDoubleClick={() => applyPreset(preset)}
+                    title={`${preset.name} - ${preset.description}`}
+                  >
+                    <img src={ENV_CARDS[preset.id]} alt={preset.name} draggable={false} />
+                    {isActive && <span className="env-check">&#10003;</span>}
+                  </div>
+                );
+              }
               return (
                 <div
                   key={preset.id}
-                  onClick={() => handlePresetClick(preset)}
+                  onClick={() => previewPreset(preset)}
+                  onDoubleClick={() => applyPreset(preset)}
                   style={{
                     cursor: 'pointer',
                     borderRadius: 'var(--radius)',
@@ -417,8 +513,10 @@ const EnvironmentBrowser: React.FC<EnvironmentBrowserProps> = ({ onClose, onPres
                   <div
                     style={{
                       width: '100%',
-                      height: 64,
-                      background: `linear-gradient(135deg, ${preset.thumbnailGradient[0]}, ${preset.thumbnailGradient[1]}, ${preset.thumbnailGradient[2]})`,
+                      aspectRatio: '16 / 9',
+                      background: thumbs[preset.id]
+                        ? `center / contain no-repeat url(${thumbs[preset.id]}), radial-gradient(circle at 50% 45%, ${preset.thumbnailGradient[1]}55 0%, #15171d 70%)`
+                        : `linear-gradient(135deg, ${preset.thumbnailGradient[0]}, ${preset.thumbnailGradient[1]}, ${preset.thumbnailGradient[2]})`,
                       position: 'relative',
                     }}
                   >
@@ -492,9 +590,19 @@ const EnvironmentBrowser: React.FC<EnvironmentBrowserProps> = ({ onClose, onPres
             {HDRI_PRESETS.length} built-in presets
             {hdriAssets.length > 0 && ` + ${hdriAssets.length} custom HDRI(s)`}
           </div>
-          <button className="btn-primary" onClick={onClose}>
-            Done
-          </button>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            {pending && (
+              <span style={{ fontSize: 10, color: 'var(--text-dim)' }}>
+                Previewing - not applied yet (double-click or Apply)
+              </span>
+            )}
+            <button className="btn-sm" onClick={applyPending} disabled={!pending} style={{ fontSize: 11, padding: '6px 16px' }}>
+              Apply
+            </button>
+            <button className="btn-primary" onClick={onClose}>
+              Done
+            </button>
+          </div>
         </div>
       </div>
     </div>

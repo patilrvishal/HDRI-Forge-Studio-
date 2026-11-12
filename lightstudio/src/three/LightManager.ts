@@ -167,6 +167,9 @@ export class LightManager {
     // Map brightness 0-1000 to intensity 0-10
     const intensity = (lightData.brightness / 1000) * 10;
     light.intensity = intensity;
+    // a rig light that has a shadow-casting companion hands part of its light to it (the area light itself cannot cast shadows)
+    const share = light.userData.shadowShare as number | undefined;
+    if (share) light.intensity = intensity * (1 - share);
 
     // Area / overhead lights: push the dimensions onto the actual THREE light
     if (light instanceof THREE.RectAreaLight) {
@@ -405,13 +408,18 @@ export class LightManager {
     return null;
   }
 
+  /** The three.js object of a light (so it can be placed in a hierarchy group). */
+  getLightObject(id: string): THREE.Object3D | null {
+    return this.lights.get(id)?.light ?? null;
+  }
+
   private removeLightFromScene(id: string, scene: THREE.Scene): void {
     const entry = this.lights.get(id);
     if (!entry) return;
 
     const { light, helper, target } = entry;
 
-    scene.remove(light);
+    light.removeFromParent();                       // the light may sit inside a rig group, not directly under the scene
     if (helper) {
       scene.remove(helper);
       helper.geometry.dispose();

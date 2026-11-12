@@ -1,9 +1,13 @@
 import * as THREE from 'three';
 import { RGBELoader } from 'three/addons/loaders/RGBELoader.js';
-import type { HDRIPreset, EnvPanel } from '../types/Environment';
+import { EXRLoader } from 'three/addons/loaders/EXRLoader.js';
+import { isEXRUrl } from '../utils/hdriFormat';
+import type { HDRIPreset } from '../types/Environment';
+import { buildPresetEnvScene } from './presetEnvScene';
 
 export class EnvironmentLoader {
   private rgbeLoader: RGBELoader;
+  private exrLoader: EXRLoader;
   private currentEnvTexture: THREE.Texture | null = null;
   /** The original equirectangular texture (used as scene.background for 360° backplate) */
   private currentEquirectTexture: THREE.Texture | null = null;
@@ -11,6 +15,7 @@ export class EnvironmentLoader {
 
   constructor() {
     this.rgbeLoader = new RGBELoader();
+    this.exrLoader = new EXRLoader();
   }
 
   /**
@@ -34,43 +39,15 @@ export class EnvironmentLoader {
       return this._createNullTexture();
     }
 
-    const envScene = new THREE.Scene();
-    envScene.background = new THREE.Color(preset.backgroundHint);
-
-    // Create emissive panels
-    for (const panel of preset.panels) {
-      this._addPanel(envScene, panel);
-    }
-
-    // Ground reflector
-    const groundGeo = new THREE.PlaneGeometry(20, 20);
-    const groundMat = new THREE.MeshBasicMaterial({
-      color: preset.groundColor ?? 0x333344,
-      side: THREE.DoubleSide,
-    });
-    const ground = new THREE.Mesh(groundGeo, groundMat);
-    ground.position.set(0, -2, 0);
-    ground.rotation.x = -Math.PI / 2;
-    envScene.add(ground);
-
-    // Ambient fill
-    if (preset.ambient) {
-      const ambient = new THREE.AmbientLight(preset.ambient.color, preset.ambient.intensity);
-      envScene.add(ambient);
-    }
-
-    // Apply rotation to the entire environment scene
-    if (rotationDeg !== 0) {
-      envScene.rotation.y = (rotationDeg * Math.PI) / 180;
-    }
+    const { scene: envScene, ground } = buildPresetEnvScene(preset, rotationDeg);
 
     // Bake through PMREMGenerator
     const renderTarget = pmremGenerator.fromScene(envScene, 0, 0.1, 100);
     const envTexture = renderTarget.texture;
 
     // Dispose helper geometries
-    groundGeo.dispose();
-    groundMat.dispose();
+    (ground.geometry as THREE.BufferGeometry).dispose();
+    (ground.material as THREE.Material).dispose();
     envScene.traverse((child) => {
       if (child instanceof THREE.Mesh && child !== ground) {
         child.geometry?.dispose();
@@ -89,14 +66,16 @@ export class EnvironmentLoader {
    * Returns the PMREM-processed texture for scene.environment.
    * Also stores the original equirectangular texture for use as scene.background.
    */
-  loadHDRI(
+  async loadHDRI(
     source: string | File,
     pmremGenerator: THREE.PMREMGenerator,
   ): Promise<THREE.Texture> {
-    return new Promise<THREE.Texture>((resolve, reject) => {
-      const url = typeof source === 'string' ? source : URL.createObjectURL(source);
+    const url = typeof source === 'string' ? source : URL.createObjectURL(source);
+    const isEXR = await isEXRUrl(url);
+    const loader = isEXR ? this.exrLoader : this.rgbeLoader;
 
-      this.rgbeLoader.load(
+    return new Promise<THREE.Texture>((resolve, reject) => {
+      loader.load(
         url,
         (texture) => {
           texture.mapping = THREE.EquirectangularReflectionMapping;
@@ -237,29 +216,5 @@ export class EnvironmentLoader {
     const tex = new THREE.CanvasTexture(canvas);
     tex.needsUpdate = true;
     return tex;
-  }
-
-  private _addPanel(envScene: THREE.Scene, panel: EnvPanel): void {
-    const geo = new THREE.PlaneGeometry(panel.size[0], panel.size[1]);
-    const mat = new THREE.MeshBasicMaterial({
-      color: panel.color,
-      side: THREE.DoubleSide,
-    });
-    // Scale brightness via color intensity — multiply by intensity
-    const color = new THREE.Color(panel.color);
-    color.multiplyScalar(panel.intensity);
-    mat.color = color;
-
-    const mesh = new THREE.Mesh(geo, mat);
-    mesh.position.set(panel.position[0], panel.position[1], panel.position[2]);
-
-    if (panel.rotationX !== undefined) {
-      mesh.rotation.x = panel.rotationX;
-    }
-    if (panel.rotationY !== undefined) {
-      mesh.rotation.y = panel.rotationY;
-    }
-
-    envScene.add(mesh);
   }
 }

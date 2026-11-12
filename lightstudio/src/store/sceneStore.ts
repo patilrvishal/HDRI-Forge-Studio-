@@ -17,6 +17,10 @@ interface SceneStore extends SceneState {
   // Transient: which loader to run the pending model through - 'glb' (default,
   // e.g. Blender's export) or 'obj' (e.g. Maya, which has no native glTF export)
   _pendingModelFormat: 'glb' | 'obj';
+  // Transient: extra model files (File > Import Models) from a scene file restore
+  _pendingImportedModels: { name: string; dataBase64: string }[] | null;
+  // Transient: the restored imports ARE the whole scene (the file has no main model), so they replace the open model
+  _pendingImportedReplace: boolean;
   // Transient: pending custom HDRI data (base64) from scene file restore
   _pendingHDRIDataBase64: string | null;
   _pendingHDRIFileName: string;
@@ -40,6 +44,7 @@ interface SceneStore extends SceneState {
   setRenderSettings: (settings: Partial<SceneState['renderSettings']>) => void;
   setBloom: (bloom: Partial<SceneState['renderSettings']['bloom']>) => void;
   setAO: (ao: Partial<SceneState['renderSettings']['ao']>) => void;
+  setGI: (gi: Partial<SceneState['renderSettings']['gi']>) => void;
   setGround: (ground: Partial<SceneState['renderSettings']['ground']>) => void;
   setExposure: (exposure: number) => void;
   setVignette: (vignette: Partial<SceneState['renderSettings']['vignette']>) => void;
@@ -64,6 +69,8 @@ interface SceneStore extends SceneState {
   // Model data restore
   setPendingModelData: (base64: string | null, fileName: string, skipFit?: boolean, format?: 'glb' | 'obj') => void;
   clearPendingModelData: () => void;
+  setPendingImportedModels: (models: { name: string; dataBase64: string }[] | null, replaceExisting?: boolean) => void;
+  clearPendingImportedModels: () => void;
   // HDRI data restore
   setPendingHDRIData: (base64: string | null, fileName: string) => void;
   clearPendingHDRIData: () => void;
@@ -76,6 +83,8 @@ export const useSceneStore = create<SceneStore>((set, get) => ({
   _pendingModelFileName: 'model.glb',
   _pendingModelSkipFit: false,
   _pendingModelFormat: 'glb',
+  _pendingImportedModels: null,
+  _pendingImportedReplace: false,
   _pendingHDRIDataBase64: null,
   _pendingHDRIFileName: 'custom.hdr',
 
@@ -150,6 +159,16 @@ export const useSceneStore = create<SceneStore>((set, get) => ({
       renderSettings: {
         ...state.renderSettings,
         ao: { ...state.renderSettings.ao, ...ao },
+      },
+    }));
+  },
+
+  setGI: (gi) => {
+    history.recordThrottled('Change Global Illumination');
+    set((state) => ({
+      renderSettings: {
+        ...state.renderSettings,
+        gi: { ...state.renderSettings.gi, ...gi },
       },
     }));
   },
@@ -253,6 +272,7 @@ export const useSceneStore = create<SceneStore>((set, get) => ({
         ...newState.renderSettings,
         bloom: { ...DEFAULT_RENDER_SETTINGS.bloom, ...newState.renderSettings.bloom },
         ao: { ...DEFAULT_RENDER_SETTINGS.ao, ...newState.renderSettings.ao },
+        gi: { ...DEFAULT_RENDER_SETTINGS.gi, ...(newState.renderSettings as Partial<RenderSettings>).gi },
         ground: { ...DEFAULT_RENDER_SETTINGS.ground, ...(newState.renderSettings as Partial<RenderSettings>).ground },
         vignette: { ...DEFAULT_RENDER_SETTINGS.vignette, ...newState.renderSettings.vignette },
         colorGrading: { ...DEFAULT_RENDER_SETTINGS.colorGrading, ...newState.renderSettings.colorGrading },
@@ -270,6 +290,11 @@ export const useSceneStore = create<SceneStore>((set, get) => ({
     set({ _pendingModelDataBase64: base64, _pendingModelFileName: fileName, _pendingModelSkipFit: skipFit, _pendingModelFormat: format });
   },
 
+  setPendingImportedModels: (models, replaceExisting = false) =>
+    set({ _pendingImportedModels: models, _pendingImportedReplace: replaceExisting }),
+
+  clearPendingImportedModels: () => set({ _pendingImportedModels: null, _pendingImportedReplace: false }),
+
   clearPendingModelData: () => {
     set({ _pendingModelDataBase64: null, _pendingModelFileName: 'model.glb', _pendingModelSkipFit: false, _pendingModelFormat: 'glb' });
   },
@@ -282,3 +307,6 @@ export const useSceneStore = create<SceneStore>((set, get) => ({
     set({ _pendingHDRIDataBase64: null, _pendingHDRIFileName: 'custom.hdr' });
   },
 }));
+if (import.meta.env.DEV && typeof window !== 'undefined') {
+  (window as unknown as { __sceneStore?: unknown }).__sceneStore = useSceneStore;
+}

@@ -2,7 +2,7 @@ import React, { useRef, useState, useCallback, useEffect } from 'react';
 import { TopMenubar } from '../Toolbar/TopMenubar';
 import { LeftToolbar } from '../Toolbar/LeftToolbar';
 import { Viewport } from '../Viewport/Viewport';
-import { LightListPanel } from '../Lights/LightListPanel';
+import { HdrlsLeftColumn } from './HdrlsLeftColumn';
 import { LightProfileGrid } from '../Lights/LightProfileGrid';
 import { DynamicPropertiesPanel } from '../Properties/DynamicPropertiesPanel';
 import { PresetBrowser } from '../Presets/PresetBrowser';
@@ -13,6 +13,7 @@ import { ViewportDesignPanel } from '../Viewport/ViewportDesignPanel';
 import { RenderSettingsPanel } from '../Settings/RenderSettingsPanel';
 import { ResizeHandle } from '../UI/ResizeHandle';
 import { ErrorBoundary } from '../UI/ErrorBoundary';
+import { ConfirmPromptModal } from '../UI/ConfirmPromptModal';
 import { useUIStore, type PanelKey } from '../../store/uiStore';
 import { useSceneStore } from '../../store/sceneStore';
 import { useLightsStore } from '../../store/lightsStore';
@@ -20,6 +21,7 @@ import { useHDRIShapesStore } from '../../store/hdriShapesStore';
 import { useUILayoutStore } from '../../store/uiLayoutStore';
 import { useHistoryStore } from '../../store/historyStore';
 import { useKeyboardShortcuts } from '../../hooks/useKeyboardShortcuts';
+import { saveScene, saveSceneAs } from '../../utils/sceneFiles';
 import { CameraPanel } from '../Viewport/CameraPanel';
 import { useSceneHierarchyStore } from '../../store/sceneHierarchyStore';
 
@@ -46,6 +48,8 @@ function SceneCameraSlot() {
 }
 import { GradientBackgroundPanel } from '../Environment/GradientBackgroundPanel';
 import { HDRIPreviewPanel } from '../HDRI/HDRIPreviewPanel';
+import { CanvasPanel } from '../Canvas/CanvasPanel';
+import { PresetLibrary } from '../Appearance/PresetLibrary';
 import { ExportDialog } from '../Export/ExportDialog';
 import { FinalRenderPanel } from '../Export/FinalRenderPanel';
 import { EnvironmentBrowser } from '../Environment/EnvironmentBrowser';
@@ -56,6 +60,8 @@ import { SceneManager, RenderPipeline } from '../../three/engine';
 import { SceneExporter } from '../../three/SceneExporter';
 import { MaterialManager } from '../../three/MaterialManager';
 import * as THREE from 'three';
+import { useEditedEnvSync } from '../../hdriedit/viewportEnv';
+import { useAreaLightShortcut } from '../Lights/useAreaLightShortcut';
 
 
 /** Inline wrapper: Light Profile grid section below the light list */
@@ -70,10 +76,39 @@ const LightProfileSection: React.FC = () => {
     <div className="light-profile-section">
       <div className="light-profile-section-title">Light Profiles</div>
       <LightProfileGrid
-        lights={lights.map((l) => ({ id: l.id, type: l.type, color: l.color, name: l.name }))}
+        lights={lights.map((l) => ({ id: l.id, type: l.type, color: l.color, name: l.name, appearance: l.appearance, aspect: (l.areaWidth ?? 2) / Math.max(0.01, l.areaHeight ?? 2) }))}
         selectedLightId={selectedLightId}
         onSelectLight={selectLight}
       />
+    </div>
+  );
+};
+
+/** Preset Library: click a preset to add a light that looks like it. */
+const LightPresetLibrarySection: React.FC = () => {
+  const [open, setOpen] = useState(true);
+  return (
+    <div className="light-profile-section">
+      <div className="light-profile-section-title" style={{ cursor: 'pointer' }} onClick={() => setOpen((o) => !o)}>
+        Preset Library {open ? '▾' : '▸'}
+      </div>
+      {open && (
+        <div style={{ padding: '0 6px 6px' }}>
+          <PresetLibrary
+            compact
+            onApply={(a, asp) => {
+              const st = useLightsStore.getState();
+              st.addLight('area');
+              const created = useLightsStore.getState().lights.slice(-1)[0];
+              if (!created) return;
+              const area = 4;
+              const w = Math.min(20, Math.max(0.1, +Math.sqrt(area * asp).toFixed(2)));
+              st.updateLight(created.id, { name: a.name, appearance: a, areaWidth: w, areaHeight: Math.min(20, Math.max(0.1, +(area / w).toFixed(2))) });
+              st.selectLight(created.id);
+            }}
+          />
+        </div>
+      )}
     </div>
   );
 };
@@ -94,6 +129,8 @@ const PanelCloseButton: React.FC<{ panel: PanelKey }> = ({ panel }) => (
 );
 
 export const AppLayout: React.FC = () => {
+  useEditedEnvSync();
+  useAreaLightShortcut();
   const sceneManagerRef = useRef<SceneManager | null>(null);
   const sceneRef = useRef<THREE.Scene | null>(null);
   const envMapRef = useRef<THREE.Texture | null>(null);
@@ -133,7 +170,7 @@ export const AppLayout: React.FC = () => {
   const viewportDesignVisible = panelVisibility.viewportDesign;
 
   // Bottom panel: side-by-side tabs (mutually exclusive)
-  const [bottomTab, setBottomTab] = useState<'hdri' | 'presets' | 'customHdri'>('hdri');
+  const [bottomTab, setBottomTab] = useState<'hdri' | 'canvas' | 'presets' | 'customHdri'>('canvas');
 
   // History state for status bar
   const undoCount = useHistoryStore((s) => s.undoStack.length);
@@ -142,10 +179,16 @@ export const AppLayout: React.FC = () => {
   const [rightTab, setRightTab] = useState<'properties' | 'preview' | 'material' | 'matEdit'>('properties');
   const storeRightTab = useUIStore((s) => s.rightPanelTab);
 
+  /** A tab picked by hand is mirrored into the store, so a later viewport click that asks for the same tab still switches to it. */
+  const pickRightTab = (t: 'properties' | 'preview' | 'material' | 'matEdit') => {
+    setRightTab(t);
+    useUIStore.getState().setRightPanelTab(t);
+  };
+
   // Sync right tab from store (e.g. viewport click sets it to 'matEdit')
   useEffect(() => {
     if (storeRightTab && storeRightTab !== rightTab) {
-      setRightTab(storeRightTab);
+      setRightTab(storeRightTab === 'preview' ? 'properties' : storeRightTab);
     }
   }, [storeRightTab]);
   const [, setScreenshotUrl] = useState<string | null>(null);
@@ -196,23 +239,12 @@ export const AppLayout: React.FC = () => {
   // Keyboard shortcuts
   useKeyboardShortcuts({
     onSave: () => {
-      // Ctrl+S must do what the Project menu advertises next to this shortcut:
-      // write an actual scene FILE. It previously ran quickSave(), which only
-      // touched localStorage - invisible on success, and silently dropped
-      // entirely once an embedded model pushed it past the storage quota, so
-      // Ctrl+S looked completely dead.
-      const ui = useUIStore.getState();
-      try {
-        const data = SceneExporter.exportScene();
-        SceneExporter.downloadSceneFile(data);
-        // Keep the session-recovery copy too, best-effort.
-        SceneExporter.quickSave();
-        ui.showToast('Scene saved', 'success');
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : 'Unknown error';
-        console.error('[LightForge] Save failed:', err);
-        ui.showToast(`Save failed: ${msg}`, 'error');
-      }
+      // Ctrl+S runs the same Save as the Project menu: overwrite the file saved or opened last
+      // (after asking), or open Save As for a scene that has never been saved.
+      void saveScene();
+    },
+    onSaveAs: () => {
+      void saveSceneAs();
     },
     onOpen: () => {
       const ui = useUIStore.getState();
@@ -436,6 +468,8 @@ export const AppLayout: React.FC = () => {
             className="panel panel-glow border-light-effect"
             style={{
               width: leftPanelWidth,
+              height: '100%',
+              minHeight: 0,
               flexShrink: 0,
               overflow: 'hidden',
               borderRight: 'none',
@@ -443,82 +477,10 @@ export const AppLayout: React.FC = () => {
               flexDirection: 'column',
             }}
           >
-            <div className="panel-header">
-              <h3>
-                <svg width="10" height="10" viewBox="0 0 10 10" fill="currentColor" style={{ opacity: 0.6 }}>
-                  <circle cx="5" cy="5" r="3" />
-                </svg>
-                {leftTab === 'lights' ? 'Lights & Shapes' : leftTab === 'environment' ? 'Environment' : 'Scene Hierarchy'}
-              </h3>
-              <div style={{ display: 'flex', gap: 2, alignItems: 'center' }}>
-                {leftTab === 'lights' && (
-                  <>
-                    <button
-                      className="btn-icon"
-                      style={{ width: 20, height: 20 }}
-                      onClick={() => useLightsStore.getState().addLight()}
-                      title="Add Light"
-                      aria-label="Add Light"
-                    >
-                      <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5">
-                        <path d="M6 1v10M1 6h10" />
-                      </svg>
-                    </button>
-                    <button
-                      className="btn-icon"
-                      style={{ width: 20, height: 20 }}
-                      onClick={() => useHDRIShapesStore.getState().addShape('rectangle')}
-                      title="Add HDRI Shape"
-                      aria-label="Add HDRI Shape"
-                    >
-                      <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5">
-                        <rect x="1.5" y="2.5" width="9" height="7" rx="1" />
-                      </svg>
-                    </button>
-                  </>
-                )}
-                <PanelCloseButton panel="leftPanel" />
-              </div>
-            </div>
-
-            {/* Tab bar */}
-            <div className="tab-bar tab-bar-purple" style={{ flexShrink: 0 }}>
-              {(['lights', 'environment', 'scene'] as const).map((tab) => (
-                <button
-                  key={tab}
-                  className={`tab-item ${leftTab === tab ? 'active' : ''}`}
-                  onClick={() => setLeftTab(tab)}
-                  style={{ flex: 1, justifyContent: 'center' }}
-                >
-                  {tab === 'lights' ? 'Lights' : tab === 'environment' ? 'Env' : 'Scene'}
-                </button>
-              ))}
-            </div>
-
-            {/* Tab content */}
-            <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-              {leftTab === 'lights' ? (
-                <>
-                  <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
-                    <LightListPanel />
-                  </div>
-                  <LightProfileSection />
-                </>
-              ) : leftTab === 'environment' ? (
-                <>
-                  <EnvironmentAssetsPanel />
-                  <div style={{ borderTop: '1px solid var(--border)', marginTop: 8, paddingTop: 8 }}>
-                    <GradientBackgroundPanel />
-                  </div>
-                </>
-              ) : (
-                <ErrorBoundary>
-                  <SceneHierarchy sceneRef={sceneRef} />
-                  <div style={{ borderTop: '1px solid var(--border)', marginTop: 8, paddingTop: 8 }}>
-                    <SceneCameraSlot />
-                  </div>
-                </ErrorBoundary>
-              )}
+            <div style={{ flex: 1, minHeight: 0 }}>
+              <ErrorBoundary>
+                <HdrlsLeftColumn sceneRef={sceneRef} onGenerateThumbnail={handleGenerateThumbnail} />
+              </ErrorBoundary>
             </div>
           </div>
         </div>
@@ -530,9 +492,9 @@ export const AppLayout: React.FC = () => {
             side="left"
             onResize={(newSize) => setLeftPanelWidth(newSize)}
             getCurrentSize={() => leftPanelWidth}
-            minSize={150}
-            maxSize={500}
-            onDoubleClick={() => setLeftPanelWidth(220)}
+            minSize={260}
+            maxSize={600}
+            onDoubleClick={() => setLeftPanelWidth(340)}
           />
         )}
 
@@ -578,9 +540,9 @@ export const AppLayout: React.FC = () => {
               side="top"
               onResize={(newSize) => setBottomPanelHeight(newSize)}
               getCurrentSize={() => bottomPanelHeight}
-              minSize={100}
-              maxSize={400}
-              onDoubleClick={() => setBottomPanelHeight(240)}
+              minSize={120}
+              maxSize={700}
+              onDoubleClick={() => setBottomPanelHeight(380)}
             />
           )}
 
@@ -622,6 +584,12 @@ export const AppLayout: React.FC = () => {
                     HDRI Preview
                   </div>
                   <div
+                    className={`tab-item ${bottomTab === 'canvas' ? 'active' : ''}`}
+                    onClick={() => setBottomTab('canvas')}
+                  >
+                    Canvas
+                  </div>
+                  <div
                     className={`tab-item ${bottomTab === 'presets' ? 'active' : ''}`}
                     onClick={() => setBottomTab('presets')}
                   >
@@ -642,6 +610,7 @@ export const AppLayout: React.FC = () => {
               {/* Tab content - mutually exclusive, full width */}
               <div style={{ flex: 1, overflow: 'hidden' }}>
                 {bottomTab === 'hdri' && <HDRIPreviewPanel />}
+                {bottomTab === 'canvas' && <CanvasPanel />}
                 {bottomTab === 'presets' && <PresetBrowser onGenerateThumbnail={handleGenerateThumbnail} />}
                 {bottomTab === 'customHdri' && <EnvironmentAssetsPanel />}
               </div>
@@ -677,11 +646,24 @@ export const AppLayout: React.FC = () => {
             className="panel panel-glow border-light-effect properties-card-frame"
             style={{
               width: rightPanelWidth,
+              height: '100%',
+              minHeight: 0,
               flexShrink: 0,
-              overflow: 'hidden',
+              // clip (not hidden): same visual clipping, but the browser can't scroll this box sideways
+              // to reveal a focused value box (the header tab bar is wider than the panel)
+              overflow: 'clip',
               borderLeft: 'none',
+              display: 'flex',
+              flexDirection: 'column',
             }}
           >
+            {/* Light Preview: always visible on top, like HDR Light Studio */}
+            <div style={{ height: '36%', minHeight: 190, maxHeight: 420, flexShrink: 0, overflow: 'hidden', borderBottom: '2px solid var(--border-light)' }}>
+              <ErrorBoundary>
+                <LightPreview />
+              </ErrorBoundary>
+            </div>
+
             {/* Tab bar with close button */}
             <div
               style={{
@@ -695,26 +677,20 @@ export const AppLayout: React.FC = () => {
               <div className="tab-bar tab-bar-purple" style={{ flex: 1, background: 'none', boxShadow: 'none' }}>
                 <div
                   className={`tab-item ${rightTab === 'properties' ? 'active' : ''}`}
-                  onClick={() => setRightTab('properties')}
+                  onClick={() => pickRightTab('properties')}
                 >
                   <CubeIcon />
-                  Properties
-                </div>
-                <div
-                  className={`tab-item ${rightTab === 'preview' ? 'active' : ''}`}
-                  onClick={() => setRightTab('preview')}
-                >
-                  Light Prev
+                  Light Properties
                 </div>
                 <div
                   className={`tab-item ${rightTab === 'material' ? 'active' : ''}`}
-                  onClick={() => setRightTab('material')}
+                  onClick={() => pickRightTab('material')}
                 >
                   Material
                 </div>
                 <div
                   className={`tab-item ${rightTab === 'matEdit' ? 'active' : ''}`}
-                  onClick={() => setRightTab('matEdit')}
+                  onClick={() => pickRightTab('matEdit')}
                 >
                   Mat Edit
                 </div>
@@ -725,17 +701,12 @@ export const AppLayout: React.FC = () => {
             </div>
 
             {/* Tab content */}
-            <div className="panel-body" style={{ overflow: 'hidden', padding: 0, display: 'flex', flexDirection: 'column' }}>
+            <div className="panel-body" style={{ overflow: 'hidden', padding: 0, display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
               {rightTab === 'properties' && (
-                <div className="glossy-3d-trial" style={{ flex: 1, overflow: 'hidden' }}>
+                <div className="glossy-3d-trial" style={{ flex: 1, minHeight: 0, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
                   <ErrorBoundary>
                     <DynamicPropertiesPanel sceneRef={sceneRef} />
                   </ErrorBoundary>
-                </div>
-              )}
-              {rightTab === 'preview' && (
-                <div style={{ flex: 1, overflow: 'hidden' }}>
-                  <LightPreview />
                 </div>
               )}
               {rightTab === 'material' && (
@@ -781,7 +752,7 @@ export const AppLayout: React.FC = () => {
           </span>
         </div>
         <div style={{ display: 'flex', gap: 12 }}>
-          <span>LightForge Studio <span style={{ color: 'var(--accent)' }}>v2.0</span></span>
+          <span>HDRI Forge Studio <span style={{ color: 'var(--accent)' }}>v2.0</span></span>
           <span>Phase 12</span>
         </div>
       </div>
@@ -816,30 +787,44 @@ export const AppLayout: React.FC = () => {
             position: 'fixed',
             inset: 0,
             background: 'rgba(0,0,0,0.6)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
             zIndex: 9999,
           }}
           onClick={() => setAboutModal(false)}
         >
+          {/* top/left 50% + translate, not flex-centering - see the
+              ConfirmPromptModal comment for why (invisible in WebView2). */}
           <div
-            className="context-menu"
             style={{
+              position: 'fixed',
+              top: '50%',
+              left: '50%',
+              transform: 'translate(-50%, -50%)',
               minWidth: 260,
               padding: 16,
               textAlign: 'center',
+              background: 'var(--bg-elevated)',
+              border: '1px solid var(--border-light)',
+              borderRadius: 'var(--radius)',
+              boxShadow: '0 12px 36px rgba(0,0,0,0.55)',
+              zIndex: 10000,
             }}
             onClick={(e) => e.stopPropagation()}
           >
+            <img
+              src="/logo-mark.png"
+              alt="HDRI Forge Studio"
+              width={56}
+              height={56}
+              style={{ borderRadius: 10, display: 'block', margin: '0 auto 10px' }}
+            />
             <div style={{ fontSize: 16, fontWeight: 700, background: 'var(--neon-gradient)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent', marginBottom: 4 }}>
-              LightForge Studio
+              HDRI Forge Studio
             </div>
             <div style={{ fontSize: 11, color: 'var(--text-sec)', marginBottom: 8 }}>
-              3D Car Lighting Studio
+              HDRI Lighting & Angle Hunt Studio
             </div>
             <div style={{ fontSize: 10, color: 'var(--text-dim)' }}>
-              Version 1.0.0
+              Version 2.1.0
             </div>
             <button
               className="btn-primary"
@@ -854,6 +839,9 @@ export const AppLayout: React.FC = () => {
 
       {/* Manual / Documentation Modal */}
       {manualModalOpen && <ManualWindow onClose={() => setManualModal(false)} />}
+
+      {/* Confirm/prompt dialogs - see uiStore.requestConfirm/requestPrompt */}
+      <ConfirmPromptModal />
 
       {/* Transient status toast (save / load / export feedback) */}
       <StatusToast />

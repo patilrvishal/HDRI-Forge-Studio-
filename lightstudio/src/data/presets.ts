@@ -1,5 +1,5 @@
 /**
- * Complete built-in light preset definitions for LightForge Studio.
+ * Complete built-in light preset definitions for HDRI Forge Studio.
  *
  * Categories:
  *   Studio   (6 presets)  — controlled studio environments
@@ -18,7 +18,7 @@ type LT = PresetLight['type'];
 type CP = PresetLight['colorProfile'];
 type FF = PresetLight['falloff'];
 
-function pl(
+export function pl(
   name: string,
   type: LT,
   color: string,
@@ -56,13 +56,23 @@ function pl(
         repeat: false,
         advanced: { lR: 0, p1: 0, p2: 0, p3: 0, rR: 0, ro: 0, roat: 0 },
       },
-      maisleU: 0,
-      mendieV: 0,
-      smartGolly: 0,
-      dailyMultiplier: 1,
     },
     ...opts,
   };
+}
+
+/** Area light hung at the given spot, facing down (width along X, depth along Z). */
+function plDown(name: string, color: string, brightness: number, lng: number, height: number, radius: number, w: number, d: number): PresetLight {
+  const l = pl(name, 'area', color, brightness, 0, lng, height, radius, { areaLight: true, falloff: 'linear', areaWidth: w, areaHeight: d, edgeSoftness: 60 });
+  l.transform = { ...l.transform, rotation: { ...l.transform.rotation, x: -90, y: 0, z: 0, enabled: true } };
+  return l;
+}
+
+/** Area light aimed by hand: rotated about the vertical axis by yawDeg (a light emits along its own -Z). */
+function plAim(name: string, color: string, brightness: number, lng: number, height: number, radius: number, w: number, h: number, yawDeg: number): PresetLight {
+  const l = pl(name, 'area', color, brightness, 0, lng, height, radius, { areaLight: true, falloff: 'linear', areaWidth: w, areaHeight: h, edgeSoftness: 35 });
+  l.transform = { ...l.transform, rotation: { ...l.transform.rotation, x: 0, y: yawDeg, z: 0, enabled: true } };
+  return l;
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -84,10 +94,11 @@ export const STUDIO_PRESETS: PresetLight[][] = [
   ],
   // 3. High Key White
   [
-    pl('Left Panel', 'area', '#ffffff', 280, 30, 210, 2.5, 5, { areaLight: true, falloff: 'linear' }),
-    pl('Right Panel', 'area', '#ffffff', 280, 30, 330, 2.5, 5, { areaLight: true, falloff: 'linear' }),
-    pl('Top Panel', 'area', '#ffffff', 200, 90, 0, 5.5, 3, { areaLight: true, falloff: 'linear' }),
-    pl('Front Fill', 'area', '#ffffff', 120, 20, 0, 1.5, 5, { areaLight: true, falloff: 'linear' }),
+    // built to the rig sheet: two rounded ceiling soft panels and two 1.2 m softboxes at 45 degrees
+    plDown('Ceiling Panel Large', '#ffffff', 120, 0, 2.85, 0.5, 3.4, 1.7),
+    plDown('Ceiling Panel Medium', '#ffffff', 120, 180, 2.28, 0.4, 2.4, 1.3),
+    plAim('Softbox Left', '#ffffff', 80, 256, 1.45, 2.886, 1.2, 1.2, -135),
+    plAim('Softbox Right', '#ffffff', 80, 104, 1.45, 2.886, 1.2, 1.2, 135),
   ],
   // 4. Low Key Dramatic
   [

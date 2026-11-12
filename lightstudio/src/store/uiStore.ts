@@ -48,6 +48,14 @@ interface UIState {
   envBrowserModalOpen: boolean;
   manualModalOpen: boolean;
 
+  /** Imperative confirm()/prompt() replacements - window.confirm/prompt are
+   *  not supported in the packaged desktop app's WebView2 runtime (they
+   *  silently no-op there), so anything that needs a blocking yes/no or
+   *  text-entry dialog goes through these instead of the native browser
+   *  ones. null when no dialog is open. */
+  confirmDialog: { message: string; confirmLabel?: string; resolve: (ok: boolean) => void } | null;
+  promptDialog: { message: string; defaultValue: string; resolve: (value: string | null) => void } | null;
+
   // Tools
   activeTool: ActiveTool;
   gridSnapEnabled: boolean;
@@ -100,6 +108,18 @@ interface UIState {
   setEnvBrowserModal: (open: boolean) => void;
   setManualModal: (open: boolean) => void;
 
+  /** Opens a yes/no dialog and resolves once the user picks - await it
+   *  exactly like the old `if (!confirm(...)) return;`. */
+  requestConfirm: (message: string, confirmLabel?: string) => Promise<boolean>;
+  /** Resolves the open confirm dialog (called by ConfirmPromptModal). */
+  resolveConfirm: (ok: boolean) => void;
+  /** Opens a text-entry dialog pre-filled with defaultValue and resolves
+   *  with the entered text, or null if cancelled - await it like the old
+   *  `prompt(message, defaultValue)`. */
+  requestPrompt: (message: string, defaultValue?: string) => Promise<string | null>;
+  /** Resolves the open prompt dialog (called by ConfirmPromptModal). */
+  resolvePrompt: (value: string | null) => void;
+
   // Tools & Layout
   setActiveTool: (tool: ActiveTool) => void;
   toggleGridSnap: () => void;
@@ -150,6 +170,8 @@ export const useUIStore = create<UIState>((set, get) => ({
   aboutModalOpen: false,
   envBrowserModalOpen: false,
   manualModalOpen: false,
+  confirmDialog: null,
+  promptDialog: null,
   activeTool: 'select',
   gridSnapEnabled: false,
   toast: null,
@@ -310,6 +332,27 @@ export const useUIStore = create<UIState>((set, get) => ({
   setAboutModal: (open) => set({ aboutModalOpen: open }),
   setEnvBrowserModal: (open) => set({ envBrowserModalOpen: open }),
   setManualModal: (open) => set({ manualModalOpen: open }),
+
+  requestConfirm: (message, confirmLabel) =>
+    new Promise<boolean>((resolve) => {
+      // Resolve any dialog left open by a caller that never awaited its own
+      // result (shouldn't happen, but leaves no dangling Promise if it does).
+      get().confirmDialog?.resolve(false);
+      set({ confirmDialog: { message, confirmLabel, resolve } });
+    }),
+  resolveConfirm: (ok) => {
+    get().confirmDialog?.resolve(ok);
+    set({ confirmDialog: null });
+  },
+  requestPrompt: (message, defaultValue = '') =>
+    new Promise<string | null>((resolve) => {
+      get().promptDialog?.resolve(null);
+      set({ promptDialog: { message, defaultValue, resolve } });
+    }),
+  resolvePrompt: (value) => {
+    get().promptDialog?.resolve(value);
+    set({ promptDialog: null });
+  },
 
   // ── Tools & Layout ────────────────────────────────────────────
   setActiveTool: (tool) => set({ activeTool: tool }),

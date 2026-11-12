@@ -12,19 +12,19 @@ interface UILayoutStore {
 }
 
 const DEFAULTS = {
-  leftPanelWidth: 220,
-  rightPanelWidth: 320,
-  bottomPanelHeight: 240,
+  leftPanelWidth: 340,
+  rightPanelWidth: 380,
+  bottomPanelHeight: 380,
 };
 
 export const useUILayoutStore = create<UILayoutStore>((set) => ({
   ...DEFAULTS,
 
   setLeftPanelWidth: (width) =>
-    set({ leftPanelWidth: Math.max(150, Math.min(500, width)) }),
+    set({ leftPanelWidth: Math.max(260, Math.min(600, width)) }),
   setRightPanelWidth: (width) =>
     set({ rightPanelWidth: Math.max(200, Math.min(600, width)) }),
   setBottomPanelHeight: (height) =>
-    set({ bottomPanelHeight: Math.max(120, Math.min(500, height)) }),
+    set({ bottomPanelHeight: Math.max(120, Math.min(700, height)) }),
   resetToDefaults: () => set(DEFAULTS),
 }));

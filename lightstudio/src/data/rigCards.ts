@@ -1,0 +1,21 @@
+/** Designed card artwork (picture, name and light count) for the built-in Studio rigs, keyed by preset name. */
+export const RIG_CARDS: Record<string, string> = {
+  '3-Point Classic': '/rigcards/3_point_classic.png',
+  'Beauty Soft': '/rigcards/beauty_soft.png',
+  'High Key White': '/rigcards/high_key_white.png',
+  'Low Key Dramatic': '/rigcards/low_key_dramatic.png',
+  'Fashion Editorial': '/rigcards/fashion_editorial.png',
+  'Product Hero': '/rigcards/product_hero.png',
+  'Twin Softboxes': '/rigcards/twin_softboxes.png',
+  'Strip Tunnel': '/rigcards/strip_tunnel.png',
+  'Panel Ring': '/rigcards/panel_ring.png',
+  'Cyc Wall White': '/rigcards/cyc_wall_white.png',
+  'Clamshell': '/rigcards/clamshell.png',
+  'Butterfly': '/rigcards/butterfly.png',
+  'Rembrandt': '/rigcards/rembrandt.png',
+  'Gradient Room': '/rigcards/gradient_room.png',
+  'Octa Overhead': '/rigcards/octa_overhead.png',
+  'Wide Front Wash': '/rigcards/wide_front_wash.png',
+  'Light Grid': '/rigcards/light_grid.png',
+  'Rim Only': '/rigcards/rim_only.png',
+};

@@ -18,6 +18,7 @@ interface KeyboardShortcutCallbacks {
   setViewMode?: (mode: string) => void;
   /** Cycle the selected light forward (1) or backward (-1) through the light list. */
   cycleLight?: (direction: 1 | -1) => void;
+  onSaveAs?: () => void;
 }
 
 export function useKeyboardShortcuts(callbacks: KeyboardShortcutCallbacks): void {
@@ -35,7 +36,8 @@ export function useKeyboardShortcuts(callbacks: KeyboardShortcutCallbacks): void
         switch (e.key.toLowerCase()) {
           case 's':
             e.preventDefault();
-            callbacks.onSave?.();
+            if (e.shiftKey) callbacks.onSaveAs?.();
+            else callbacks.onSave?.();
             return;
           case 'o':
             e.preventDefault();
@@ -136,7 +138,7 @@ export function useKeyboardShortcuts(callbacks: KeyboardShortcutCallbacks): void
           callbacks.setActiveTool?.('rotate');
           break;
         case 's':
-          callbacks.setActiveTool?.('select');
+          callbacks.setActiveTool?.('scale');
           break;
         case 'f':
           callbacks.onFrameAll?.();

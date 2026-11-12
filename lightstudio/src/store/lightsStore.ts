@@ -2,11 +2,15 @@ import { create } from 'zustand';
 import type { Light } from '../types/Light';
 import { createDefaultLight, LIGHT_TEMPLATES } from '../types/Light';
 import { history } from './historyStore';
+import type { CompositeSettings, LightCollection } from '../types/Composite';
+import { defaultComposite } from '../types/Composite';
 
 interface LightsState {
   lights: Light[];
   selectedLightId: string | null;
-  collections: { id: string; name: string }[];
+  /** A Composite selected in the light list (its controls show in Properties). */
+  selectedCompositeId: string | null;
+  collections: LightCollection[];
   collectionFilter: string | null; // null = "All Lights"
 
   addLight: (templateKey?: string) => void;
@@ -15,6 +19,14 @@ interface LightsState {
   updateLight: (id: string, updates: Partial<Light>) => void;
   updateLightTransform: (id: string, transformUpdates: Partial<Light['transform']>) => void;
   selectLight: (id: string | null) => void;
+  selectComposite: (id: string | null) => void;
+  /** Merge lights into a new Composite; returns its id. */
+  mergeToComposite: (lightIds: string[], name?: string) => string | null;
+  /** Take a light out of its Composite. */
+  releaseFromComposite: (lightId: string) => void;
+  /** Delete a Composite, releasing its lights. */
+  dissolveComposite: (collectionId: string) => void;
+  renameCollection: (id: string, name: string) => void;
   toggleLightVisibility: (id: string) => void;
   toggleLightSolo: (id: string) => void;
   reorderLights: (startIndex: number, endIndex: number) => void;
@@ -24,6 +36,9 @@ interface LightsState {
   setLightsOrder: (ids: string[]) => void;
   setCollectionFilter: (collectionId: string | null) => void;
   addCollection: (name: string) => void;
+  /** Turn a group on/off as a Composite and edit its shared controls. */
+  setComposite: (collectionId: string, patch: Partial<CompositeSettings> | null) => void;
+  setCollections: (c: LightCollection[]) => void;
   removeCollection: (id: string) => void;
   setLightsFromPreset: (lights: Light[]) => void;
   clearAllLights: () => void;
@@ -32,6 +47,7 @@ interface LightsState {
 export const useLightsStore = create<LightsState>((set, get) => ({
   lights: [],
   selectedLightId: null,
+  selectedCompositeId: null,
   collections: [
     { id: 'default', name: 'Default' },
     { id: 'key', name: 'Key Lights' },
@@ -98,7 +114,45 @@ export const useLightsStore = create<LightsState>((set, get) => ({
 
   selectLight: (id) => {
     // Selection changes are NOT recorded - they don't mutate scene data
-    set({ selectedLightId: id });
+    set(id ? { selectedLightId: id, selectedCompositeId: null } : { selectedLightId: id });
+  },
+
+  selectComposite: (id) => {
+    set(id ? { selectedCompositeId: id, selectedLightId: null } : { selectedCompositeId: null });
+  },
+
+  mergeToComposite: (lightIds, name) => {
+    const st = get();
+    const ids = new Set(lightIds);
+    if (!st.lights.some((l) => ids.has(l.id))) return null;
+    history.record('Merge to Composite');
+    const id = `comp_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 5)}`;
+    const n = st.collections.filter((c) => c.composite).length + 1;
+    set((state) => ({
+      collections: [...state.collections, { id, name: name ?? `Composite ${n}`, composite: defaultComposite() }],
+      lights: state.lights.map((l) => (ids.has(l.id) ? { ...l, collectionId: id } : l)),
+      selectedCompositeId: id,
+      selectedLightId: null,
+    }));
+    return id;
+  },
+
+  releaseFromComposite: (lightId) => {
+    history.record('Release from Composite');
+    set((state) => ({ lights: state.lights.map((l) => (l.id === lightId ? { ...l, collectionId: null } : l)) }));
+  },
+
+  dissolveComposite: (collectionId) => {
+    history.record('Dissolve Composite');
+    set((state) => ({
+      lights: state.lights.map((l) => (l.collectionId === collectionId ? { ...l, collectionId: null } : l)),
+      collections: state.collections.filter((c) => c.id !== collectionId),
+      selectedCompositeId: state.selectedCompositeId === collectionId ? null : state.selectedCompositeId,
+    }));
+  },
+
+  renameCollection: (id, name) => {
+    set((state) => ({ collections: state.collections.map((c) => (c.id === id ? { ...c, name } : c)) }));
   },
 
   toggleLightVisibility: (id) => {
@@ -161,6 +215,19 @@ export const useLightsStore = create<LightsState>((set, get) => ({
       collections: [...state.collections, { id, name }],
     }));
   },
+
+  setComposite: (collectionId, patch) => {
+    history.recordThrottled('Update Composite');
+    set((state) => ({
+      collections: state.collections.map((c) => {
+        if (c.id !== collectionId) return c;
+        if (patch === null) return { id: c.id, name: c.name };
+        return { ...c, composite: { ...(c.composite ?? defaultComposite()), ...patch } };
+      }),
+    }));
+  },
+
+  setCollections: (collections) => set({ collections }),
 
   removeCollection: (id) => {
     history.record('Remove Collection');

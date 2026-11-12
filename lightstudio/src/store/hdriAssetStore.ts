@@ -1,5 +1,7 @@
 import { create } from 'zustand';
 import { hdriAssetDB } from '../services/HDRIAssetDB';
+import type { EditLayer, SkyEnvParams } from '../hdriedit/types';
+import { defaultSky } from '../hdriedit/types';
 
 /** A single custom HDRI asset in the scene */
 export interface HDRIAsset {
@@ -37,8 +39,45 @@ export interface HDRIAsset {
   /** -100..100. Post-process saturation adjustment (desaturate toward
    *  luminance at -100, oversaturate at +100). */
   saturation: number;
+  /** Extra orientation / projection / grading controls. All optional (and
+   *  absent on projects saved before they existed) - undefined means the
+   *  default in HDRI_ASSET_GRADING_DEFAULTS, i.e. no change. */
+  /** Rotation around X (pitch) and Z (roll), degrees, -180..180. Y stays `rotation`. */
+  rotationX?: number;
+  rotationZ?: number;
+  /** Viewer offset inside the environment dome, metres. Only has an effect
+   *  together with a finite domeRadius: the map is projected onto a sphere of
+   *  that radius and the capture point moves by this offset (parallax, and a
+   *  "ground projection" when Y is negative). */
+  offsetX?: number;
+  offsetY?: number;
+  offsetZ?: number;
+  /** Radius of that projection dome, metres (large = effectively infinite). */
+  domeRadius?: number;
+  /** Mirror the map left/right. */
+  flipX?: boolean;
+  /** -180..180 degrees hue rotation. */
+  hue?: number;
+  /** -100..100 cool..warm white balance. */
+  temperature?: number;
+  /** -100..100 green..magenta white balance. */
+  tint?: number;
+  /** -100..100 tame/boost the bright end (luminance-weighted). */
+  highlights?: number;
+  /** -100..100 lift/crush the dark end (luminance-weighted). */
+  shadows?: number;
+  /** 0 = off; otherwise soft-limits peak radiance (tames sun / softbox hotspots). */
+  peakLimit?: number;
+  /** 0..100 softens the map (blurs reflections). */
+  blur?: number;
   /** Whether this asset is currently active/selected */
   active: boolean;
+  /** 'sky' = procedural sky (no file); default is a loaded file. */
+  kind?: 'file' | 'sky';
+  /** Sky parameters when kind is 'sky'. */
+  sky?: SkyEnvParams;
+  /** Non-destructive Edit HDRI Environments layer stack. */
+  edits?: EditLayer[];
 }
 
 /** Defaults for the new grading fields, so every existing call site that
@@ -49,7 +88,28 @@ export const HDRI_ASSET_GRADING_DEFAULTS = {
   contrast: 0,
   gamma: 1,
   saturation: 0,
+  rotationX: 0,
+  rotationZ: 0,
+  offsetX: 0,
+  offsetY: 0,
+  offsetZ: 0,
+  domeRadius: 50,
+  flipX: false,
+  hue: 0,
+  temperature: 0,
+  tint: 0,
+  highlights: 0,
+  shadows: 0,
+  peakLimit: 0,
+  blur: 0,
 } as const;
+
+/** The optional controls above, as one list (Looks capture/restore them, the panel resets them). */
+export const HDRI_EXTRA_KEYS = [
+  'rotationX', 'rotationZ', 'offsetX', 'offsetY', 'offsetZ', 'domeRadius', 'flipX',
+  'hue', 'temperature', 'tint', 'highlights', 'shadows', 'peakLimit', 'blur',
+] as const;
+export type HDRIExtra = Partial<Pick<HDRIAsset, (typeof HDRI_EXTRA_KEYS)[number]>>;
 
 interface HDRIAssetStore {
   assets: HDRIAsset[];
@@ -59,12 +119,14 @@ interface HDRIAssetStore {
 
   /** Add a new HDRI asset from file */
   addAsset: (file: File, arrayBuffer: ArrayBuffer) => HDRIAsset;
+  /** Add a procedural sky as an HDRI asset */
+  addSkyAsset: () => HDRIAsset;
   /** Remove an asset by ID (also revokes blob URL, deletes from IndexedDB) */
   removeAsset: (id: string) => void;
   /** Select an asset (makes it active) */
   selectAsset: (id: string | null) => void;
   /** Update per-asset properties */
-  updateAsset: (id: string, updates: Partial<Pick<HDRIAsset, 'name' | 'intensity' | 'rotation' | 'active' | 'opacity' | 'contrast' | 'gamma' | 'saturation'>>) => void;
+  updateAsset: (id: string, updates: Partial<Pick<HDRIAsset, 'name' | 'intensity' | 'rotation' | 'active' | 'opacity' | 'contrast' | 'gamma' | 'saturation' | 'edits' | 'sky'>> & HDRIExtra) => void;
   /** Set the blob URL on an asset (after creating from base64 restore) */
   setAssetBlobUrl: (id: string, url: string) => void;
   /** Reorder the whole assets array to match the given id sequence - keeps
@@ -135,6 +197,26 @@ export const useHDRIAssetStore = create<HDRIAssetStore>((set, get) => ({
       assets: [...s.assets, asset],
       selectedAssetId: id,
     }));
+    return asset;
+  },
+
+  addSkyAsset: () => {
+    const id = `hdri_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    const asset: HDRIAsset = {
+      id,
+      name: 'Procedural Sky',
+      fileName: 'sky',
+      blobUrl: null,
+      dataBase64: null,
+      intensity: 1.0,
+      rotation: 0,
+      ...HDRI_ASSET_GRADING_DEFAULTS,
+      active: true,
+      kind: 'sky',
+      sky: defaultSky(),
+      edits: [],
+    };
+    set((s) => ({ assets: [...s.assets, asset], selectedAssetId: id }));
     return asset;
   },
 
@@ -240,7 +322,7 @@ export const useHDRIAssetStore = create<HDRIAssetStore>((set, get) => ({
           console.warn('[hdriAssetStore] Failed to restore blob for', a.name, err);
         }
       }
-      return { ...a, blobUrl };
+      return { ...HDRI_ASSET_GRADING_DEFAULTS, ...a, blobUrl };
     });
 
     set((s) => {
@@ -265,3 +347,6 @@ export const useHDRIAssetStore = create<HDRIAssetStore>((set, get) => ({
     );
   },
 }));
+if (import.meta.env.DEV && typeof window !== 'undefined') {
+  (window as unknown as { __hdriAssetStore?: unknown }).__hdriAssetStore = useHDRIAssetStore;
+}
