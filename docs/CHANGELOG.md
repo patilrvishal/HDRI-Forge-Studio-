@@ -1,5 +1,13 @@
 # HDRI Forge Studio - changelog
 
+## 0.1.29
+
+### Viewport lights
+- Library lights (softboxes, strips, octabox, umbrella, shape presets) show their icon in the viewport without the outline box.
+- They also get the icon's metal frame and corner studs (viewport only; never part of the HDRI or the Erik live link).
+- The viewport picture is sharper: 640 px instead of 192, with a higher glow cap so it is not faded.
+- Lights added before this version have no frame data: delete and re-add them from the library.
+
 ## 0.1.28
 
 ### Rigs (Rig tab > Studio)
