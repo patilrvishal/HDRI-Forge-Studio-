@@ -121,7 +121,7 @@ export class TexturedEmitters {
     e.group.quaternion.copy(u.quaternion);
     e.mesh.scale.set(Math.max(0.01, u.width), Math.max(0.01, u.height), 1);
     e.mat.emissive.copy(u.tint);
-    e.mat.emissiveIntensity = Math.min(u.intensity, 1.2);      // keeps the picture readable in the viewport instead of burning out to flat white
+    e.mat.emissiveIntensity = Math.min(u.intensity, u.pathTraced ? 1.2 : 0.8);      // keeps the picture readable in the viewport instead of burning out to flat white
   }
 
   has(id: string): boolean {

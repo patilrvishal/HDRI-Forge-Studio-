@@ -1963,7 +1963,10 @@ export class LightManager {
     // Update helper (a compact wireframe gizmo, shaped per light type)
     const helper = this._helpers.get(ld.id);
     if (helper) {
-      helper.visible = shouldShow && ld.gearVisible;
+      // A light that shows its own picture (a library light: umbrella, strip, ring...) needs no outline box around it;
+      // the picture is the light. The box stays for plain lights, and the gizmo handles still show when it is selected.
+      const showsPicture = !!ld.appearance && this._texEmitters.isVisible(ld.id);
+      helper.visible = shouldShow && ld.gearVisible && !showsPicture;
       helper.position.copy(lightObj.position);
       helper.quaternion.copy(lightObj.quaternion);
 
