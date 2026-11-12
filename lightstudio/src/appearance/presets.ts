@@ -3,7 +3,7 @@
  * copied from third-party libraries); users can add their own presets and
  * import image-based content for anything photographic.
  */
-import type { AppearanceBlend, ContentLayer, ContentType, LightAppearance, ContentParams } from './types';
+import type { AppearanceBlend, ContentLayer, ContentType, LightAppearance, ContentParams, ViewFrame } from './types';
 import { colorStops, cosStops, curveFrom, newAppearance, newLayer, stops } from './content';
 
 export type PresetCategory =
@@ -223,8 +223,36 @@ add('Sky', 'Overcast', 2, ['sky', 'soft'], () =>
 add('Sky', 'High Noon', 2, ['sky', 'sun'], () =>
   build('High Noon', layer('sky', { altitude: 80, azimuth: 20, turbidity: 2.2, albedo: 0.2 })));
 
+// The frame + studs each icon shows around its shape (viewport only).
+const rectFrame = (inset = 0.03): ViewFrame => ({ kind: 'rect', inset });
+const polyFrame = (sides: number, softness: number, rotation = 0): ViewFrame => ({ kind: 'poly', sides, rotation, scale: Math.max(0.05, 1 - softness * 0.5) });
+const FRAMES: Record<string, ViewFrame> = {
+  'Softbox Square': rectFrame(),
+  'Softbox Top-Heavy': rectFrame(),
+  'Softbox Hot Centre': rectFrame(),
+  'Octabox': polyFrame(8, 0.05, 22.5),
+  'Rounded Softbox': polyFrame(4, 0.06),
+  'Umbrella': polyFrame(8, 0.03),
+  'Strip Light': rectFrame(),
+  'Strip Fade Left': rectFrame(),
+  'Strip Centre Fade': rectFrame(),
+  'Tall Strip': rectFrame(),
+  'Disc': polyFrame(12, 0.05),
+  'Hexagon': polyFrame(6, 0.06),
+  'Triangle': polyFrame(3, 0.06),
+  'Pentagon': polyFrame(5, 0.06),
+  'Diamond': polyFrame(4, 0.06),
+  'Round Hexagon': polyFrame(6, 0.08),
+};
+
 export const APPEARANCE_PRESETS: AppearancePreset[] = P_LIST.map((p, i) => ({
   ...p,
+  build: () => {
+    const a = p.build();
+    const f = FRAMES[p.name];
+    if (f) a.frame = { ...f };
+    return a;
+  },
   id: 'builtin_' + p.name.toLowerCase().replace(/[^a-z0-9]+/g, '_') + '_' + i,
 }));
 

@@ -2038,7 +2038,7 @@ export class LightManager {
     const at = ld.areaTex;
     const w = Math.max(0.01, light.width);
     const h = Math.max(0.01, light.height);
-    const tex = ld.appearance ? getLightTexture(ld.id, ld.appearance, w / h, Math.round(Math.min(768, Math.max(96, 192 * (at?.textureScale ?? 1))))) : null;
+    const tex = ld.appearance ? getLightTexture(ld.id, ld.appearance, w / h, Math.round(Math.min(1024, Math.max(96, 640 * (at?.textureScale ?? 1))))) : null;      // sharp in the viewport (it used to be 192 px)
     if (!ld.appearance) dropLightTexture(ld.id);
     light.userData.appearanceTex = tex ? { data: tex.data, width: tex.width, height: tex.height } : undefined;
     light.userData.areaMode = !!at?.enabled;
@@ -2058,6 +2058,7 @@ export class LightManager {
       this._texEmitters.update(ld.id, {
         show,
         pathTraced: real,
+        frame: ld.appearance?.frame ?? null,
         camVisible: at?.camVisibility !== false,
         position: light.position,
         quaternion: light.quaternion,

@@ -334,8 +334,26 @@ export interface AppearanceGlobals {
   scale: number;
 }
 
+/**
+ * The metal frame and corner studs a light's icon shows around its shape. Viewport only: it never lights anything,
+ * so it is not part of the HDRI or the exported textures.
+ */
+export interface ViewFrame {
+  /** 'rect' = a rectangle around the light, 'poly' = a regular polygon (sides, rotation, size). */
+  kind: 'rect' | 'poly';
+  /** rect: how far inside the light's edge the frame sits (0..1 of its half size). */
+  inset?: number;
+  /** poly */
+  sides?: number;
+  rotation?: number;
+  /** poly: circumradius as a fraction of half the light's smaller side. */
+  scale?: number;
+}
+
 export interface LightAppearance {
   version: 1;
+  /** Viewport frame + studs (see ViewFrame). */
+  frame?: ViewFrame;
   name: string;
   master: ContentLayer;
   valueBlend: ContentLayer[];
