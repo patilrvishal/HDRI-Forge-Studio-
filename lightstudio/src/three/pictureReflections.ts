@@ -108,7 +108,11 @@ export class PictureReflections {
     } catch { return; }                                   // superseded by a newer bake, or it failed: keep what is showing
     if (my !== this.gen || this.disposed) return;
 
-    const tex = new THREE.DataTexture(pixels, W, H, THREE.RGBAFormat, THREE.FloatType);
+    // The baked rows run top to bottom; a data texture is read bottom to top, so the rows are turned over (otherwise the
+    // reflection of a light above the model shows up below it).
+    const flipped = new Float32Array(pixels.length);
+    for (let y = 0; y < H; y++) flipped.set(pixels.subarray(y * W * 4, (y + 1) * W * 4), (H - 1 - y) * W * 4);
+    const tex = new THREE.DataTexture(flipped, W, H, THREE.RGBAFormat, THREE.FloatType);
     tex.mapping = THREE.EquirectangularReflectionMapping;
     tex.flipY = false;
     tex.needsUpdate = true;
