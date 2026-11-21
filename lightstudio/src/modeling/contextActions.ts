@@ -8,6 +8,7 @@ import { disableObjectLight, enableObjectLight, getObjectLight, setIncludeInHdri
 import { useObjectHdriStore } from '../store/objectHdriStore';
 import { objectKey } from '../three/objectBinding';
 import { toggleAreaLight } from '../three/areaLightApi';
+import { useLumiCurveWindowStore } from '../store/lumiCurveWindowStore';
 
 function showRightTab(tab: 'properties' | 'matEdit'): void {
   const ui = useUIStore.getState();
@@ -24,6 +25,7 @@ export function runLightCommand(cmd: string): boolean {
   const [, op, arg] = cmd.split(':');
   switch (op) {
     case 'properties': showRightTab('properties'); break;
+    case 'curve': useLumiCurveWindowStore.getState().open(l.id); break;
     case 'aim': st.updateLightTransform(l.id, { rotation: { ...l.transform.rotation, enabled: false } }); break;
     case 'bright': st.updateLight(l.id, { brightness: Math.max(0, Math.round(l.brightness * Number(arg) * 100) / 100) }); break;
     case 'size':

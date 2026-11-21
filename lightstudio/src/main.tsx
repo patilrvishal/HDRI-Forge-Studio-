@@ -7,6 +7,7 @@ import { isSplashWindow, revealMain } from './utils/revealMain'
 import { isIntroEnabled } from './utils/introPref'
 import { initBlenderBridge } from './bridge/BlenderBridgeListener'
 import { ErikLiveBadge } from './erikLive/ErikLiveBadge'
+import { LumiCurveWindow } from './components/Appearance/LumiCurveWindow'
 import { isTauri } from '@tauri-apps/api/core'
 import { initA11yLabels } from './utils/a11yLabels'
 
@@ -25,6 +26,7 @@ if (isSplashWindow()) {
   createRoot(document.getElementById('root')!).render(
     <StrictMode>
       <App />
+      <LumiCurveWindow />
       {(import.meta.env.DEV || isTauri()) && <ErikLiveBadge />}
     </StrictMode>,
   )

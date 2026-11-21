@@ -7,6 +7,9 @@ import { OBJECT_MENU, type MenuItem } from './menus';
 
 const sep: MenuItem = { sep: true };
 
+const hasLumiCurve = (a?: { master: { content: { type: string } }; valueBlend: { content: { type: string } }[]; alphaMultiply: { content: { type: string } }[] }): boolean =>
+  !!a && [a.master, ...a.valueBlend, ...a.alphaMultiply].some((x) => x.content.type === 'lumicurve');
+
 /** Right-click menu for the selected light: only what a light has. */
 export function lightMenu(): MenuItem[] {
   const st = useLightsStore.getState();
@@ -16,6 +19,7 @@ export function lightMenu(): MenuItem[] {
   return [
     { title: l.name },
     { label: 'Properties', cmd: 'light:properties' },
+    ...(hasLumiCurve(l.appearance) ? [{ label: 'Edit Lumi-Curve...', cmd: 'light:curve' }] : []),
     sep,
     { label: 'Move', cmd: 'transform:grab', key: 'G' },
     { label: 'Rotate', cmd: 'transform:rotate', key: 'R' },

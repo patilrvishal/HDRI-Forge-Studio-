@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import * as THREE from 'three';
 import { useLightsStore } from '../../store/lightsStore';
+import { useLumiCurveWindowStore } from '../../store/lumiCurveWindowStore';
 import { useHDRIAssetStore } from '../../store/hdriAssetStore';
 import { useObjectHdriStore } from '../../store/objectHdriStore';
 import { useAppearanceStore } from '../../appearance/appearanceStore';
@@ -292,7 +293,8 @@ export const CanvasPanel: React.FC = () => {
       transform: { ...created.transform, position: { x: centre.x, y: centre.y, z: centre.z }, spherical: { lat: sph.lat, lng: sph.lng, radius: sph.radius, height: sph.height }, rotation: { ...created.transform.rotation, enabled: false } },
     } as Partial<Light>);
     st.selectLight(created.id);
-    setStatus('Lumi-Curve light created. Edit its path and look under Light Appearance.');
+    setStatus('Lumi-Curve light created. Drag its points, tangents and the green / blue glow handles in the Lumi-Curve Editor.');
+    useLumiCurveWindowStore.getState().open(created.id);
     setTool('select');
   };
 

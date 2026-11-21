@@ -20,6 +20,8 @@ import { Dropdown } from '../UI/Dropdown';
 import { ColorPicker } from '../UI/ColorPicker';
 import { RampEditor } from './RampEditor';
 import { CurveEditor } from './CurveEditor';
+import { useLumiCurveWindowStore } from '../../store/lumiCurveWindowStore';
+import { useLightsStore } from '../../store/lightsStore';
 import { FilterStackEditor } from '../Filters/FilterStackEditor';
 
 const TYPE_OPTIONS = (section: SectionKind) =>
@@ -218,6 +220,14 @@ const ContentControls: React.FC<{
       const p = c.p;
       return (
         <>
+          <button
+            className="btn-sm"
+            style={{ width: '100%', margin: '4px 0', fontSize: 11 }}
+            title="Opens the floating Lumi-Curve Editor: the light drawn live, with draggable points, tangents and green / blue glow handles"
+            onClick={() => { const id = useLightsStore.getState().selectedLightId; if (id) useLumiCurveWindowStore.getState().open(id); }}
+          >
+            Open Lumi-Curve Editor
+          </button>
           <CurveEditor params={p} aspect={aspect} onChange={(patch) => set(patch)} />
           <ColorPicker label="Colour" color={p.color} onChange={(v) => set({ color: v })} />
           <Slider label="Intensity" value={p.intensity} min={0} max={50} step={0.01} onChange={(v) => set({ intensity: v })} />

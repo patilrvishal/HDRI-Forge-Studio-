@@ -1,5 +1,12 @@
 # HDRI Forge Studio - changelog
 
+## Unreleased
+
+### Lumi-Curve Editor window
+- New floating **Lumi-Curve Editor** (like HDR Light Studio's): the light drawn live on black with the curve over it, a tool column on the left (move point / tangent / glow handle, add point by click and drag, delete, move all, rotate, scale, flip, fix tangents, delete all) and a view column on the right (zoom, pan, fit, straighten, snap, preview).
+- The selected point shows a **green** and a **blue** handle: drag them to set how far the glow reaches on each side; the light, the reflections and the Erik live link follow at once.
+- Opens from the right-click menu of a Lumi-Curve light (Edit Lumi-Curve...), from the Light Appearance panel (Open Lumi-Curve Editor), and automatically after Draw Lumi-Curve on the Canvas.
+
 ## 0.1.29
 
 ### Viewport lights
