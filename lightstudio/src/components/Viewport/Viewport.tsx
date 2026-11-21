@@ -45,6 +45,7 @@ import { ModelingOverlay } from '../Modeling/ModelingOverlay';
 import { ModelingController } from '../../modeling/ModelingController';
 import { setModelingController, getModelingController } from '../../modeling/bridge';
 import { pickLight } from '../../three/pickLight';
+import { PictureReflections } from '../../three/pictureReflections';
 import { useModelingStore } from '../../store/modelingStore';
 import { useObjectHdriStore } from '../../store/objectHdriStore';
 import type { AnimatedProperty } from '../../types/Animation';
@@ -122,6 +123,7 @@ export const Viewport: React.FC<ViewportProps> = ({ sceneManagerRef, onScreensho
   const showGrid = useSceneStore((s) => s.showGrid);
   const turntable = useSceneStore((s) => s.turntable);
   const environment = useSceneStore((s) => s.environment);
+  const [envNonce, setEnvNonce] = useState(0);        // bumped when the picture-light reflections turn off, so the real environment is put back
   const hdriShapes = useHDRIShapesStore((s) => s.shapes);
   const hdriLivePreview = useHDRIShapesStore((s) => s.livePreview);
   const hdriSelectedShapeId = useHDRIShapesStore((s) => s.selectedShapeId);
@@ -619,7 +621,23 @@ export const Viewport: React.FC<ViewportProps> = ({ sceneManagerRef, onScreensho
     }
 
     sm.setBackground(environment.background, environment.showBackground);
-  }, [environment.background, environment.showBackground, environment.presetId, environment.gradientBackground, environment.intensity, sceneManagerRef, envLoaderRef, backplate]);
+  }, [environment.background, environment.showBackground, environment.presetId, environment.gradientBackground, environment.intensity, sceneManagerRef, envLoaderRef, backplate, envNonce]);
+
+  // Lights that show a picture (a Lumi-Curve, a ring, an umbrella...) are reflected through the environment so their reflection on the
+  // model has the picture's shape (a plain area light can only be a rectangle). When none are left the real environment comes back.
+  useEffect(() => {
+    const sm = sceneManagerRef.current;
+    if (!sm) return;
+    const pr = new PictureReflections(sm, () => setEnvNonce((n) => n + 1), () => renderPipelineRef.current?.isPathTracingActive() === true);
+    const unsubs = [
+      useLightsStore.subscribe(() => pr.schedule()),
+      useSceneStore.subscribe(() => pr.schedule()),
+      useHDRIAssetStore.subscribe(() => pr.schedule()),
+      useHDRIShapesStore.subscribe(() => pr.schedule()),
+    ];
+    pr.schedule();
+    return () => { unsubs.forEach((u) => u()); pr.dispose(); };
+  }, [sceneManagerRef]);
 
   // Sync ground settings (reflections, fade, color, PBR)
   useEffect(() => {

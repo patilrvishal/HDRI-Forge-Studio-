@@ -809,6 +809,8 @@ export async function generateAnalyticalHDRI(
   envLayers: EnvLayer[] = [],
   options: {
     includeAreaModeLights?: boolean;
+    /** Only lights this returns true for are painted (the viewport bakes just its picture lights this way). */
+    lightFilter?: (light: THREE.Object3D) => boolean;
     /** Polled between row batches; return true to abandon this render (throws HDRICancelled). */
     isCancelled?: () => boolean;
     /** Rows between event-loop yields (default 100). Smaller keeps the UI responsive in live mode. */
@@ -819,7 +821,7 @@ export async function generateAnalyticalHDRI(
   const pixels = new Float32Array(width * height * 4);
 
   // Extract all lights from scene
-  const allLights = extractLightsFromScene(scene, !!options.includeAreaModeLights);
+  const allLights = extractLightsFromScene(scene, !!options.includeAreaModeLights, options.lightFilter);
   // Lights in a Composite that carries filters are rendered as one image, filtered, then laid on top.
   const isFiltered = (l: ExtractedLight) => !!l.compositeId && !!l.compositeFilters;
   const lights = allLights.filter((l) => !isFiltered(l));
@@ -1144,7 +1146,7 @@ function aimDirection(light: THREE.SpotLight | THREE.DirectionalLight, from: THR
   return dir;
 }
 
-function extractLightsFromScene(scene: THREE.Scene, includeAreaMode = false): ExtractedLight[] {
+function extractLightsFromScene(scene: THREE.Scene, includeAreaMode = false, lightFilter?: (light: THREE.Object3D) => boolean): ExtractedLight[] {
   const lights: ExtractedLight[] = [];
   let tag: { compositeId?: string; compositeFilters?: FilterSpec[]; compositeBlend?: AppearanceBlend; layerIndex?: number; blendMode?: AppearanceBlend; blendInvert?: boolean; blendChannel?: ExtractedLight['blendChannel']; mapping?: ExtractedLight['mapping'] } = {};
   const push = (l: ExtractedLight) => { lights.push({ ...l, ...tag }); };
@@ -1154,6 +1156,7 @@ function extractLightsFromScene(scene: THREE.Scene, includeAreaMode = false): Ex
   scene.traverse((child) => {
     if (!(child instanceof THREE.Light)) return;
     if (!child.visible) return;
+    if (lightFilter && !lightFilter(child)) return;
     if (child.userData.isLightHelper === true) return;
     if (child.userData.isProxy === true) return;
     if (child.userData.isGrid === true) return;
@@ -1221,7 +1224,8 @@ function extractLightsFromScene(scene: THREE.Scene, includeAreaMode = false): Ex
         color: tex && child.userData.baseColor ? (child.userData.baseColor as THREE.Color).clone() : child.color.clone(),
         tex,
         spread: typeof child.userData.spread === 'number' ? child.userData.spread : undefined,
-        intensity: child.intensity,
+        // the viewport mutes a light whose picture it reflects through the environment: the real intensity is kept here
+        intensity: typeof child.userData.baseIntensity === 'number' ? child.userData.baseIntensity : child.intensity,
         position: worldPos.clone(),
         width: child.width,
         height: child.height,

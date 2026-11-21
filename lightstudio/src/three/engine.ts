@@ -2042,8 +2042,11 @@ export class LightManager {
     if (!ld.appearance) dropLightTexture(ld.id);
     light.userData.appearanceTex = tex ? { data: tex.data, width: tex.width, height: tex.height } : undefined;
     light.userData.areaMode = !!at?.enabled;
+    light.userData.hasPicture = !!tex;
     light.userData.spread = at?.spread ?? 100;
     light.userData.baseColor = new THREE.Color(ld.color);
+    light.userData.baseIntensity = light.intensity;                       // the real intensity (exports read this)
+    if (light.userData.envReflected) light.intensity = 0;                 // its reflection comes from the environment instead (see pictureReflections.ts)
     if (tex) {
       // Uniform RectAreaLight approximation of the textured emitter.
       light.color.r *= tex.mean.r;

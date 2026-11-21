@@ -170,9 +170,12 @@ let shapeCache: { shapes: unknown; gb: unknown; intensity: number; w: number; la
 const getScene = (): THREE.Scene | null =>
   ((window as unknown as { __lightforgeScene?: { scene: THREE.Scene } }).__lightforgeScene)?.scene ?? null;
 
-async function buildLayers(passW: number): Promise<EnvLayer[]> {
+/** The layers the HDRI is made of (assets, shapes, gradient): what Erik, the HDRI Preview and the export all use. */
+export const buildCompositeLayers = (passW: number, globalIntensity?: number): Promise<EnvLayer[]> => buildLayers(passW, globalIntensity);
+
+async function buildLayers(passW: number, globalIntensity?: number): Promise<EnvLayer[]> {
   const sceneState = useSceneStore.getState();
-  const intensity = sceneState.environment.intensity ?? 1.0;
+  const intensity = globalIntensity ?? sceneState.environment.intensity ?? 1.0;
   const assets = useHDRIAssetStore.getState().assets;
 
   if (!layerCache || layerCache.assets !== assets || layerCache.intensity !== intensity) {

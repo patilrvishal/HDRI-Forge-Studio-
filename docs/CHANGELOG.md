@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+### Reflections of picture lights
+- The reflection of a light that shows a picture (a Lumi-Curve, a ring, an umbrella...) on the model now has the picture's shape; before it was always a small rectangle. The viewport puts the same composite the HDRI Preview and the Erik link use (HDRI layers, shapes, gradient and these lights) into the environment, scaled so the model gets the same overall light as before, and mutes the light's plain rectangle so it is not counted twice. Plain lights are unchanged, the real environment returns when no picture light is left, and the path tracer is left alone.
+
 ### Lumi-Curve Editor window
 - New floating **Lumi-Curve Editor** (like HDR Light Studio's): the light drawn live on black with the curve over it, a tool column on the left (move point / tangent / glow handle, add point by click and drag, delete, move all, rotate, scale, flip, fix tangents, delete all) and a view column on the right (zoom, pan, fit, straighten, snap, preview).
 - The selected point shows a **green** and a **blue** handle: drag them to set how far the glow reaches on each side; the light, the reflections and the Erik live link follow at once.
