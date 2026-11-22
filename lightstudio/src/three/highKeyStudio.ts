@@ -20,12 +20,15 @@ import { lightFacing } from './lightFacing';
  *
  * Coordinates: the model stands at the origin, the back wall is at -Z, the camera looks in from +Z through the open front.
  */
-const HALF_W = 3.0;
-const BACK_Z = -2.0;
-const FRONT_Z = 2.0;
-const H = 3.0;
-const R_PLAN = 1.0;    // vertical corner radius
-const R_COVE = 1.0;    // wall-to-floor fillet
+// The room is solved from the card: seen from (0, 1.5, 5) looking slightly up at the back wall, the back wall's top and base
+// land at 38% and 78% of the frame, the softboxes at 11% / 89% of its width, the two ceiling panels at 40% / 26% of it.
+// That needs a room about 9.8 m wide, 5.8 m deep and 3.5 m high (the old 6 x 4 x 3 m put the side lights outside the walls).
+const HALF_W = 4.9;
+const BACK_Z = -3.3;
+const FRONT_Z = 2.5;
+const H = 3.5;
+const R_PLAN = 1.3;    // vertical corner radius
+const R_COVE = 1.2;    // wall-to-floor fillet
 const R_TOP = 0.8;     // wall-to-ceiling curl
 
 const std = (color: number, roughness: number, metalness = 0, extra: Partial<THREE.MeshStandardMaterialParameters> = {}) =>
@@ -62,6 +65,21 @@ function wallProfile(): [number, number][] {
   for (let i = 0; i <= 14; i++) { const a = (i / 14) * (Math.PI / 2); p.push([R_COVE - R_COVE * Math.sin(a), R_COVE - R_COVE * Math.cos(a)]); }
   for (let i = 0; i <= 14; i++) { const a = (i / 14) * (Math.PI / 2); p.push([R_TOP - R_TOP * Math.cos(a), H - R_TOP + R_TOP * Math.sin(a)]); }
   return p;
+}
+
+/** Soft light falloff painted on a wall: brighter toward the back wall, darker toward the open front and up into the ceiling curl. */
+function shadeWall(g: THREE.BufferGeometry, back: boolean): void {
+  const pos = g.getAttribute('position');
+  const col = new Float32Array(pos.count * 3);
+  for (let i = 0; i < pos.count; i++) {
+    const y = pos.getY(i), z = pos.getZ(i);
+    const depth = Math.min(1, Math.max(0, (FRONT_Z - z) / (FRONT_Z - BACK_Z)));        // 0 at the open front, 1 at the back wall
+    let f = back ? 0.98 : 0.6 + 0.38 * Math.pow(depth, 0.8);
+    const curl = Math.min(1, Math.max(0, (y - (H - 1.4)) / 1.4));                       // up into the ceiling curl
+    f *= 1 - 0.28 * curl * curl;
+    col[i * 3] = col[i * 3 + 1] = col[i * 3 + 2] = f;
+  }
+  g.setAttribute('color', new THREE.BufferAttribute(col, 3));
 }
 
 function room(path: PathPt[], profile: [number, number][]): THREE.BufferGeometry {
@@ -119,7 +137,19 @@ export function buildHighKeyStudio(group: THREE.Group, lights: Light[]): void {
   group.userData.reflBox = [-HALF_W, 0, BACK_Z, HALF_W, H, FRONT_Z + 6];
 
   // glossy white floor, running out past the open front so the model never floats in a void
-  const floor = new THREE.Mesh(new THREE.PlaneGeometry(HALF_W * 2, FRONT_Z - BACK_Z + 12), std(0x9fa1a8, 0.16, 0));
+  const floorGeo = new THREE.PlaneGeometry(HALF_W * 2, FRONT_Z - BACK_Z + 12);
+  {
+    const fp = floorGeo.getAttribute('position');
+    const fc = new Float32Array(fp.count * 3);
+    const zc = (FRONT_Z + BACK_Z) / 2 + 6;
+    for (let i = 0; i < fp.count; i++) {
+      const z = zc - fp.getY(i);                                                      // the plane is laid flat: local y runs toward -Z
+      const f = 1 - 0.32 * Math.min(1, Math.max(0, (z + 1) / (FRONT_Z + 5)));          // full brightness at the back, falling off toward the camera
+      fc[i * 3] = fc[i * 3 + 1] = fc[i * 3 + 2] = f;
+    }
+    floorGeo.setAttribute('color', new THREE.BufferAttribute(fc, 3));
+  }
+  const floor = new THREE.Mesh(floorGeo, std(0x9fa1a8, 0.16, 0, { vertexColors: true }));
   floor.name = 'Floor';
   floor.userData.mirrorFloor = true;
   floor.rotation.x = -Math.PI / 2;
@@ -134,9 +164,11 @@ export function buildHighKeyStudio(group: THREE.Group, lights: Light[]): void {
   // three wall parts so each can be edited on its own; a little glow stands in for the bounce light (more on the back wall,
   // which the room's light reaches most, less on the sides)
   for (const [seg, name, glow] of [[path.left, 'Side Wall Left', 0.03], [path.back, 'Back Wall', 0.24], [path.right, 'Side Wall Right', 0.03]] as [PathPt[], string, number][]) {
+    const geo = room(seg, profile);
+    shadeWall(geo, name === 'Back Wall');
     const w = new THREE.Mesh(
-      room(seg, profile),
-      std(0xf1f2f4, 0.6, 0, { side: THREE.DoubleSide, emissive: 0xe4e8f2, emissiveIntensity: glow }),
+      geo,
+      std(0xf1f2f4, 0.6, 0, { side: THREE.DoubleSide, emissive: 0xe4e8f2, emissiveIntensity: glow, vertexColors: true }),
     );
     w.name = name;
     w.userData.reflective = true;
@@ -162,17 +194,22 @@ export function buildHighKeyStudio(group: THREE.Group, lights: Light[]): void {
 
   // two black track rails across the ceiling, each with a couple of spot heads
   const rails = std(0x101113, 0.4, 0.8);
-  [[-0.7, [-1.8, 1.4]], [0.75, [-1.2, 1.9]]].forEach(([z, xs], i) => {
-    const beam = new THREE.Mesh(new THREE.BoxGeometry(HALF_W * 2 - 0.4, 0.07, 0.09), rails);
+  // [z, height, half length, spot x]
+  ([[0.45, 3.4, 1.8, 1.45], [-0.4, 2.95, 2.0, 1.65]] as [number, number, number, number][]).forEach(([z, y, half, spotX], i) => {
+    const beam = new THREE.Mesh(new THREE.BoxGeometry(half * 2, 0.07, 0.09), rails);
     beam.name = `Track Rail ${i + 1}`;
-    beam.position.set(0, H - 0.1, z as number);
+    beam.position.set(0, y, z);
     group.add(beam);
-    (xs as number[]).forEach((x, k) => {
+    for (const sx of [-1, 1]) {
+      const rod = new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.012, H - y, 6), rails);
+      rod.name = `Track Rail ${i + 1} Hanger`;
+      rod.position.set(sx * half * 0.96, (H + y) / 2, z);
+      group.add(rod);
       const head = new THREE.Mesh(new THREE.CylinderGeometry(0.045, 0.06, 0.16, 12), rails);
-      head.name = `Spot Head ${i * 2 + k + 1}`;
-      head.position.set(x, H - 0.24, z as number);
+      head.name = `Spot Head ${i * 2 + (sx > 0 ? 2 : 1)}`;
+      head.position.set(sx * spotX, y - 0.14, z);
       group.add(head);
-    });
+    }
   });
 
   // the two ceiling soft panels (placed from the rig's own lights)

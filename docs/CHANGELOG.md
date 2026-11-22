@@ -1,6 +1,7 @@
 # HDRI Forge Studio - changelog
 
 ## Unreleased
+- High Key White re-fitted to its card: the studio is now about 9.8 x 5.8 x 3.5 m so the side softboxes stand inside the walls, with the ceiling panels, track rails and spot heads placed where the card shows them, and soft brightness gradients on the walls and floor.
 
 ### High Key White, closer to its card
 - Ceiling panels sized to the card (about 40% and 24% of the frame width) with a thin light tray instead of a dark housing; softboxes moved out to about 11% / 89% of the frame width, turned toward the centre, with their tripods standing under them.
