@@ -46,6 +46,7 @@ import { ModelingController } from '../../modeling/ModelingController';
 import { setModelingController, getModelingController } from '../../modeling/bridge';
 import { pickLight } from '../../three/pickLight';
 import { PictureReflections } from '../../three/pictureReflections';
+import { NEW_SCENE_EVENT } from '../../utils/newScene';
 import { useModelingStore } from '../../store/modelingStore';
 import { useObjectHdriStore } from '../../store/objectHdriStore';
 import type { AnimatedProperty } from '../../types/Animation';
@@ -1205,6 +1206,17 @@ export const Viewport: React.FC<ViewportProps> = ({ sceneManagerRef, onScreensho
     sm.controls.target.set(...cameraRequest.target);
     sm.controls.update();
   }, [cameraRequest, sceneManagerRef]);
+  // New Scene: take the loaded model (GLB / Erik) out of the 3D scene too
+  useEffect(() => {
+    const onNew = () => {
+      modelLoaderRef.current?.removeCurrentModel();
+      erikLoaderRef.current?.removeModel();
+      lastRigName.current = '';
+    };
+    window.addEventListener(NEW_SCENE_EVENT, onNew);
+    return () => window.removeEventListener(NEW_SCENE_EVENT, onNew);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sceneManagerRef]);
   const lastRigName = useRef('');
   useEffect(() => {
     const sm = sceneManagerRef.current;

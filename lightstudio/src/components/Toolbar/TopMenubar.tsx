@@ -15,6 +15,7 @@ import { exportSceneAsHDR, exportSceneAsEXR } from '../../three/HDRIExporter';
 import type { SceneManager } from '../../three/engine';
 import { promptForCustomHDRI } from '../../utils/loadCustomHDRI';
 import { importFromErik } from '../../erikLive/erikImport';
+import { resetForNewScene } from '../../utils/newScene';
 import { addProceduralSky } from '../../hdriedit/addSky';
 import { useSceneFileStore, dirName } from '../../store/sceneFileStore';
 import type { RecentScene } from '../../store/sceneFileStore';
@@ -95,12 +96,7 @@ const MENU_DEFINITIONS = (
         // the Looks panel's Save button).
         const ok = await useUIStore.getState().requestConfirm('Create a new scene? Unsaved changes will be lost.', 'New Scene');
         if (!ok) return;
-        useSceneStore.getState().resetScene();
-        useSceneFileStore.getState().setCurrent(null);
-        useLightsStore.getState().clearAllLights();
-        useAppearanceStore.getState().clearImages();
-        getModelingController()?.deserialize([]);
-        useObjectHdriStore.getState().clear();
+        resetForNewScene();
         useSceneStore.getState().setCamera([5, 3, 5], [0, 0, 0]);
         if (sceneManagerRef?.current) {
           sceneManagerRef.current.setCameraState([5, 3, 5], [0, 0, 0], 45);

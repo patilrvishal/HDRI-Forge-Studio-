@@ -1,5 +1,10 @@
 # HDRI Forge Studio - changelog
 
+## Unreleased
+
+### New Scene
+- **Fix:** New Scene now clears everything: the studio rig (room, fixtures, shadow lights), HDRI layers and shapes, mesh objects, the loaded model (GLB or Erik) and its materials, imported cameras and the hierarchy state. Before, the last scene's studio set and layers stayed on screen.
+
 ## 0.1.30
 
 ### Reflections of picture lights

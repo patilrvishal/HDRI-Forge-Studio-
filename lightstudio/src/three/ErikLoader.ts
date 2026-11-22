@@ -221,6 +221,11 @@ export class ErikLoader {
     return this._ktx2Loader;
   }
 
+  /** Takes the loaded car out of the scene (New Scene). */
+  removeModel(): void {
+    this._removeCurrentModel();
+  }
+
   private _removeCurrentModel(): void {
     if (this._currentModel) {
       this._scene.remove(this._currentModel);
