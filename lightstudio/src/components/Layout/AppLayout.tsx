@@ -1,3 +1,4 @@
+import { MaterialOverrideController } from '../Materials/MaterialOverrideController';
 import React, { useRef, useState, useCallback, useEffect } from 'react';
 import { TopMenubar } from '../Toolbar/TopMenubar';
 import { LeftToolbar } from '../Toolbar/LeftToolbar';
@@ -453,6 +454,7 @@ export const AppLayout: React.FC = () => {
         {/* Left Toolbar (fixed width) */}
         <LeftToolbar sceneManagerRef={sceneManagerRef} />
 
+        <MaterialOverrideController sceneRef={sceneRef} />
         {/* Left Panel - Light List (resizable, smooth transition) */}
         <div
           className="panel-transition"

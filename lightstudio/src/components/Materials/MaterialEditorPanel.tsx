@@ -6,6 +6,7 @@ import { useUIStore } from '../../store/uiStore';
 import type { PBRMaterialState, TextureSlotKey } from '../../types/MaterialEditor';
 import { TEXTURE_SLOT_LABELS } from '../../types/MaterialEditor';
 import type { MaterialManager } from '../../three/MaterialManager';
+import { MaterialOverrideBar } from './MaterialOverrideBar';
 
 interface MaterialEditorPanelProps {
   materialManagerRef: React.MutableRefObject<MaterialManager | null>;
@@ -776,6 +777,8 @@ const MaterialEditorPanel: React.FC<MaterialEditorPanelProps> = ({ materialManag
           </svg>
         </button>
       </div>
+
+      <MaterialOverrideBar />
 
       {/* ── Search bar ─────────────────────────────────────────── */}
       {searchOpen && (
