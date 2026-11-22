@@ -22,14 +22,14 @@ import { lightFacing } from './lightFacing';
  */
 // The room and the camera are solved together from 14 landmarks measured on the card (back wall top and base, both track rails'
 // ends, both ceiling panels, the softbox face and stand foot): camera (0, 1.28, 5.78) pitched up 5.2 deg with a 72 deg horizontal
-// field of view reproduces every one of them to within 0.3% of the frame. That puts the room at about 10.3 m wide, 11.6 m deep
+// field of view reproduces every one of them to within 0.3% of the frame. That puts the room at about 13.2 m wide, 11.6 m deep
 // (the open front is behind the camera) and 3.2 m high, with the back wall 4.6 m behind the model.
-const HALF_W = 5.15;
+const HALF_W = 6.6;
 const BACK_Z = -4.6;
 const FRONT_Z = 7.0;
 const H = 3.22;
 const R_PLAN = 2.0;    // vertical corner radius
-const R_COVE = 1.3;    // wall-to-floor fillet
+const R_COVE = 0.55;   // wall-to-floor fillet (kept small so the stand feet sit on the flat floor, not inside the curve)
 const R_TOP = 0.7;     // wall-to-ceiling curl
 
 const std = (color: number, roughness: number, metalness = 0, extra: Partial<THREE.MeshStandardMaterialParameters> = {}) =>
