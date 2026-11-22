@@ -18,6 +18,7 @@ import {
 import { compositeShapesCanvas, shapesCanvasToEnvLayer } from '../../three/HDRIShapesLayer';
 import { promptForCustomHDRI } from '../../utils/loadCustomHDRI';
 import { useErikLiveStore } from '../../erikLive/ErikLiveSync';
+import { NEW_SCENE_EVENT } from '../../utils/newScene';
 
 /** Preview always DISPLAYS at this CSS size (scaled by zoom) regardless of
  *  which resolution is selected - the canvas's actual pixel buffer is set
@@ -157,6 +158,8 @@ export const HDRIPreviewPanel: React.FC = () => {
   }, [resIndex, setErikLiveTarget]);
   const [format, setFormat] = useState<'hdr' | 'exr'>('hdr');
   const [rendering, setRendering] = useState(false);
+  /** The picture on screen was rendered before the lights, shapes or environment last changed (Live Preview is off). */
+  const [stale, setStale] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [stats, setStats] = useState<{ max: number; clipped: number; total: number } | null>(null);
   const [zoom, setZoom] = useState(1);
@@ -342,6 +345,7 @@ export const HDRIPreviewPanel: React.FC = () => {
       renderedResRef.current = { w: res.w, h: res.h };
 
       setStats(analyzePixels(pixels));
+      setStale(false);
 
       const ctx = canvas.getContext('2d');
       if (ctx) {
@@ -356,6 +360,25 @@ export const HDRIPreviewPanel: React.FC = () => {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [environment.intensity, resIndex]);
+
+  // With Live Preview off the picture does not follow the scene. Say so instead of leaving old lights on screen as if they were current.
+  useEffect(() => {
+    if (!livePreview && renderedResRef.current) setStale(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lights, environment, hdriAssets, shapes, objectHdriVersion]);
+
+  // A new scene has nothing to show: clear the last picture.
+  useEffect(() => {
+    const clear = () => {
+      const c = canvasRef.current;
+      c?.getContext('2d')?.clearRect(0, 0, c.width, c.height);
+      pixelsRef.current = null;
+      renderedResRef.current = null;
+      setStale(false);
+    };
+    window.addEventListener(NEW_SCENE_EVENT, clear);
+    return () => window.removeEventListener(NEW_SCENE_EVENT, clear);
+  }, []);
 
   /** Re-render whenever lights, the environment, or the selected preview
    *  resolution change (debounced). Resolution is included so picking 4K/8K
@@ -742,6 +765,14 @@ export const HDRIPreviewPanel: React.FC = () => {
             }}
           >
             rendering...
+          </div>
+        )}
+        {stale && !rendering && (
+          <div
+            style={{ position: 'absolute', top: 6, left: 8, fontSize: 10, color: '#e0a64b', fontFamily: 'var(--font-mono)', background: 'rgba(0,0,0,0.6)', padding: '2px 6px', borderRadius: 4 }}
+            title="The lights, shapes or environment changed after this picture was rendered. Press Refresh Preview, or turn Live Preview on."
+          >
+            out of date: press Refresh Preview
           </div>
         )}
       </div>

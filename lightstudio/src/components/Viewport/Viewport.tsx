@@ -26,7 +26,7 @@ import { useViewportModeStore } from '../../store/viewportModeStore';
 import { CameraSwitcher } from './CameraSwitcher';
 import { useRigSetStore } from '../../store/rigSetStore';
 import { buildRigSet } from '../../three/rigSet';
-import { findRigGroup, makeRigGroup, removeRigGroup, fillRigGroup, applyDefaultHdriInclude, applyMaterialOverrides, syncShadowLights, SHADOW_SHARE } from '../../three/rigGroup';
+import { findRigGroup, makeRigGroup, removeRigGroup, purgeOrphanRigShadows, fillRigGroup, applyDefaultHdriInclude, applyMaterialOverrides, syncShadowLights, SHADOW_SHARE } from '../../three/rigGroup';
 import { lightFacing } from '../../three/lightFacing';
 import { applySetReflections } from '../../three/setReflections';
 import { registerShadedProvider, createShadedProvider } from '../../three/hdriShading';
@@ -1223,6 +1223,7 @@ export const Viewport: React.FC<ViewportProps> = ({ sceneManagerRef, onScreensho
     if (!sm) return;
     const scene = sm.scene;
     registerShadedProvider(createShadedProvider(sm.renderer));      // lets the HDRI use the room's real shading
+    purgeOrphanRigShadows(scene);
     let group = findRigGroup(scene);
     if (group && (!rigSetKind || group.name !== rigName)) {
       removeRigGroup(scene, group);

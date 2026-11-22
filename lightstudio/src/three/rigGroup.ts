@@ -17,13 +17,36 @@ export function makeRigGroup(name: string): THREE.Group {
   return g;
 }
 
-/** Drops the group: its set parts are disposed, any lights it still holds go back under the scene. */
+function disposeShadowLight(c: THREE.Object3D): void {
+  (c as THREE.SpotLight).shadow?.map?.dispose();
+  (c as THREE.SpotLight).target?.removeFromParent();
+  c.removeFromParent();
+}
+
+/**
+ * Drops the group: its set parts are disposed, its shadow-casting companions are deleted, and the user's own lights it still
+ * holds go back under the scene. The companions used to be moved into the scene with the rest, so they stayed behind as lights
+ * nobody could see or delete and kept painting blobs into the HDRI after the rig was gone.
+ */
 export function removeRigGroup(scene: THREE.Scene, group: THREE.Group): void {
   for (const c of [...group.children]) {
     if (c.userData.rigPart) { group.remove(c); disposeRigSet(c); }
-    else scene.add(c);
+    else if (c.userData.rigShadow) disposeShadowLight(c);
+    else if ((c as THREE.Light).isLight) scene.add(c);
+    else group.remove(c);                              // a companion's aim target
   }
   scene.remove(group);
+}
+
+/** Deletes shadow companions that were left behind in the scene (by an older version, or a rig removed some other way). */
+export function purgeOrphanRigShadows(scene: THREE.Scene): void {
+  const orphans: THREE.Object3D[] = [];
+  scene.traverse((o) => {
+    if (!o.userData.rigShadow) return;
+    for (let n: THREE.Object3D | null = o.parent; n; n = n.parent) if (n.userData.isRigSet) return;
+    orphans.push(o);
+  });
+  orphans.forEach(disposeShadowLight);
 }
 
 /** Moves the freshly built set parts into the group, giving each a stable, readable name. */
