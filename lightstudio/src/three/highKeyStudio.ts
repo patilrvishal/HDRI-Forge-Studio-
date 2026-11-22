@@ -96,18 +96,18 @@ function roundedRect(w: number, d: number, r: number): THREE.Shape {
 function ceilingPanel(w: number, d: number, name: string): THREE.Group {
   const g = new THREE.Group();
   g.name = name;
-  const FR = 0.16;                          // frame margin: the lit panel sits INSIDE the housing frame
+  const FR = 0.05;                          // a thin tray: the lit panel sits INSIDE it
   const r = Math.min(w, d) * 0.22;
   const body = new THREE.Mesh(
     new THREE.ExtrudeGeometry(roundedRect(w + FR * 2, d + FR * 2, r + FR), { depth: 0.1, bevelEnabled: true, bevelThickness: 0.03, bevelSize: 0.03, bevelSegments: 4, curveSegments: 14 }),
-    std(0x35373d, 0.5, 0.35),
+    std(0xc4c8cf, 0.45, 0.2),
   );
   body.rotation.x = Math.PI / 2;            // extrusion axis points down
   body.position.y = 0.0;
   g.add(body);
   const face = new THREE.Mesh(
     new THREE.ShapeGeometry(roundedRect(w, d, r), 14),
-    std(0xffffff, 0.7, 0, { emissive: 0xffffff, emissiveIntensity: 2.6, side: THREE.DoubleSide }),
+    std(0xffffff, 0.7, 0, { emissive: 0xffffff, emissiveIntensity: 1.5, side: THREE.DoubleSide }),
   );
   face.rotation.x = Math.PI / 2;
   face.position.y = -0.14;                  // just under the housing so it reads as the lit face
@@ -145,7 +145,7 @@ export function buildHighKeyStudio(group: THREE.Group, lights: Light[]): void {
   }
 
   // dark ceiling inside the curl
-  const ceil = new THREE.Mesh(new THREE.PlaneGeometry(HALF_W * 2, FRONT_Z - BACK_Z), std(0x4a4b50, 0.8, 0.15, { emissive: 0x303238, emissiveIntensity: 0.6 }));
+  const ceil = new THREE.Mesh(new THREE.PlaneGeometry(HALF_W * 2, FRONT_Z - BACK_Z), std(0x1a1d20, 0.8, 0.15));
   ceil.name = 'Ceiling';
   ceil.rotation.x = Math.PI / 2;
   ceil.position.set(0, H, (FRONT_Z + BACK_Z) / 2);
@@ -154,8 +154,8 @@ export function buildHighKeyStudio(group: THREE.Group, lights: Light[]): void {
   // glowing rim along the top of the walls
   const rimPts = path.all.map((p) => new THREE.Vector3(p.x + p.nx * R_TOP * 0.9, H - 0.07, p.z + p.nz * R_TOP * 0.9));
   const rim = new THREE.Mesh(
-    new THREE.TubeGeometry(new THREE.CatmullRomCurve3(rimPts), 160, 0.025, 6, false),
-    std(0xffffff, 0.5, 0, { emissive: 0xffffff, emissiveIntensity: 4 }),
+    new THREE.TubeGeometry(new THREE.CatmullRomCurve3(rimPts), 160, 0.04, 6, false),
+    std(0xffffff, 0.5, 0, { emissive: 0xffffff, emissiveIntensity: 2.2 }),
   );
   rim.name = 'Wall Rim Light';
   group.add(rim);
@@ -201,7 +201,7 @@ export function buildHighKeyStudio(group: THREE.Group, lights: Light[]): void {
     sb.lookAt(pos.clone().add(facing));
     group.add(sb);
     const away = new THREE.Vector3(-facing.x, 0, -facing.z).normalize();
-    const stand = tripod(p.x + away.x * 1.05, p.z + away.z * 1.05, p.y - 0.1, away);
+    const stand = tripod(p.x + away.x * 0.3, p.z + away.z * 0.3, p.y - 0.62, away);
     stand.name = `${l.name} Stand`;
     group.add(stand);
   }

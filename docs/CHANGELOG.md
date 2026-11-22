@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### High Key White, closer to its card
+- Ceiling panels sized to the card (about 40% and 24% of the frame width) with a thin light tray instead of a dark housing; softboxes moved out to about 11% / 89% of the frame width, turned toward the centre, with their tripods standing under them.
+- Charcoal ceiling (#1A1D20), thicker but softer wall rim glow, lower panel and softbox glow, and a gentler bloom set when the rig is applied so the white room is not washed out.
+- Rig lights no longer show their wire outline boxes.
+
+### Lighting preset card component
+- New reusable `LightingPresetCard` (React + TypeScript + Tailwind, 560:352, 74% / 26% split, gold outline, hover lift, selected glow, keyboard accessible) and a small example grid, in `src/components/Presets/`.
+
 ### New Scene
 - **Fix:** New Scene now clears everything: the studio rig (room, fixtures, shadow lights), HDRI layers and shapes, mesh objects, the loaded model (GLB or Erik) and its materials, imported cameras and the hierarchy state. Before, the last scene's studio set and layers stayed on screen.
 

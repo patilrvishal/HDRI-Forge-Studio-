@@ -1,5 +1,6 @@
 import { RIG_CARDS } from '../../data/rigCards';
-import { RIG_SETS, RIG_CAMERAS } from '../../data/rigSets';
+import { RIG_SETS, RIG_CAMERAS, RIG_BLOOM } from '../../data/rigSets';
+import { useSceneStore } from '../../store/sceneStore';
 import { useRigSetStore } from '../../store/rigSetStore';
 import React, { useEffect, useRef, useMemo, useCallback, useState } from 'react';
 import { usePresetsStore } from '../../store/presetsStore';
@@ -274,7 +275,9 @@ export const PresetBrowser: React.FC<PresetBrowserProps> = ({ onGenerateThumbnai
       if (newLights.length > 0) selectLight(newLights[0].id);
       if (asRig) {
         rs.setRig(RIG_SETS[preset.name], newLights.map((l) => l.id), preset.name);
+        newLights.forEach((l) => useLightsStore.getState().updateLight(l.id, { gearVisible: false }));      // the fixtures show the lights: no wire boxes
         if (RIG_CAMERAS[preset.name]) rs.requestCamera(RIG_CAMERAS[preset.name]);      // open on the card's own view
+        if (RIG_BLOOM[preset.name]) { const r = useSceneStore.getState().renderSettings; useSceneStore.setState({ renderSettings: { ...r, bloom: { ...r.bloom, ...RIG_BLOOM[preset.name] } } }); }
       }
       showToast(`Applied "${preset.name}"`);
     },

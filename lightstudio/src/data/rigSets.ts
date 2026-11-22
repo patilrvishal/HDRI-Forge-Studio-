@@ -9,6 +9,11 @@ export const RIG_CAMERAS: Record<string, { pos: [number, number, number]; target
   'High Key White': { pos: [0, 1.5, 5.0], target: [0, 1.45, -2], hfov: 72 },
 };
 
+/** A gentler glow for rigs whose card shows crisp lights on a dark ceiling: the default bloom washes the whole white room out. */
+export const RIG_BLOOM: Record<string, { intensity: number; threshold: number }> = {
+  'High Key White': { intensity: 0.2, threshold: 0.95 },
+};
+
 export const RIG_SETS: Record<string, RigSetKind> = {
   '3-Point Classic': 'dark_floor',
   'Beauty Soft': 'dark_floor',

@@ -73,7 +73,7 @@ export function softbox(w: number, h: number): THREE.Group {
   // diffuser: glows, with a fabric-like slightly rough surface
   const face = new THREE.Mesh(
     new THREE.PlaneGeometry(w - 0.02, h - 0.02),
-    std(0xffffff, 0.85, 0, { emissive: 0xffffff, emissiveIntensity: 2.2 }),
+    std(0xffffff, 0.85, 0, { emissive: 0xffffff, emissiveIntensity: 1.5 }),
   );
   face.position.z = 0.008;
   g.add(face);
