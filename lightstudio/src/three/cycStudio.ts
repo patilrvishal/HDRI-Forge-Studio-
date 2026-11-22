@@ -57,10 +57,9 @@ function taperedShell(w: number, h: number, bw: number, bh: number, depth: numbe
   return g;
 }
 
-export function softbox(w: number, h: number): THREE.Group {
+export function softbox(w: number, h: number, depth = 0.85): THREE.Group {
   const g = new THREE.Group();
   const shellMat = std(0x0c0d0f, 0.62, 0.15, { side: THREE.DoubleSide });
-  const depth = 0.85;
   g.add(new THREE.Mesh(taperedShell(w, h, w * 0.28, h * 0.28, depth), shellMat));
 
   // front frame (the rim the diffuser is stretched over)
@@ -93,7 +92,7 @@ export function softbox(w: number, h: number): THREE.Group {
   return g;
 }
 
-export function tripod(x: number, z: number, topY: number, outFrom: THREE.Vector3): THREE.Group {
+export function tripod(x: number, z: number, topY: number, outFrom: THREE.Vector3, spread = 0.78): THREE.Group {
   const g = new THREE.Group();
   const metal = std(0x14151a, 0.38, 0.85);
   const col = new THREE.Mesh(new THREE.CylinderGeometry(0.022, 0.03, topY, 14), metal);
@@ -105,7 +104,7 @@ export function tripod(x: number, z: number, topY: number, outFrom: THREE.Vector
   const base = Math.atan2(outFrom.x, outFrom.z);
   for (let i = 0; i < 3; i++) {
     const a = base + (i / 3) * Math.PI * 2 + Math.PI / 3;
-    const fx = x + Math.sin(a) * 0.78, fz = z + Math.cos(a) * 0.78;
+    const fx = x + Math.sin(a) * spread, fz = z + Math.cos(a) * spread;
     const len = Math.hypot(fx - x, 0.62, fz - z);
     const leg = new THREE.Mesh(new THREE.CylinderGeometry(0.014, 0.014, len, 8), metal);
     leg.position.set((x + fx) / 2, 0.31, (z + fz) / 2);

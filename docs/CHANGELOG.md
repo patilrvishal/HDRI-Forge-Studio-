@@ -1,6 +1,7 @@
 # HDRI Forge Studio - changelog
 
 ## Unreleased
+- High Key White solved numerically against the card: camera and room fitted together to 14 landmarks (back wall, both track rails, both ceiling panels, softbox face and stand foot). Larger room, a track frame with side runs and spot heads, rounded ceiling panels with a grey housing, tilted narrower softboxes on shorter stands, a brighter glossy floor, brighter walls with a centre-bright gradient, a lifted grey ceiling and a thin rim glow.
 - High Key White re-fitted to its card: the studio is now about 9.8 x 5.8 x 3.5 m so the side softboxes stand inside the walls, with the ceiling panels, track rails and spot heads placed where the card shows them, and soft brightness gradients on the walls and floor.
 
 ### High Key White, closer to its card

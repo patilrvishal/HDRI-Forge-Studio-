@@ -20,16 +20,17 @@ import { lightFacing } from './lightFacing';
  *
  * Coordinates: the model stands at the origin, the back wall is at -Z, the camera looks in from +Z through the open front.
  */
-// The room is solved from the card: seen from (0, 1.5, 5) looking slightly up at the back wall, the back wall's top and base
-// land at 38% and 78% of the frame, the softboxes at 11% / 89% of its width, the two ceiling panels at 40% / 26% of it.
-// That needs a room about 9.8 m wide, 5.8 m deep and 3.5 m high (the old 6 x 4 x 3 m put the side lights outside the walls).
-const HALF_W = 4.9;
-const BACK_Z = -3.3;
-const FRONT_Z = 2.5;
-const H = 3.5;
-const R_PLAN = 1.3;    // vertical corner radius
-const R_COVE = 1.2;    // wall-to-floor fillet
-const R_TOP = 0.8;     // wall-to-ceiling curl
+// The room and the camera are solved together from 14 landmarks measured on the card (back wall top and base, both track rails'
+// ends, both ceiling panels, the softbox face and stand foot): camera (0, 1.28, 5.78) pitched up 5.2 deg with a 72 deg horizontal
+// field of view reproduces every one of them to within 0.3% of the frame. That puts the room at about 10.3 m wide, 11.6 m deep
+// (the open front is behind the camera) and 3.2 m high, with the back wall 4.6 m behind the model.
+const HALF_W = 5.15;
+const BACK_Z = -4.6;
+const FRONT_Z = 7.0;
+const H = 3.22;
+const R_PLAN = 2.0;    // vertical corner radius
+const R_COVE = 1.3;    // wall-to-floor fillet
+const R_TOP = 0.7;     // wall-to-ceiling curl
 
 const std = (color: number, roughness: number, metalness = 0, extra: Partial<THREE.MeshStandardMaterialParameters> = {}) =>
   new THREE.MeshStandardMaterial({ color, roughness, metalness, ...extra });
@@ -72,11 +73,12 @@ function shadeWall(g: THREE.BufferGeometry, back: boolean): void {
   const pos = g.getAttribute('position');
   const col = new Float32Array(pos.count * 3);
   for (let i = 0; i < pos.count; i++) {
-    const y = pos.getY(i), z = pos.getZ(i);
-    const depth = Math.min(1, Math.max(0, (FRONT_Z - z) / (FRONT_Z - BACK_Z)));        // 0 at the open front, 1 at the back wall
-    let f = back ? 0.98 : 0.6 + 0.38 * Math.pow(depth, 0.8);
-    const curl = Math.min(1, Math.max(0, (y - (H - 1.4)) / 1.4));                       // up into the ceiling curl
-    f *= 1 - 0.28 * curl * curl;
+    const x = pos.getX(i), y = pos.getY(i);
+    // the card's walls are brightest straight behind the model and fall to grey toward both side walls
+    let f = 0.6 + 0.4 * (1 - Math.pow(Math.min(1, Math.abs(x) / HALF_W), 1.5));
+    if (back) f = Math.max(f, 0.8);
+    const curl = Math.min(1, Math.max(0, (y - (H - 1.2)) / 1.2));                       // up into the ceiling curl
+    f *= 1 - 0.22 * curl * curl;
     col[i * 3] = col[i * 3 + 1] = col[i * 3 + 2] = f;
   }
   g.setAttribute('color', new THREE.BufferAttribute(col, 3));
@@ -114,11 +116,11 @@ function roundedRect(w: number, d: number, r: number): THREE.Shape {
 function ceilingPanel(w: number, d: number, name: string): THREE.Group {
   const g = new THREE.Group();
   g.name = name;
-  const FR = 0.05;                          // a thin tray: the lit panel sits INSIDE it
-  const r = Math.min(w, d) * 0.22;
+  const FR = 0.07;                          // the housing rim: the lit panel sits INSIDE it
+  const r = Math.min(w, d) * 0.3;
   const body = new THREE.Mesh(
     new THREE.ExtrudeGeometry(roundedRect(w + FR * 2, d + FR * 2, r + FR), { depth: 0.1, bevelEnabled: true, bevelThickness: 0.03, bevelSize: 0.03, bevelSegments: 4, curveSegments: 14 }),
-    std(0xc4c8cf, 0.45, 0.2),
+    std(0x6b6e75, 0.45, 0.3),
   );
   body.rotation.x = Math.PI / 2;            // extrusion axis points down
   body.position.y = 0.0;
@@ -144,12 +146,12 @@ export function buildHighKeyStudio(group: THREE.Group, lights: Light[]): void {
     const zc = (FRONT_Z + BACK_Z) / 2 + 6;
     for (let i = 0; i < fp.count; i++) {
       const z = zc - fp.getY(i);                                                      // the plane is laid flat: local y runs toward -Z
-      const f = 1 - 0.32 * Math.min(1, Math.max(0, (z + 1) / (FRONT_Z + 5)));          // full brightness at the back, falling off toward the camera
+      const f = 1 - 0.2 * Math.min(1, Math.max(0, (z - BACK_Z) / 12));                 // full brightness at the back, falling off toward the camera
       fc[i * 3] = fc[i * 3 + 1] = fc[i * 3 + 2] = f;
     }
     floorGeo.setAttribute('color', new THREE.BufferAttribute(fc, 3));
   }
-  const floor = new THREE.Mesh(floorGeo, std(0x9fa1a8, 0.16, 0, { vertexColors: true }));
+  const floor = new THREE.Mesh(floorGeo, std(0xd4d6dc, 0.14, 0, { vertexColors: true }));
   floor.name = 'Floor';
   floor.userData.mirrorFloor = true;
   floor.rotation.x = -Math.PI / 2;
@@ -163,7 +165,7 @@ export function buildHighKeyStudio(group: THREE.Group, lights: Light[]): void {
   const profile = wallProfile();
   // three wall parts so each can be edited on its own; a little glow stands in for the bounce light (more on the back wall,
   // which the room's light reaches most, less on the sides)
-  for (const [seg, name, glow] of [[path.left, 'Side Wall Left', 0.03], [path.back, 'Back Wall', 0.24], [path.right, 'Side Wall Right', 0.03]] as [PathPt[], string, number][]) {
+  for (const [seg, name, glow] of [[path.left, 'Side Wall Left', 0.34], [path.back, 'Back Wall', 0.5], [path.right, 'Side Wall Right', 0.34]] as [PathPt[], string, number][]) {
     const geo = room(seg, profile);
     shadeWall(geo, name === 'Back Wall');
     const w = new THREE.Mesh(
@@ -177,7 +179,7 @@ export function buildHighKeyStudio(group: THREE.Group, lights: Light[]): void {
   }
 
   // dark ceiling inside the curl
-  const ceil = new THREE.Mesh(new THREE.PlaneGeometry(HALF_W * 2, FRONT_Z - BACK_Z), std(0x1a1d20, 0.8, 0.15));
+  const ceil = new THREE.Mesh(new THREE.PlaneGeometry(HALF_W * 2, FRONT_Z - BACK_Z), std(0x4a4d53, 0.8, 0, { emissive: 0x3a3d43, emissiveIntensity: 0.9 }));
   ceil.name = 'Ceiling';
   ceil.rotation.x = Math.PI / 2;
   ceil.position.set(0, H, (FRONT_Z + BACK_Z) / 2);
@@ -186,7 +188,7 @@ export function buildHighKeyStudio(group: THREE.Group, lights: Light[]): void {
   // glowing rim along the top of the walls
   const rimPts = path.all.map((p) => new THREE.Vector3(p.x + p.nx * R_TOP * 0.9, H - 0.07, p.z + p.nz * R_TOP * 0.9));
   const rim = new THREE.Mesh(
-    new THREE.TubeGeometry(new THREE.CatmullRomCurve3(rimPts), 160, 0.04, 6, false),
+    new THREE.TubeGeometry(new THREE.CatmullRomCurve3(rimPts), 200, 0.016, 6, false),
     std(0xffffff, 0.5, 0, { emissive: 0xffffff, emissiveIntensity: 2.2 }),
   );
   rim.name = 'Wall Rim Light';
@@ -194,23 +196,43 @@ export function buildHighKeyStudio(group: THREE.Group, lights: Light[]): void {
 
   // two black track rails across the ceiling, each with a couple of spot heads
   const rails = std(0x101113, 0.4, 0.8);
-  // [z, height, half length, spot x]
-  ([[0.45, 3.4, 1.8, 1.45], [-0.4, 2.95, 2.0, 1.65]] as [number, number, number, number][]).forEach(([z, y, half, spotX], i) => {
-    const beam = new THREE.Mesh(new THREE.BoxGeometry(half * 2, 0.07, 0.09), rails);
-    beam.name = `Track Rail ${i + 1}`;
-    beam.position.set(0, y, z);
-    group.add(beam);
-    for (const sx of [-1, 1]) {
-      const rod = new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.012, H - y, 6), rails);
-      rod.name = `Track Rail ${i + 1} Hanger`;
-      rod.position.set(sx * half * 0.96, (H + y) / 2, z);
+  // The track frame hangs just under the ceiling: a near cross rail (z 0.43, 5.2 m long), a far one (z -2.49, 5.9 m long) and a
+  // run down each side joining their ends. Spot heads hang from the cross-rail ends and the middle of each side run.
+  const RY = H - 0.1;
+  const NEAR = { z: 0.43, hw: 2.62 }, FAR = { z: -2.49, hw: 2.97 };
+  const bar = (name: string, a: THREE.Vector3, b: THREE.Vector3, th: number) => {
+    const len = a.distanceTo(b);
+    const m = new THREE.Mesh(new THREE.BoxGeometry(th, th, len), rails);
+    m.name = name;
+    m.position.copy(a).add(b).multiplyScalar(0.5);
+    m.lookAt(b);
+    group.add(m);
+  };
+  const spot = (name: string, x: number, z: number) => {
+    const head = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.055, 0.16, 12), rails);
+    head.name = name;
+    head.position.set(x, RY - 0.16, z);
+    group.add(head);
+    const stem = new THREE.Mesh(new THREE.CylinderGeometry(0.01, 0.01, 0.1, 6), rails);
+    stem.name = `${name} Stem`;
+    stem.position.set(x, RY - 0.05, z);
+    group.add(stem);
+  };
+  bar('Track Rail Near', new THREE.Vector3(-NEAR.hw, RY, NEAR.z), new THREE.Vector3(NEAR.hw, RY, NEAR.z), 0.08);
+  bar('Track Rail Far', new THREE.Vector3(-FAR.hw, RY, FAR.z), new THREE.Vector3(FAR.hw, RY, FAR.z), 0.08);
+  let spotNo = 0;
+  for (const sx of [-1, 1]) {
+    bar('Track Rail Side', new THREE.Vector3(sx * NEAR.hw, RY, NEAR.z), new THREE.Vector3(sx * FAR.hw, RY, FAR.z), 0.065);
+    spot(`Spot Head ${++spotNo}`, sx * NEAR.hw * 0.97, NEAR.z);
+    spot(`Spot Head ${++spotNo}`, sx * (NEAR.hw + FAR.hw) / 2, (NEAR.z + FAR.z) / 2);
+    spot(`Spot Head ${++spotNo}`, sx * FAR.hw * 0.97, FAR.z);
+    for (const e of [NEAR, FAR]) {
+      const rod = new THREE.Mesh(new THREE.CylinderGeometry(0.01, 0.01, 0.1, 6), rails);
+      rod.name = 'Track Rail Hanger';
+      rod.position.set(sx * e.hw, H - 0.05, e.z);
       group.add(rod);
-      const head = new THREE.Mesh(new THREE.CylinderGeometry(0.045, 0.06, 0.16, 12), rails);
-      head.name = `Spot Head ${i * 2 + (sx > 0 ? 2 : 1)}`;
-      head.position.set(sx * spotX, y - 0.14, z);
-      group.add(head);
     }
-  });
+  }
 
   // the two ceiling soft panels (placed from the rig's own lights)
   for (const l of lights) {
@@ -230,7 +252,7 @@ export function buildHighKeyStudio(group: THREE.Group, lights: Light[]): void {
   // the two 1.2 x 1.2 m softboxes on tripods
   for (const l of lights.filter((x) => /softbox/i.test(x.name))) {
     const p = l.transform.position;
-    const sb = softbox(l.areaWidth ?? 1.2, l.areaHeight ?? 1.2);
+    const sb = softbox(l.areaWidth ?? 1.2, l.areaHeight ?? 1.2, 0.4);
     sb.name = `${l.name} Fixture`;
     sb.position.set(p.x, p.y, p.z);
     const pos = new THREE.Vector3(p.x, p.y, p.z);
@@ -238,7 +260,7 @@ export function buildHighKeyStudio(group: THREE.Group, lights: Light[]): void {
     sb.lookAt(pos.clone().add(facing));
     group.add(sb);
     const away = new THREE.Vector3(-facing.x, 0, -facing.z).normalize();
-    const stand = tripod(p.x + away.x * 0.3, p.z + away.z * 0.3, p.y - 0.62, away);
+    const stand = tripod(p.x + away.x * 0.2, p.z + away.z * 0.2, p.y - (l.areaHeight ?? 1.2) / 2 + 0.1, away, 0.55);
     stand.name = `${l.name} Stand`;
     group.add(stand);
   }
