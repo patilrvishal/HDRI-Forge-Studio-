@@ -1,6 +1,6 @@
 # HDRI Forge Studio - changelog
 
-## Unreleased
+## 0.1.30
 
 ### Reflections of picture lights
 - The reflection of a light that shows a picture (a Lumi-Curve, a ring, an umbrella...) on the model now has the picture's shape; before it was always a small rectangle. The viewport puts the same composite the HDRI Preview and the Erik link use (HDRI layers, shapes, gradient and these lights) into the environment, scaled so the model gets the same overall light as before, and mutes the light's plain rectangle so it is not counted twice. Plain lights are unchanged, the real environment returns when no picture light is left, and the path tracer is left alone.
